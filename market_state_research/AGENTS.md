@@ -11,9 +11,9 @@ source or a domain's data directory lives once in the shared `common/` package.
 The domains are operated by the bot under rules the maintainer makes, as the root
 [AGENTS.md](../AGENTS.md) defines both (Who does what): from its own host the bot runs the
 commands and follows each domain's `PROCEDURE.md`, never edits a rule, and opens a GitHub
-issue when one blocks or misleads it. In the two scripted domains, `stock_iv_regime` and
-`fundamentals`, every source is read by Python through an API, so the bot needs a shell with
-uv and network access, and no browser; in `posts` the bot reads each nominated account by
+issue when one blocks or misleads it. In the three scripted domains, `stock_iv_regime`,
+`market_position_regime` and `fundamentals`, every source is read by Python over HTTPS (the
+API rule, below), so the bot needs a shell with uv and network access, and no browser; in `posts` the bot reads each nominated account by
 whatever route its host offers and writes every file itself. Nothing the bot produces is
 tracked: every `data/` directory, every poster's folder and every watchlist is ignored by
 Git.
@@ -26,15 +26,15 @@ market_state_research/
 ├── TODO.md             (the maintainer's backlog, ignored by Git)
 ├── common/             shared Python package, bound to no domain
 │   └── vendor/             (the chart library every report page inlines)
-├── <domain>/           a scripted domain: stock_iv_regime, fundamentals
+├── <domain>/           a scripted domain: stock_iv_regime, market_position_regime, fundamentals
 │   ├── AGENTS.md
 │   ├── PROCEDURE.md
-│   ├── watchlist.json      (the bot's: the stock tickers, ignored by Git)
+│   ├── watchlist.json      (the bot's stock tickers, ignored by Git; none in market_position_regime)
 │   ├── script/
 │   │   └── templates/      (optional)
 │   └── data/
 │       ├── .gitignore
-│       ├── raw/{TICKER}/
+│       ├── raw/{TICKER}/       (raw/market/ in market_position_regime)
 │       ├── formatted/{TICKER}/
 │       └── reports/{TICKER}/
 └── posts/              the domain without a script
@@ -57,7 +57,7 @@ market_state_research/
 | `common/vendor/` | Third-party files copied unmodified from a pinned release, with their licence, notice and provenance: TradingView Lightweight Charts, which `common.chart` verifies and every domain's chart inlines. |
 | `<domain>/AGENTS.md` | The domain's guidance: first the aim, the outputs and what they mean, the commands; then the method, the module boundaries, the raw files, each source's formats and facts verified live, the fixtures and vendored libraries. |
 | `<domain>/PROCEDURE.md` | The domain's operations: settings, parameters, commands and their output fields (in `posts`, the steps the bot takes by hand), the routines, failure handling and the report back. |
-| `<domain>/watchlist.json` | The domain's watchlist, maintained by the bot and ignored by Git (Watchlists): the stock tickers in `stock_iv_regime` and in `fundamentals`, the posters and their accounts in `posts`. |
+| `<domain>/watchlist.json` | The domain's watchlist, maintained by the bot and ignored by Git (Watchlists): the stock tickers in `stock_iv_regime` and in `fundamentals`, the posters and their accounts in `posts`; `market_position_regime`, whose subject is the market, has none. |
 | `<domain>/script/` | A scripted domain's Python package and supporting code; `posts` has none. |
 | `<domain>/script/templates/` | Optional output templates read by the code, such as an HTML page. |
 | `<domain>/data/` | Runtime files in three sections, `raw/`, `formatted/` and `reports/` (Data layout). |
@@ -111,13 +111,14 @@ the posters of `posts` are read by the bot, never by Python.
 
 Every `data/` directory, a scripted domain's or, in `posts`, a poster's, holds exactly three
 sections. In the scripted domains each section has one folder per ticker
-(`raw/{TICKER}/`, ...), and Python writes them only through `common.layout`; in `posts` the
-bot writes all three by hand, under that domain's `AGENTS.md`:
+(`raw/{TICKER}/`, ...), or one folder `market/` in `market_position_regime`, whose subject is
+the market, and Python writes them only through `common.layout`; in `posts` the bot writes all
+three by hand, under that domain's `AGENTS.md`:
 
 | Section | Contents | Written by |
 | --- | --- | --- |
 | `raw/` | What was fetched, verbatim, as the domain's `AGENTS.md` describes each file; in `posts`, every post of one account over one interval a human asked about. | `fetch`, the one network command of each scripted domain, and the bot only renames a file `.rejected`; in `posts`, the bot, once per file. |
-| `formatted/` | What Python derives from `raw/`: the tables or texts the domain's `AGENTS.md` names; in `posts`, the fact-check of each raw file. | `record` in `stock_iv_regime`, `text` in `fundamentals`; the bot in `posts`. |
+| `formatted/` | What Python derives from `raw/`: the tables or texts the domain's `AGENTS.md` names; in `posts`, the fact-check of each raw file. | `record` in `stock_iv_regime` and `market_position_regime`, `text` in `fundamentals`; the bot in `posts`. |
 | `reports/` | What people read. | `record`, or `render` in `fundamentals`, where the bot also writes one report per document; the bot in `posts`, one report per request. |
 
 - **A run keeps what is stored.** The raw files are the evidence every value rests on, and
@@ -145,9 +146,9 @@ bot writes all three by hand, under that domain's `AGENTS.md`:
   per-document reports are the bot's: it may rewrite one until `check` passes it, and again
   after a field's definition changes (the domain's `AGENTS.md`). A `posts` report answers
   one request, under a name of its own, and is never rewritten.
-- **Selection replaces bookkeeping.** Per key (a session's chain, a call's transcript) the
-  newest file wins (the domain's `AGENTS.md` says what a key is), so a refresh writes a newer
-  file beside the stored one, which wins from then on. Nothing records the selection: there
+- **Selection replaces bookkeeping.** Per key (a session's chain, a week's report, a call's
+  transcript) the newest file wins (the domain's `AGENTS.md` says what a key is), so a refresh
+  writes a newer file beside the stored one, which wins from then on. Nothing records the selection: there
   are no ledgers, manifests, envelopes, version fields or lost-update guards. In `posts` an
   account's coverage is the union of the intervals its raw files' names give, and nothing
   else records it.
@@ -186,15 +187,18 @@ bot writes all three by hand, under that domain's `AGENTS.md`:
   Sessions, holidays and closes come from the pinned `exchange-calendars` release, which
   knows only closures announced before it was published: a raw file of a day that is not a
   session is invalid, and the pin is raised (with `uv lock`) when NYSE announces an
-  unscheduled closure. A domain that reads no market data (`fundamentals`: filings,
-  earnings releases and earnings-call transcripts; `posts`: what people say in public) has
-  no session logic and dates its documents by their own dates.
-- Python reads its sources only through APIs, each from a command of its own that `plan`
-  names (`fetch`), only to the source's fixed hosts over HTTPS, with bounded bodies and no
-  redirect followed: a public read-only API that publishes an access policy the client
-  follows to the letter (SEC EDGAR, in `fundamentals`), or a provider's API under the
-  user's own key, kept in the ignored `.env`, sent only to its host and never written,
-  printed or stored (EODHD and Tiingo in `stock_iv_regime`, EarningsCalls.dev in
+  unscheduled closure. A domain that reads no session's data has no session logic and dates
+  its documents by their own dates: `market_position_regime` (statistics of a month, a week
+  or a quarter end, each published after it), `fundamentals` (filings, earnings releases and
+  earnings-call transcripts) and `posts` (what people say in public).
+- Python reads its sources only through APIs or public files at fixed addresses, each from a
+  command of its own that `plan` names (`fetch`), only to the source's fixed hosts over
+  HTTPS, with bounded bodies and no redirect followed: a public read-only API that publishes
+  an access policy the client follows to the letter (SEC EDGAR, in `fundamentals`), a public
+  API or file that needs no key (the CFTC's Socrata API and FINRA's margin statistics
+  workbook, in `market_position_regime`), or a provider's API under the user's own key, kept
+  in the ignored `.env`, sent only to its host and never written, printed or stored (EODHD
+  and Tiingo in `stock_iv_regime`, FRED in `market_position_regime`, EarningsCalls.dev in
   `fundamentals`). No source of a scripted domain is read in a browser, and no command
   reads a setting it does not need. This rule binds Python. `posts` has none: the bot reads
   each nominated account by the route its host offers (its own integration with the
@@ -219,6 +223,7 @@ bot writes all three by hand, under that domain's `AGENTS.md`:
 | Domain | Aim | Sources |
 | --- | --- | --- |
 | [`stock_iv_regime`](stock_iv_regime/AGENTS.md) ([procedure](stock_iv_regime/PROCEDURE.md)) | Per session, the 14-DTE 25Δ skew and ATM IV and their 252-session percentiles, and the 15-session correlations of the stock's daily return with the changes of the 14-DTE 25Δ call and put IVs, over a look-back window, in two charts read together. | EODHD options API (`EODHD_API`) and Tiingo daily prices (`TIINGO_API`). |
+| [`market_position_regime`](market_position_regime/AGENTS.md) ([procedure](market_position_regime/PROCEDURE.md)) | For the US equity market over a window of dates, FINRA's margin debt by month (its year-over-year growth and its ratio to the Fed's market value of US corporate equities) and S&P 500 futures positioning by week (asset managers' net long and leveraged funds' net short, each as its percentile over 52 weeks), in two charts read together. | FINRA's margin statistics workbook, the CFTC's Traders in Financial Futures (Socrata API) and FRED (`FRED_API`). |
 | [`fundamentals`](fundamentals/AGENTS.md) ([procedure](fundamentals/PROCEDURE.md)) | What each stock issuer's own documents of each fiscal period say, in eleven fields of verbatim quotes, compiled into a time series. | SEC EDGAR (`SEC_USER_AGENT`) and the EarningsCalls.dev transcript API (`EARNINGSCALLS_API`). |
 | [`posts`](posts/AGENTS.md) ([procedure](posts/PROCEDURE.md)) | Per nominated poster, every post of the intervals a human asked about, archived verbatim and fact-checked claim by claim against cited evidence (`true`, `unverified` or `fake`); a profile with the poster's background and the count of verdicts so far; a report per request. | The poster's accounts, by the route the bot's host offers (a key only when that route is a platform's API: `{PLATFORM}_API`); evidence from primary sources first. |
 
@@ -243,6 +248,28 @@ IV. `plan` (read-only) says `fetch`, `record` or `reuse`; `record` rewrites
 Lightweight Charts library and draws two charts over the stock's adjusted close, the
 percentiles and the correlations, always served together, and its Markdown twin; `show`
 prints the twin recomputed from `raw/`. Nothing adds a regime label.
+
+### market_position_regime
+
+The domain has no ticker: its subject is the market, so each section of `data/` holds one
+folder, `market/`. Over a window of New York dates (`--from`, `--to`; default the three years
+ending today), `fetch` writes to `raw/market/` what the window lacks of three sources:
+FINRA's margin statistics workbook as received (`finra_margin_{TOKEN}.xlsx`, the customers'
+debit and free credit balances of every month since 1997), the CFTC's Traders in Financial
+Futures rows of the S&P 500 Consolidated (`cftc_tff_{FIRST}_{LAST}_{TOKEN}.json`, one report
+a week since 2010) and FRED's quarterly Z.1 series of the market value of corporate equities
+(`fred_{SERIES}_{TOKEN}.json`, nonfinancial and domestic financial corporations). Each
+document is due from the time its source publishes it, and one the source has not published
+yet is `pending`. Each month gets the year-over-year growth of its debit balances and their
+ratio to the market value at the latest quarter end on or before its last day; each week
+the net long position of asset managers and the net short position of leveraged funds, in
+E-mini equivalents (the CFTC changed its contract from $250 to $50 times the index on
+2023-05-02), and the percentile of each among the 52 weeks ending with it. `plan`
+(read-only) says `fetch`, `record` or `reuse`; `record` rewrites
+`formatted/market/margin_debt.csv` and `formatted/market/index_futures.csv` and writes the
+report `reports/market/market_{FROM}_{TO}_{TOKEN}.html`, two charts on their own time axes,
+margin debt by month and futures positioning by week, always served together, and its
+Markdown twin; `show` prints the twin recomputed from `raw/`. Nothing adds a regime label.
 
 ### fundamentals
 

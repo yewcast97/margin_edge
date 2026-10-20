@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{{TITLE}}</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #7b4fd1;
+  --series-4: #c93f7c;
+  --warning: #fab219;
+  --focus: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #9670e0;
+    --series-4: #d9558f;
+    --focus: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface-1: #1a1a19;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.10);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #9670e0;
+  --series-4: #d9558f;
+  --focus: #3987e5;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--page);
+  color: var(--text-primary);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 32px; }
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+.subtitle { margin: 0 0 12px; color: var(--text-secondary); }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 16px; font-size: 12px; }
+.meta div { display: flex; gap: 6px; min-width: 0; }
+.meta dt { color: var(--text-secondary); }
+.meta dd { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.banner {
+  margin: 0 0 16px; padding: 8px 12px; border-left: 3px solid var(--warning);
+  background: var(--surface-1); border-radius: 4px;
+}
+.banner-icon { color: var(--warning); }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 16px; }
+.card h2 { margin: 0 4px 8px; color: var(--text-primary); }
+.toolbar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 0 4px 10px; }
+.readout {
+  flex: 1 1 420px; min-width: 0; display: flex; flex-wrap: wrap; align-content: flex-start;
+  align-items: baseline; gap: 6px 20px; font-variant-numeric: tabular-nums;
+}
+.readout .when { font-weight: 600; }
+.readout .item { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; white-space: nowrap; }
+.readout .key { display: inline-block; width: 14px; height: 2px; border-radius: 1px; align-self: center; }
+.readout .value { font-weight: 600; }
+.controls { flex: none; display: flex; align-items: center; gap: 16px; margin-left: auto; }
+.label { color: var(--text-secondary); font-size: 12px; }
+button {
+  font: inherit; font-size: 12px; color: var(--text-secondary); background: transparent;
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; cursor: pointer;
+}
+button:hover { background: var(--grid); }
+button:focus-visible, .chart:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.chart { position: relative; height: clamp(360px, 48vh, 520px); border-radius: 6px; }
+.hint { margin: 8px 4px 0; color: var(--text-secondary); font-size: 12px; }
+details { margin-top: 16px; }
+summary { cursor: pointer; color: var(--text-secondary); }
+.table-wrap { overflow-x: auto; margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+thead th { color: var(--text-secondary); font-weight: 600; border-bottom-color: var(--axis); }
+tbody th { text-align: left; font-weight: 400; }
+td.missing { text-align: left; color: var(--text-secondary); }
+td.reason { text-align: left; white-space: normal; min-width: 240px; }
+table.gaps { width: auto; }
+table.gaps th, table.gaps td { text-align: left; }
+h2 { font-size: 14px; font-weight: 600; margin: 16px 4px 4px; color: var(--text-secondary); }
+footer { margin-top: 20px; color: var(--text-secondary); font-size: 12px; }
+footer p { margin: 4px 0; }
+footer a { color: var(--text-secondary); }
+.notice { white-space: pre-line; }
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>{{HEADING}}</h1>
+<p class="subtitle">Two charts, read together: FINRA margin debt by month, its year-over-year growth and its ratio to the market value of US corporate equities; and S&amp;P 500 futures positioning by week, asset managers' net long and leveraged funds' net short as percentiles over 52 weeks · {{START}} → {{END}}</p>
+<dl class="meta">
+<div><dt>Window</dt><dd>{{START}} → {{END}}</dd></div>
+<div><dt>Coverage</dt><dd>{{COVERAGE}}</dd></div>
+<div><dt>Newest</dt><dd>{{NEWEST}}</dd></div>
+<div><dt>Not due yet</dt><dd>{{UPCOMING}}</dd></div>
+<div><dt>Generated</dt><dd>{{GENERATED}}</dd></div>
+<div><dt>Data</dt><dd>{{CSV}}</dd></div>
+<div><dt>Raw files</dt><dd>{{FILES}}</dd></div>
+<div><dt>Source</dt><dd>{{SOURCE}}</dd></div>
+</dl>
+</header>
+{{BANNERS}}
+<section class="card" aria-labelledby="margin-heading">
+<h2 id="margin-heading">Margin debt · monthly</h2>
+<div class="toolbar">
+<div class="readout" id="margin-readout" aria-live="polite">
+<span class="when"><span id="margin-readout-date">{{MARGIN_DATE}}</span> <span class="label" id="margin-readout-detail">{{MARGIN_DETAIL}}</span></span>
+<span class="item"><span class="key" style="background: var(--series-1)"></span><span class="value" id="margin-readout-value-0">{{MARGIN_VALUE_0}}</span><span class="label">Year-over-year growth, %</span></span>
+<span class="item"><span class="key" style="background: var(--series-2)"></span><span class="value" id="margin-readout-value-1">{{MARGIN_VALUE_1}}</span><span class="label">Ratio to market value, %</span></span>
+<span class="item"><span class="value" id="margin-readout-value-2">{{MARGIN_VALUE_2}}</span><span class="label">Debit balances, $M</span></span>
+<span class="item"><span class="value" id="margin-readout-value-3">{{MARGIN_VALUE_3}}</span><span class="label">Market value, $M</span></span>
+</div>
+<div class="controls">
+<button type="button" id="margin-fit">Fit all</button>
+</div>
+</div>
+<div class="chart" id="chart-margin" tabindex="0" role="group" aria-describedby="margin-hint" aria-label="Margin debt by month: its year-over-year growth in percent on the right scale and its ratio to the market value of US corporate equities in percent on the left scale"></div>
+<p class="hint" id="margin-hint">The year-over-year growth is on the right scale, with a line at 0; the ratio to market value on the left scale. Each month is drawn on its last day. A line breaks where a month has no value: a month not fetched, or a fetched month without the growth or the ratio (a quarter end the Fed has not published yet). The readout names the quarter end whose market value the month's ratio rests on.</p>
+</section>
+<section class="card" aria-labelledby="futures-heading">
+<h2 id="futures-heading">S&amp;P 500 futures positioning · weekly</h2>
+<div class="toolbar">
+<div class="readout" id="futures-readout" aria-live="polite">
+<span class="when"><span id="futures-readout-date">{{FUTURES_DATE}}</span> <span class="label" id="futures-readout-detail">{{FUTURES_DETAIL}}</span></span>
+<span class="item"><span class="key" style="background: var(--series-3)"></span><span class="value" id="futures-readout-value-0">{{FUTURES_VALUE_0}}</span><span class="label">Asset managers' net, percentile</span></span>
+<span class="item"><span class="key" style="background: var(--series-4)"></span><span class="value" id="futures-readout-value-1">{{FUTURES_VALUE_1}}</span><span class="label">Leveraged funds' net short, percentile</span></span>
+<span class="item"><span class="value" id="futures-readout-value-2">{{FUTURES_VALUE_2}}</span><span class="label">Asset managers' net, E-mini eq.</span></span>
+<span class="item"><span class="value" id="futures-readout-value-3">{{FUTURES_VALUE_3}}</span><span class="label">Leveraged funds' net short, E-mini eq.</span></span>
+<span class="item"><span class="value" id="futures-readout-value-4">{{FUTURES_VALUE_4}}</span><span class="label">Open interest, E-mini eq.</span></span>
+</div>
+<div class="controls">
+<button type="button" id="futures-fit">Fit all</button>
+</div>
+</div>
+<div class="chart" id="chart-futures" tabindex="0" role="group" aria-describedby="futures-hint" aria-label="S&amp;P 500 futures positioning by week: asset managers' net long and leveraged funds' net short positions, each as its percentile over 52 weeks"></div>
+<p class="hint" id="futures-hint">Both percentiles are on a fixed 0–100 scale with a line at 50; each rests on the 52 weekly reports ending with the week, positions in E-mini equivalents ($50 times the index). Each week is drawn on its report's date. A line breaks where a week has no value: a week not fetched, or a fetched week without the 52 reports its percentile needs.</p>
+</section>
+<p class="hint">Drag to pan, scroll or pinch to zoom. With a chart focused, left and right arrow keys step through its points, Home and End jump to the first and last, Escape returns to the latest. The data tables list every value.</p>
+<noscript><p class="hint">JavaScript is required for the interactive charts; the data tables list every value.</p></noscript>
+<details>
+<summary>Data tables ({{MONTHS}} months, {{WEEKS}} weeks)</summary>
+<h2>Margin debt</h2>
+{{MARGIN_TABLE}}
+<h2>S&amp;P 500 futures positioning</h2>
+{{FUTURES_TABLE}}
+<h2>Gaps</h2>
+{{GAP_ROWS}}
+</details>
+<footer>
+<p>{{METHOD}}</p>
+<p>Every value is computed from the sources' published figures kept in the raw files, as stated above. The charts add no thresholds, labels or judgments.</p>
+<p>Charting by TradingView Lightweight Charts™ {{LIBRARY_VERSION}} (Apache License 2.0), <a href="https://www.tradingview.com/">www.tradingview.com</a>.</p>
+<p class="notice">{{NOTICE}}</p>
+</footer>
+</main>
+<script id="position-chart-data" type="application/json">{{PAYLOAD}}</script>
+<script>
+{{LIBRARY}}
+</script>
+<script>
+(() => {
+  "use strict";
+  const data = JSON.parse(document.getElementById("position-chart-data").textContent);
+  const LWC = window.LightweightCharts;
+  const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+  // Two charts, each on its own time axis: monthly margin debt and weekly futures positioning.
+  // A series names its scale; `range` fixes that scale, `reference` draws a line at a value.
+  const CHARTS = [
+    {
+      id: "margin",
+      points: data.margin,
+      title: "Margin debt · year-over-year growth (%, right scale) · ratio to market value (%, left scale)",
+      series: [
+        { key: "yoy_pct", color: "--series-1", scale: "right", reference: 0 },
+        { key: "ratio_pct", color: "--series-2", scale: "left" },
+      ],
+    },
+    {
+      id: "futures",
+      points: data.futures,
+      title: "S&P 500 futures · asset managers' net long and leveraged funds' net short · percentiles over 52 weeks (0–100)",
+      series: [
+        { key: "asset_mgr_net_52w_percentile", color: "--series-3", scale: "right", range: [0, 100], reference: 50 },
+        { key: "lev_money_net_short_52w_percentile", color: "--series-4", scale: "right", range: [0, 100] },
+      ],
+    },
+  ];
+  const MARGINS = { top: 0.08, bottom: 0.08 };
+  // A point's colour styles the segment that leaves it, so a transparent point before a point
+  // without a value leaves a visible gap instead of a line through it.
+  const GAP = "rgba(0, 0, 0, 0)";
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const decimals = (text) => {
+    const point = text.indexOf(".");
+    return point < 0 ? 0 : text.length - point - 1;
+  };
+  const pad = (number) => String(number).padStart(2, "0");
+  const timeKey = (time) => {
+    if (typeof time === "string") return time;
+    if (time && typeof time === "object" && "year" in time) return `${time.year}-${pad(time.month)}-${pad(time.day)}`;
+    return undefined;
+  };
+  const palette = () => ({
+    surface: css("--surface-1"),
+    secondary: css("--text-secondary"),
+    muted: css("--text-muted"),
+    grid: css("--grid"),
+    axis: css("--axis"),
+  });
+  const themed = (colors) => ({
+    layout: {
+      background: { type: LWC.ColorType.Solid, color: colors.surface },
+      textColor: colors.secondary,
+    },
+    grid: {
+      vertLines: { color: colors.grid, style: LWC.LineStyle.Solid },
+      horzLines: { color: colors.grid, style: LWC.LineStyle.Solid },
+    },
+    leftPriceScale: { borderColor: colors.axis },
+    rightPriceScale: { borderColor: colors.axis },
+    timeScale: { borderColor: colors.axis },
+    crosshair: {
+      vertLine: { color: colors.muted, style: LWC.LineStyle.Solid, labelBackgroundColor: colors.secondary },
+      horzLine: { color: colors.muted, style: LWC.LineStyle.Solid, labelBackgroundColor: colors.secondary },
+    },
+  });
+
+  const mount = (spec) => {
+    const container = document.getElementById(`chart-${spec.id}`);
+    const points = spec.points;
+    const has = (key, index) => index >= 0 && index < points.length && points[index][key] !== null;
+    if (!LWC || !points.some((_, index) => spec.series.some((item) => has(item.key, index)))) {
+      container.textContent = "The chart has no value to draw; the data tables list every point.";
+      return null;
+    }
+    const timeline = points.map((point) => point.time);
+    const indexOf = new Map(timeline.map((time, index) => [time, index]));
+    const fetched = (index) => points[index].readout.some((value) => value !== "—");
+    let latest = timeline.length - 1;
+    while (latest > 0 && !fetched(latest)) latest -= 1;
+    let colors = palette();
+    const base = themed(colors);
+    const chart = LWC.createChart(container, {
+      autoSize: true,
+      layout: { ...base.layout, fontFamily: FONT, fontSize: 12, attributionLogo: true },
+      grid: base.grid,
+      leftPriceScale: { ...base.leftPriceScale, minimumWidth: 64, visible: spec.series.some((item) => item.scale === "left") },
+      rightPriceScale: { ...base.rightPriceScale, minimumWidth: 64 },
+      timeScale: {
+        ...base.timeScale,
+        timeVisible: false,
+        fixLeftEdge: true,
+        fixRightEdge: true,
+        lockVisibleTimeRangeOnResize: true,
+      },
+      // Vertical swipes scroll the page on touch screens instead of being captured by the chart.
+      handleScroll: { vertTouchDrag: false },
+      crosshair: {
+        mode: LWC.CrosshairMode.Magnet,
+        vertLine: { ...base.crosshair.vertLine, width: 1 },
+        horzLine: { ...base.crosshair.horzLine, width: 1 },
+      },
+      hoveredSeriesOnTop: false,
+      localization: { locale: "en-US", dateFormat: "yyyy-MM-dd" },
+    });
+    const lines = [];
+    const markers = [];
+    const references = [];
+    // One series: a line through the points with a value; a value followed by a point without
+    // one is transparent, so the line breaks there, and each value beside a break gets a dot,
+    // so segment ends and isolated points stay visible. The axis label shows the latest
+    // value only when the latest fetched point has one, never an earlier one carried forward.
+    const drawn = spec.series.map((item) => {
+      const precision = points.reduce((most, point) => Math.max(
+        most,
+        point[item.key] === null ? 0 : decimals(point[item.key]),
+      ), 0);
+      const priceFormat = { type: "price", precision, minMove: Math.pow(10, -precision) };
+      const color = css(item.color);
+      const options = {
+        priceScaleId: item.scale,
+        color,
+        priceLineColor: color,
+        lineWidth: 2,
+        lineStyle: LWC.LineStyle.Solid,
+        priceLineVisible: false,
+        lastValueVisible: has(item.key, latest),
+        crosshairMarkerRadius: 4,
+        crosshairMarkerBorderWidth: 2,
+        crosshairMarkerBorderColor: colors.surface,
+        crosshairMarkerBackgroundColor: color,
+        priceFormat,
+      };
+      if (item.range) {
+        options.autoscaleInfoProvider = () => ({ priceRange: { minValue: item.range[0], maxValue: item.range[1] } });
+      }
+      const line = chart.addSeries(LWC.LineSeries, options);
+      let last = -1;
+      timeline.forEach((_, index) => { if (has(item.key, index)) last = index; });
+      line.setData(timeline.map((time, index) => {
+        if (!has(item.key, index)) return { time };
+        const point = { time, value: Number(points[index][item.key]) };
+        if (index < last && !has(item.key, index + 1)) point.color = GAP;
+        return point;
+      }));
+      line.priceScale().applyOptions({ visible: true, scaleMargins: MARGINS });
+      lines.push({ series: line, token: item.color });
+      const edges = timeline.map((time, index) => ({ time, index })).filter(({ index }) =>
+        has(item.key, index) && (!has(item.key, index - 1) || !has(item.key, index + 1)));
+      if (edges.length) {
+        const ends = chart.addSeries(LWC.LineSeries, {
+          priceScaleId: item.scale,
+          color,
+          lineVisible: false,
+          pointMarkersVisible: true,
+          pointMarkersRadius: 3,
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+          priceFormat,
+        });
+        ends.setData(edges.map(({ time, index }) => ({ time, value: Number(points[index][item.key]) })));
+        markers.push({ series: ends, token: item.color });
+      }
+      if (item.reference !== undefined) {
+        references.push(line.createPriceLine({
+          price: item.reference,
+          color: colors.axis,
+          lineWidth: 1,
+          lineStyle: LWC.LineStyle.Solid,
+          axisLabelVisible: false,
+        }));
+      }
+      return line;
+    });
+    const titleLines = (theme) => [
+      { text: spec.title, color: theme.secondary, fontSize: 12, fontFamily: FONT, fontStyle: "600" },
+    ];
+    const title = LWC.createTextWatermark(chart.panes()[0], { horzAlign: "left", vertAlign: "top", lines: titleLines(colors) });
+
+    const readoutBox = document.getElementById(`${spec.id}-readout`);
+    const readout = {
+      date: document.getElementById(`${spec.id}-readout-date`),
+      detail: document.getElementById(`${spec.id}-readout-detail`),
+      values: points[0].readout.map((_, index) => document.getElementById(`${spec.id}-readout-value-${index}`)),
+    };
+    // `view` is the readout, or the hidden copy of it that `reserve` measures.
+    const show = (index, view = readout) => {
+      const point = points[index === undefined ? latest : index];
+      view.date.textContent = point.label;
+      view.detail.textContent = point.detail;
+      point.readout.forEach((value, position) => { view.values[position].textContent = value; });
+    };
+    // The readout keeps the height of its tallest point at the current width, so the chart
+    // below it never moves while the pointer or the arrow keys change the point shown.
+    let measured = -1;
+    const reserve = () => {
+      const width = readoutBox.getBoundingClientRect().width;
+      if (width === measured) return;
+      measured = width;
+      const copy = readoutBox.cloneNode(true);
+      copy.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
+      copy.removeAttribute("id");
+      copy.removeAttribute("aria-live");
+      copy.setAttribute("aria-hidden", "true");
+      copy.style.cssText = `position: absolute; visibility: hidden; width: ${width}px;`;
+      readoutBox.after(copy);
+      const [date, detail] = copy.querySelector(".when").children;
+      const view = { date, detail, values: Array.from(copy.querySelectorAll(".value")) };
+      const tallest = points.reduce((most, _, index) => {
+        show(index, view);
+        return Math.max(most, copy.getBoundingClientRect().height);
+      }, 0);
+      copy.remove();
+      readoutBox.style.minHeight = `${Math.ceil(tallest)}px`;
+    };
+    reserve();
+    new ResizeObserver(reserve).observe(container);
+    // The crosshair is placed on the first series with a value at the point.
+    const place = (index) => {
+      const position = spec.series.findIndex((item) => has(item.key, index));
+      if (position < 0) return false;
+      chart.setCrosshairPosition(Number(points[index][spec.series[position].key]), timeline[index], drawn[position]);
+      return true;
+    };
+    let cursor = -1;
+    const visible = () => chart.timeScale().getVisibleLogicalRange();
+    chart.subscribeCrosshairMove((param) => {
+      const time = timeKey(param.time);
+      if (cursor >= 0 && !param.sourceEvent && time !== undefined && time !== timeline[cursor]) {
+        // A fit, zoom, scroll or resize re-applied the keyboard crosshair to another point.
+        const range = visible();
+        if (!(range && cursor >= range.from && cursor <= range.to && place(cursor))) {
+          cursor = -1;
+          chart.clearCrosshairPosition();
+          show(undefined);
+        }
+        return;
+      }
+      if (time === undefined || !indexOf.has(time)) {
+        if (cursor < 0) show(undefined);
+        return;
+      }
+      show(indexOf.get(time));
+    });
+    container.addEventListener("pointermove", () => { cursor = -1; });
+    const moveTo = (index) => {
+      cursor = Math.max(0, Math.min(timeline.length - 1, index));
+      const target = cursor;
+      const settle = () => {
+        if (cursor !== target) return;
+        if (!(visible() && place(target))) chart.clearCrosshairPosition();
+        show(target);
+      };
+      const range = visible();
+      if (!range) {
+        show(target);
+      } else if (target < range.from || target > range.to) {
+        const span = range.to - range.from;
+        chart.clearCrosshairPosition();
+        chart.timeScale().setVisibleLogicalRange(
+          target < range.from
+            ? { from: target - 0.5, to: target - 0.5 + span }
+            : { from: target + 0.5 - span, to: target + 0.5 },
+        );
+        show(target);
+        requestAnimationFrame(settle);
+      } else {
+        settle();
+      }
+    };
+    container.addEventListener("keydown", (event) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return; // leave browser shortcuts alone
+      const last = timeline.length - 1;
+      const targets = {
+        ArrowLeft: cursor < 0 ? latest : cursor - 1,
+        ArrowRight: cursor < 0 ? latest : cursor + 1,
+        Home: 0,
+        End: last,
+      };
+      if (event.key in targets) {
+        event.preventDefault();
+        moveTo(targets[event.key]);
+      } else if (event.key === "Escape") {
+        cursor = -1;
+        chart.clearCrosshairPosition();
+        show(undefined);
+      }
+    });
+    const fitAll = () => chart.timeScale().fitContent();
+    document.getElementById(`${spec.id}-fit`).addEventListener("click", fitAll);
+    fitAll();
+    show(undefined);
+    return () => {
+      colors = palette();
+      chart.applyOptions(themed(colors));
+      lines.forEach(({ series: line, token }) => line.applyOptions({
+        color: css(token),
+        priceLineColor: css(token),
+        crosshairMarkerBorderColor: colors.surface,
+        crosshairMarkerBackgroundColor: css(token),
+      }));
+      markers.forEach(({ series: dots, token }) => dots.applyOptions({ color: css(token) }));
+      references.forEach((line) => line.applyOptions({ color: colors.axis }));
+      title.applyOptions({ lines: titleLines(colors) });
+    };
+  };
+
+  const themes = CHARTS.map(mount).filter((apply) => apply !== null);
+  const applyTheme = () => themes.forEach((apply) => apply());
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+  new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>
+</body>
+</html>

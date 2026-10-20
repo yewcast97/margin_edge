@@ -18,6 +18,7 @@ could be better. Nothing the bot produces is tracked.
 | Domain | What it discloses | Sources |
 | --- | --- | --- |
 | [`stock_iv_regime`](market_state_research/stock_iv_regime/AGENTS.md) ([procedure](market_state_research/stock_iv_regime/PROCEDURE.md)) | Per ticker and session, option-implied volatility percentiles (the 14-DTE 25-delta skew and ATM IV) and return–IV correlations, in one interactive report of two charts. | EODHD's options API, Tiingo's daily prices |
+| [`market_position_regime`](market_state_research/market_position_regime/AGENTS.md) ([procedure](market_state_research/market_position_regime/PROCEDURE.md)) | For the US equity market over a window of dates, margin debt by month (its year-over-year growth and its ratio to the market value of US corporate equities) and S&P 500 futures positioning by week (asset managers' net long and leveraged funds' net short as percentiles over 52 weeks), in one interactive report of two charts. | FINRA's margin statistics, the CFTC's Traders in Financial Futures, FRED |
 | [`fundamentals`](market_state_research/fundamentals/AGENTS.md) ([procedure](market_state_research/fundamentals/PROCEDURE.md)) | Per issuer and fiscal period, what its filings, earnings releases and earnings calls say, in eleven fields of verbatim quotes compiled into a time series. | SEC EDGAR, EarningsCalls.dev |
 | [`posts`](market_state_research/posts/AGENTS.md) ([procedure](market_state_research/posts/PROCEDURE.md)) | What the social-media posters you nominate say, archived verbatim, fact-checked as `true`, `unverified` or `fake` with cited evidence, and reported on request, all by the bot's hand. | Each account, by the route the bot's host offers |
 
@@ -43,6 +44,7 @@ says what its keys need:
 ```sh
 EODHD_API="..."                            # stock_iv_regime: EODHD's "US Stock Options Data" (UnicornBay)
 TIINGO_API="..."                           # stock_iv_regime: Tiingo's daily prices
+FRED_API="..."                             # market_position_regime: FRED's API (the Fed's Z.1)
 SEC_USER_AGENT="Name contact@example.com"  # fundamentals: who runs the EDGAR client
 EARNINGSCALLS_API="..."                    # fundamentals: EarningsCalls.dev's transcripts
 ```
@@ -61,6 +63,7 @@ The bot runs each domain by its `PROCEDURE.md`. A scripted domain is a command l
 
 ```sh
 uv run --locked python -m market_state_research.stock_iv_regime.script plan
+uv run --locked python -m market_state_research.market_position_regime.script plan
 uv run --locked python -m market_state_research.fundamentals.script plan
 ```
 

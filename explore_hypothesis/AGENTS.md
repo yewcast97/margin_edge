@@ -13,8 +13,8 @@ of this module.
 ## Who does what here
 
 Market state research discloses the state of the market, one aspect per domain, under each
-domain's procedure: two domains by fixed scripts that the maintainer makes and tests, which the
-bot only runs, and `posts` by the bot's own hand. Hypothesis exploration tests the bot's theses
+domain's procedure: three domains by fixed scripts that the maintainer makes and tests, which
+the bot only runs, and `posts` by the bot's own hand. Hypothesis exploration tests the bot's theses
 against that picture, and welcomes creativity: for each hypothesis the user states, the bot
 does the whole work on its own host, the thesis, its own script that prepares seikan's feeds,
 the procedure it follows, the feeds, the seikan runs and the report back. The maintainer writes

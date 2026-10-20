@@ -1,7 +1,7 @@
 [project]
 name = "margin-edge"
-version = "0.3.0"
-description = "Market state research: options-implied regime (EODHD, Tiingo) and issuer fundamentals (SEC EDGAR, EarningsCalls.dev) with hardcoded validation, charts and reports; nominated posters' statements, archived and fact-checked by the bot."
+version = "0.4.0"
+description = "Market state research: stock option-implied volatility regimes (EODHD, Tiingo), market positioning from margin debt and S&P 500 futures (FINRA, CFTC, FRED) and issuer fundamentals (SEC EDGAR, EarningsCalls.dev) with hardcoded validation, charts and reports; nominated posters' statements, archived and fact-checked by the bot."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -49,6 +49,7 @@ strict = true
 files = [
     "market_state_research/common",
     "market_state_research/stock_iv_regime/script",
+    "market_state_research/market_position_regime/script",
     "market_state_research/fundamentals/script",
 ]
 explicit_package_bases = true
