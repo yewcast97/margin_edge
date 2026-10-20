@@ -2,38 +2,38 @@
 
 This domain records how the US equity market as a whole is positioned, from three public
 sources: FINRA's monthly margin statistics (customers' debit balances in margin accounts),
-the Federal Reserve's quarterly market value of US corporate equities (the Financial
-Accounts, Z.1, served by FRED) and the CFTC's weekly Traders in Financial Futures report of
-S&P 500 futures. Over a window of dates it derives four indicators and charts them. This
-file says what the work aims at, what its tables and reports hold and mean, how each value
-is obtained, and how the code and the raw files are built, with the source facts verified
-live. The operations are in [PROCEDURE.md](PROCEDURE.md). The conventions every domain
-shares (the layout, the three sections of `data/`, selection, freshness, New York time and
-the API rule) are in [market_state_research/AGENTS.md](../AGENTS.md). The domain takes no
-ticker and reads no watchlist: its subject is the market.
+the CFTC's weekly Traders in Financial Futures report of S&P 500 futures, and Cboe's daily
+history of the VIX. Over a window of dates it charts four indicators. This file says what the
+work aims at, what its tables and reports hold and mean, how each value is obtained, and how
+the code and the raw files are built, with the source facts verified live. The operations
+are in [PROCEDURE.md](PROCEDURE.md). The conventions every domain shares (the layout, the
+three sections of `data/`, selection, freshness, New York time, sessions and the API rule)
+are in [market_state_research/AGENTS.md](../AGENTS.md). The domain takes no ticker and reads
+no watchlist: its subject is the market.
 
 ## Aim
 
 For the market as a whole, a reproducible record of the indicators below, and a report of a
-window that is read whole: two charts, margin debt by month and futures positioning by week,
-served together also when one indicator is asked about, since either half alone biases the
-reading. Its values are computed from the sources' published figures by the stated method,
-with dates, coverage and a reason wherever a value is absent. The record names no regime,
-applies no threshold and gives no advice; the analyst reads it.
+window that is read whole: three charts, margin debt by month, futures positioning by week
+and the VIX by session, served together also when one indicator is asked about, since one
+chart alone biases the reading. Its values are the sources' published figures and what the
+stated method computes from them, with dates, coverage and a reason wherever a value is
+absent. The record names no regime, applies no threshold and gives no advice; the analyst
+reads it.
 
 ## The indicators
 
 | Indicator | Column | Meaning | Unit |
 | --- | --- | --- | --- |
-| Margin debt growth | `yoy_pct` | The year-over-year growth of FINRA's debit balances in customers' securities margin accounts (below). | percent |
-| Margin debt to market value | `ratio_pct` | The month's debit balances as a share of the market value of US corporate equities at the latest quarter end on or before the month's last day. | percent |
+| Margin debt | `debit_balances_musd` | FINRA's debit balances in customers' securities margin accounts, as published (below). | $ millions |
 | Asset managers' net percentile | `asset_mgr_net_52w_percentile` | Where the week's net long S&P 500 futures position of asset managers lies among the 52 weeks ending with it. | 0–100 |
 | Leveraged funds' net short percentile | `lev_money_net_short_52w_percentile` | Where the week's net short position of leveraged funds lies among the 52 weeks ending with it. | 0–100 |
+| VIX close percentile | `close_252s_percentile` | Where the session's VIX close lies among the 252 XNYS sessions ending with it. | 0–100 |
 
-The growth, the ratio and the two percentiles are the domain's aim. Every value they rest on
-is archived in the tables: the month's three balances, the market value and its quarter end;
+Every value the indicators rest on is archived in the tables: the month's three balances;
 each week's long, short and spreading positions of both groups as reported, the open
-interest, the contract's unit and the two nets in E-mini equivalents.
+interest, the contract's unit and the two nets in E-mini equivalents; each session's VIX
+close as Cboe wrote it.
 
 ## Method
 
@@ -41,22 +41,10 @@ Everything here is computed from the selected raw files (below) with exact fract
 rounded half-even once at the end; zero is written without a sign (`indicators.py`).
 
 - **Margin debt** of month M is FINRA's "Debit Balances in Customers' Securities Margin
-  Accounts", in $ millions, as of M's last business day on a settlement-date basis.
-- **Growth of month M** = (debit(M) / debit(M − 12) − 1) × 100, both from one workbook,
-  rounded to one decimal place. There is none, with the reason, without M − 12 (FINRA's table
-  starts in January 1997, so 1997 has none).
-- **Market value at quarter end E** = the sum of the two Z.1 series at E, in $ millions:
-  `NCBEILQ027S` (nonfinancial corporate business, corporate equities, liability: the Fed's
-  FL103164105, the sum of public corporations' equity, FL103164115, and closely held
-  corporations' equity, FL103164125) and `BOGZ1LM793164105Q` (domestic financial sectors,
-  corporate equities, liability, at market value: LM793164105). It is the Fed's value of all
-  equity US corporations have issued, closely held nonfinancial corporations included, not
-  the capitalisation of listed shares alone.
-- **Ratio of month M** = debit(M) / market value(E) × 100, E the latest quarter end on or
-  before M's last day (July and August rest on June 30, September on September 30), rounded
-  to two decimal places. There is none, with the reason, while either series lacks E: no
-  other quarter stands in for it, so the month ending a quarter has no ratio until the Fed
-  publishes that quarter, about two and a half months later.
+  Accounts", in $ millions, as of M's last business day on a settlement-date basis, charted
+  as published: no growth, ratio or other value is derived from it. (No denominator is
+  used: the Fed's quarterly market value of corporate equities, the one found, counts
+  closely held corporations, not listed shares alone.)
 - **Nets of week W**, from W's report: asset managers' net position = long − short, and
   leveraged funds' net short position = short − long, each in **E-mini equivalents**, contracts
   of $50 times the S&P 500: the CFTC's count × its contract's dollars per index point ÷ 50.
@@ -69,31 +57,45 @@ rounded half-even once at the end; zero is written without a sign (`indicators.p
   none when any of the 52 weeks has no stored report (the reason counts them and names the
   first), or when the 52 weeks begin before the market's first report (2010-06-15), so the
   market's first 51 weeks have none.
+- **Percentile of session D**: over the 252 consecutive XNYS sessions ending with D, 100 ×
+  the number of the other 251 sessions whose VIX close is strictly below D's / 251; equal
+  closes are not counted. It is rounded to one decimal place. There is none when any of the
+  252 sessions has no close in Cboe's file (the reason counts them and names the first), or
+  when the 252 sessions begin before 2000-01-03, the first session of the XNYS calendar the
+  domain uses (`common.sessions`), so the first 251 sessions of 2000 have none. Cboe's rows
+  of days XNYS does not trade are kept in the raw file and never ranked.
 
-## Months, weeks, quarters, window and span
+## Months, weeks, sessions, window and span
 
-- FINRA reports by month, the CFTC by week, the Fed by quarter end. The CFTC reports a
-  week's positions as of its Tuesday, or of its Monday when the Tuesday is a holiday, so a
-  week is named by its Tuesday whatever day its report is dated (`periods.week_of`); every
-  week has one report.
+- FINRA reports by month, the CFTC by week, Cboe by day. The CFTC reports a week's
+  positions as of its Tuesday, or of its Monday when the Tuesday is a holiday, so a week is
+  named by its Tuesday whatever day its report is dated (`periods.week_of`); every week has
+  one report. The VIX is read by XNYS session, and a session's close is the index at the end
+  of Cboe's calculation of the day, a quarter of an hour after XNYS closes.
 - The window runs from `--from` to `--to` (New York dates, both included; by default the
   three years ending today). Its months are those whose last day lies in it, its weeks those
-  whose Tuesday does, and its quarter ends those its months' ratios rest on. The span adds
-  what the window's values rest on: the month twelve months before each window month and the
-  51 weeks before its first week.
+  whose Tuesday does, and its sessions the XNYS sessions in it, from 2000-01-03 on. The span
+  adds what the window's percentiles rest on: the 51 weeks before its first week and the 251
+  sessions before its first session.
 - A document is due from the earliest time its source publishes it: FINRA's month M from the
-  15th of the month after M; the CFTC's week from its Friday at 15:30 New York time; the Z.1
-  quarter ending E from the 15th of the third month after E (`periods`). A due document of
-  the window or its span that `raw/` does not hold is **lacking**; one not due yet is listed
-  as not due and is no gap.
-- Selection: the newest valid workbook (by its fetch time, then by name) is the workbook;
-  per series, the newest valid FRED answer is the series; per week, the report of the newest
+  15th of the month after M; the CFTC's week from its Friday at 15:30 New York time; a
+  session's VIX from a quarter of an hour after the session's XNYS close, 16:15 New York time
+  on a full day (`periods`). A due document of the window or its span that `raw/` does not
+  hold is **lacking**: for the VIX, a due session after the newest day of the stored file
+  (Cboe's file holds every day it published, so an earlier session without a close is a gap,
+  not lacking). One not due yet is listed as not due and is no gap.
+- For the VIX the domain works as of the last completed session: a file holding a row of a
+  session whose VIX was not due when the file was fetched is invalid, so no value of a
+  session still being calculated is stored. FINRA's months and the CFTC's weeks are dated by
+  their own periods.
+- Selection: the newest valid workbook (by its fetch time, then by name) is the workbook; the
+  newest valid VIX file, likewise, is the VIX history; per week, the report of the newest
   valid CFTC answer holding the week is the week's report. Nothing edits `raw/`; a file is
   withdrawn by renaming it `.rejected`.
 
 ## The formatted tables
 
-Two tables in `formatted/market/`, rewritten from `raw/` by `record` and replaced only when
+Three tables in `formatted/market/`, rewritten from `raw/` by `record` and replaced only when
 their bytes would change. Python compares them by bytes and never parses them.
 
 `margin_debt.csv`: one row per month of the workbook, oldest first. Columns, in order:
@@ -104,12 +106,7 @@ their bytes would change. Python compares them by bytes and never parses them.
 | `debit_balances_musd` | The debit balances, $ millions. |
 | `free_credit_cash_musd` | The free credit balances in customers' cash accounts, $ millions; to January 2010, the free credit balances of cash and margin accounts together. |
 | `free_credit_margin_musd` | The free credit balances in customers' securities margin accounts, $ millions, from February 2010; blank before. |
-| `yoy_pct` | The growth, one decimal place, or blank. |
-| `market_value_quarter_end` | The quarter end the ratio rests on, `YYYY-MM-DD`. |
-| `market_value_musd` | The market value at that quarter end, $ millions as the sum of FRED's text, or blank. |
-| `ratio_pct` | The ratio, two decimal places, or blank. |
 | `source` | The raw file name of the workbook. |
-| `market_value_sources` | The raw file names of the two FRED answers, separated by a space, or blank. |
 
 `index_futures.csv`: one row per stored week, oldest first. Columns, in order:
 
@@ -126,6 +123,16 @@ their bytes would change. Python compares them by bytes and never parses them.
 | `fetched_at` | When the week's answer was fetched, ISO 8601 with its New York offset. |
 | `source` | The raw file name of the week's answer. |
 
+`vix.csv`: one row per XNYS session from 2000-01-03 to the newest day of the VIX history,
+oldest first. Columns, in order:
+
+| Column | Contents |
+| --- | --- |
+| `date` | The session, `YYYY-MM-DD`. |
+| `close` | The VIX close as Cboe wrote it (six decimal places), or blank where Cboe's file holds no row of the session. |
+| `close_252s_percentile` | The percentile, one decimal place, or blank. |
+| `source` | The raw file name of the VIX history. |
+
 ## Reports
 
 `record` writes the report `reports/market/market_{FROM}_{TO}_{TOKEN}.html` and, just before
@@ -133,23 +140,24 @@ it, its Markdown twin `.md`; `TOKEN` is the time of the `record` that wrote them
 neither is ever overwritten. `show` prints the twin's text recomputed from `raw/`.
 
 The report is one self-contained page (the chart library inlined; it opens offline) of one
-window, and one whole: its two charts are served and read together, never one alone.
+window, and one whole: its three charts are served and read together, never one alone.
 
-- Two charts, one above the other, each on its own time axis: margin debt by month, each
-  month drawn on its last day, the growth on the right scale with a line at 0 and the ratio
-  on the left scale; and S&P 500 futures positioning by week, each week drawn on its
-  report's date, the two percentiles on a fixed 0–100 scale with a line at 50. A line breaks
-  where a point has no value; a dot marks each value beside a break.
-- A readout per chart, under the pointer or stepped with the arrow keys: the month with the
-  quarter end its ratio rests on, the growth, the ratio, the debit balances and the market
-  value; or the report date with its week, the two percentiles, the two nets and the open
-  interest in E-mini equivalents (`—` where blank). It keeps the height of its tallest point.
-- A header with the window, coverage (stored points of the due ones), the newest month and
-  report, what is not due yet, the generation time, the tables' paths, the raw files and the
-  sources; banners naming every point that is due and not fetched and, per series, every
-  point without a value.
-- Collapsible data tables, one row per month and per week (`not fetched` where due and not
-  stored), followed by the gaps: each point's series without a value, with the reason.
+- Three charts, one above the other, each on its own time axis and one scale: margin debt by
+  month, each month drawn on its last day, in $ millions; S&P 500 futures positioning by
+  week, each week drawn on its report's date, the two percentiles on a fixed 0–100 scale with
+  a line at 50; and the VIX by session, the close percentile on a fixed 0–100 scale with a
+  line at 50. A line breaks where a point has no value; a dot marks each value beside a
+  break.
+- A readout per chart, under the pointer or stepped with the arrow keys: the month and its
+  debit balances; the report date with its week, the two percentiles, the two nets and the
+  open interest in E-mini equivalents; or the session, its percentile and its close (`—`
+  where blank). It keeps the height of its tallest point.
+- A header with the window, coverage (stored points of the due ones), the newest month,
+  report and session, what is not due yet, the generation time, the tables' paths, the
+  workbook and the VIX file read and the sources; banners naming every point that is due and
+  not fetched and, per series, every point without a value.
+- Collapsible data tables, one row per month, week and session (`not fetched` where due and
+  not stored), followed by the gaps: each point's series without a value, with the reason.
 - A footer stating the method and the chart library's attribution.
 
 The twin holds the same statements and tables as Markdown text.
@@ -175,16 +183,16 @@ each taking `--from DATE`, `--to DATE` and `--data-dir PATH`:
 
 | Command | Does |
 | --- | --- |
-| `fetch [--refresh]` | The one network command (needs `FRED_API`). Requests from each source what the window lacks (with `--refresh`, everything the window needs): FINRA's workbook, the CFTC's rows from the first lacking week to the last, each FRED series whole; writes an answer only when it holds something `raw/` does not. A source that fails does not stop the others. |
+| `fetch [--refresh]` | The one network command. Requests from each source what the window lacks (with `--refresh`, everything the window needs): FINRA's workbook, the CFTC's rows from the first lacking week to the last, Cboe's VIX history; writes an answer only when it holds something `raw/` does not. A source that fails does not stop the others. |
 | `plan [--refresh]` | Read-only. Per source, what is lacking and the newest stored document; what is not due yet; gaps; invalid raw files; the tables and the newest report's freshness; the action. |
-| `record` | Rewrites both tables from `raw/` and writes a new report of the window and its twin, naming whatever is lacking in it. Refuses while a raw file is invalid or when no month or week of the window is fetched. |
+| `record` | Rewrites the three tables from `raw/` and writes a new report of the window and its twin, naming whatever is lacking in it. Refuses while a raw file is invalid or when no month, week or session of the window is fetched. |
 | `show` | Read-only: one status line, then the twin recomputed from `raw/`. |
 
 `--to` defaults to today's New York date and may not be after it; `--from` defaults to the
 same day three years before `--to` (29 February: the 28th) and may not be after `--to`. A
 command that succeeds exits 0 and prints JSON (`show`: Markdown); a refusal exits 2 with one
-`MARKET_POSITION_REGIME: ...` line on standard error. `plan`, `record` and `show` read no
-setting. [PROCEDURE.md](PROCEDURE.md) gives each field and the step that follows.
+`MARKET_POSITION_REGIME: ...` line on standard error. No source needs a key, so no command
+reads a setting. [PROCEDURE.md](PROCEDURE.md) gives each field and the step that follows.
 
 ## Architecture
 
@@ -192,15 +200,15 @@ The package `market_state_research.market_position_regime.script`:
 
 | Module | Responsibility |
 | --- | --- |
-| `__main__` | The command line (`MARKET_POSITION_REGIME` label); resolves and checks the window first, then builds the client from `FRED_API` for `fetch` only. |
-| `client` | HTTPS to the three fixed endpoints only (`www.finra.org`, `publicreporting.cftc.gov`, `api.stlouisfed.org`), FRED's key appended at send time and redacted from every message, statuses, bounded and whole bodies, no redirect. Its HTTP reading helpers are copies of the stock IV regime domain's (domains never import one another). |
-| `periods` | Months, weeks named by their Tuesday, quarter ends and FRED's observation dates; when each source's document is due. |
+| `__main__` | The command line (`MARKET_POSITION_REGIME` label); resolves and checks the window first. |
+| `client` | HTTPS to the three fixed endpoints only (`www.finra.org`, `publicreporting.cftc.gov`, `cdn-api.cboe.com`), no key, statuses, bounded and whole bodies, no redirect. Its HTTP reading helpers are copies of the stock IV regime domain's (domains never import one another). |
+| `periods` | Months, weeks named by their Tuesday, the XNYS sessions of a span; when each source's document is due. |
 | `finra` | The workbook's address, its parsing with the standard library (`zipfile`, `xml.etree`) and every rule (`parse_workbook`, `check_workbook`), its raw name. |
 | `cftc` | The query (`query_url`), the rows and every rule (`check_row`, `check_answer`), the units and the E-mini conversion, the answer raw unit (`dump`, `read_answer`). |
-| `fred` | The two series, their URL, FRED's answer and every rule (`check_response`, `check_answer`), the answer raw unit. |
-| `indicators` | The growth, the ratio and the percentile over 52 weeks. |
-| `store` | Reading and validating every raw file, the selection, the margin and futures rows over the whole archive, the two tables. |
-| `chart` and `templates/chart.html` | The report (two charts on one page) and its twin, over `common.chart`: the vendored TradingView Lightweight Charts 5.2.1, pinned by SHA-256, and the page text helpers. |
+| `cboe` | The VIX file's address, its parsing and every rule (`parse_history`, `check_history`), the gzip raw unit (`dump`, `load`, `read_history`). |
+| `indicators` | The percentiles over 52 weeks and over 252 sessions. |
+| `store` | Reading and validating every raw file, the selection, the margin, futures and VIX rows over the whole archive, the three tables. |
+| `chart` and `templates/chart.html` | The report (three charts on one page) and its twin, over `common.chart`: the vendored TradingView Lightweight Charts 5.2.1, pinned by SHA-256, and the page text helpers. |
 | `workflow` | `Window` and its span, what is due and lacking, `plan`, `fetch`, `record`, `show`. |
 
 ## The raw units
@@ -243,31 +251,30 @@ used, every position a whole number of contracts; one row per week, in date orde
 answer is written only when it holds a week `raw/` lacks or a row that differs from the
 selected one.
 
-### FRED's answers
+### Cboe's VIX files
 
-`fred_{SERIES}_{TOKEN}.json`: one JSON object with exactly the keys `series`, `request` (the
-URL without the key), `fetched_at` and `response`, FRED's answer as it came. Every read checks
-every rule again (`fred.check_answer`): the keys and forms; the series one of the two and the
-request its URL; the name against the series and the time; a time not after the clock and
-after the newest quarter's end; FRED's answer with exactly its keys, in linear units, ordered
-by date ascending, from offset 0, counted (`count` equal to the observations) and not cut at
-its limit; each observation with exactly its four keys, dated a quarter's first day,
-consecutive quarters ascending, its value a non-negative decimal or `.`. A newer answer is
-written only when its values differ from the selected one's (FRED's realtime dates change
-every day and are not compared).
+`cboe_vix_{TOKEN}.csv.gz`: the file's bytes as received, in deterministic gzip (level 9, no
+name or time in its header), since the whole history (about 0.5 MB, about 0.1 MB packed) is
+fetched again each time a session is lacking. Every read unpacks it (at most 16 MiB) and
+checks the whole file again (`cboe.check_history`): ASCII lines, each ended by a line feed;
+the first exactly `DATE,OPEN,HIGH,LOW,CLOSE`; then one row per day, in date order, the first
+of 1990-01-02: the day written `MM/DD/YYYY`, then the open, high, low and close, each a
+decimal above 0 with six places (no order among the four is checked); no row dated after
+the day of the fetch, which the name gives, nor a row of an XNYS session whose VIX was not
+due yet then; the fetch time not after the clock. Rows of days XNYS does not trade are valid
+and kept. A newer file is written only when its rows differ from the selected one's.
 
 ## Fetching
 
-`fetch` sends at most four requests a run (`workflow.py`): FINRA's workbook when a due month
+`fetch` sends at most three requests a run (`workflow.py`): FINRA's workbook when a due month
 is lacking; the CFTC's rows from the Monday of the first lacking week to the Sunday of the
-last (a few hundred rows at most; the whole market since 2010 is 853); each FRED series whole
-when a due quarter end is lacking from it. With `--refresh` it requests the workbook, every
-due week of the span and both series again, whatever is stored. Per source it reports
-`reused` (nothing lacking, no request), `new` (an answer written), `verified` (an answer that
-holds nothing `raw/` lacks: nothing written) or `failed` (the request failed or the answer
-failed a rule: nothing written, the reason given), and `pending`: the due documents the
-source has not published yet. An answer is checked by the same rules as a raw file before it
-is written.
+last (a few hundred rows at most; the whole market since 2010 is 853); Cboe's VIX file when a
+due session is lacking. With `--refresh` it requests the workbook, every due week of the span
+and the VIX file again, whatever is stored. Per source it reports `reused` (nothing lacking,
+no request), `new` (an answer written), `verified` (an answer that holds nothing `raw/`
+lacks: nothing written) or `failed` (the request failed or the answer failed a rule: nothing
+written, the reason given), and `pending`: the due documents the source has not published
+yet. An answer is checked by the same rules as a raw file before it is written.
 
 ## FINRA facts verified live (2026-10-20)
 
@@ -315,38 +322,43 @@ is written.
   bytes); `tests/market_position_regime/fixtures/` holds the answer for 2023-04-03 to
   2025-11-16 (137 rows, across the change of unit and two Monday reports).
 
-## FRED and Z.1 facts verified live (2026-10-20)
+## Cboe facts verified live (2026-10-20)
 
-- `https://api.stlouisfed.org/fred/series/observations?series_id={SERIES}&file_type=json`
-  needs `api_key`, FRED's 32 lowercase letters and digits: without it FRED answers HTTP 400
-  `Bad Request.  Variable api_key is not set.` The keyless `fredgraph.csv` download refused
-  repeated requests, so the keyed API is the route. FRED removed the Wilshire 5000 series in
-  June 2024, so no listed-market capitalisation is available there.
-- An answer holds `realtime_start`, `realtime_end`, `observation_start` (`1600-01-01`),
-  `observation_end` (`9999-12-31`), `units` (`lin`), `output_type` (1), `file_type`,
-  `order_by` (`observation_date`), `sort_order` (`asc`), `count`, `offset` (0), `limit`
-  (100,000) and `observations`, each `{realtime_start, realtime_end, date, value}`; the
-  realtime dates vary with the series and the day (2026-09-16 for one series and 2026-10-20
-  for the other on 2026-10-20), so they are never compared.
-- Both series: "Millions of U.S. Dollars", "Quarterly, End of Period", not seasonally
-  adjusted, 323 observations from 1945-10-01 (Q4 1945) to 2026-04-01 (Q2 2026), last updated
-  2026-09-11 (the Z.1 release of Q2 2026); values whole (`83050847`) or with one decimal
-  (`48216.0`), and `.` in the first three quarters of each year from 1946 to 1951, when the
-  accounts were annual.
-- Q2 2026: `NCBEILQ027S` 83,050,847 and `BOGZ1LM793164105Q` 26,193,848, a market value of
-  109,244,695; 2026-06's debit balances of 1,502,072 are 1.37 % of it.
-- The Fed's series analyzer: FL103164105 is computed as FL103164115 (public corporate
-  equities; closely held included before 1996 Q4) + FL103164125 (closely held corporate
-  equities); LM793164105 is FL793164105, domestic financial sectors' corporate equities.
+- `GET https://cdn-api.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv` answers
+  200 without a key, a cookie or a particular user agent (Python's urllib default is served),
+  through Cloudflare and CloudFront: `content-type: text/csv`, chunked (no `Content-Length`),
+  no content encoding, `cache-control: max-age=60, s-maxage=900`, 473,890 bytes,
+  `last-modified: Tue, 20 Oct 2026 01:11:01 GMT` (21:11 EDT on 2026-10-19). The same path on
+  `cdn.cboe.com` answers 307 to it, so the domain asks for the target directly.
+- The file is ASCII with line feeds and a final one; its header reads
+  `DATE,OPEN,HIGH,LOW,CLOSE`, and 9,297 rows follow, from `01/02/1990` to `10/19/2026` (at
+  19:14 EDT on 2026-10-20 the row of 2026-10-20 was not in it yet); every value has six
+  decimal places, of which only the first two are ever other than zero. In 47 rows, from
+  1992-02-11 to 2006-02-08, the high or the low does not bound the open and the close.
+- Every XNYS session from 2000-01-03 to 2026-10-19 has a row. 34 rows are of days XNYS was
+  closed: 2004-06-11 (the national day of mourning for President Reagan, a flat row at the
+  day before's close) and 33 since 2022-05-30, the US holidays on which Cboe calculated the
+  index in its global trading hours (Memorial Day, Juneteenth, Independence Day, Labor Day,
+  Thanksgiving, Martin Luther King Jr. Day, Washington's Birthday, and 2025-01-09, the
+  national day of mourning for President Carter). The other days XNYS was closed, New Year's
+  Day, Good Friday and Christmas among them, have none.
+- Cboe's VIX options specifications: "The VIX Index is calculated between 2:15 a.m. CT and
+  8:25 a.m. CT and between 8:30 a.m. CT and 3:15 p.m. CT", 16:15 New York time.
+- 2026-10-19: open 18.37, high 18.93, low 17.39, close 18.44; 172 of the 251 sessions before
+  it closed below 18.44, a percentile of 68.5.
+- EODHD's `VIX.INDX` (its end-of-day API, under `EODHD_API`) was not adopted: on the key's
+  free plan it serves one year only (the answer's last bar carries `"warning": "Data is
+  limited by one year as you have free subscription"`), it holds flat bars on 2025-12-25,
+  2026-01-01 and 2026-04-03, of which Cboe's file has no row, and its bar of 2026-02-06
+  (low 19.99, close 20.37) differs from Cboe's (17.27, 17.76).
 
 ## Tests
 
 `tests/market_position_regime/` runs offline: `fake_sources.py` answers the three sources
 from data in memory as they do (FINRA's workbook bytes; the CFTC's rows of the `$where`
-dates, the query checked to be exactly `query_url`'s; FRED's observations under the expected
-key only, FRED's 400 otherwise; scripted statuses) and records every URL, the key cut from
-FRED's; `support.py` builds FINRA's workbook byte by byte in its verified layout, TFF rows
-and FRED answers from small numbers, and raw files as `fetch` names them; `fixtures/` holds
-the CFTC answer recorded live on 2026-10-20, pinned by SHA-256 and never edited (the CFTC's
-data are a US government work; no FINRA or FRED answer is kept). An autouse fixture refuses
-any real request.
+dates, the query checked to be exactly `query_url`'s; Cboe's file bytes; scripted statuses)
+and records every URL; `support.py` builds FINRA's workbook byte by byte in its verified
+layout, TFF rows and Cboe's file from small numbers, and raw files as `fetch` names them;
+`fixtures/` holds the CFTC answer recorded live on 2026-10-20, pinned by SHA-256 and never
+edited (the CFTC's data are a US government work; no FINRA or Cboe answer is kept). An
+autouse fixture refuses any real request.

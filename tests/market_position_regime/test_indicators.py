@@ -1,18 +1,17 @@
-"""The growth, the ratio and the percentile over 52 weeks, worked by hand."""
+"""The percentiles over 52 weeks and over 252 sessions, worked by hand."""
 
 from datetime import date, timedelta
 from decimal import Decimal
 from fractions import Fraction
 
-import pytest
-
 from market_state_research.market_position_regime.script.indicators import (
+    SESSIONS,
     WEEKS,
-    growth,
     percentile,
-    ratio,
     rounded,
+    session_percentile,
 )
+from market_state_research.market_position_regime.script.periods import sessions_within
 
 from .support import weeks_back
 
@@ -24,24 +23,6 @@ def test_rounding_is_half_even_exact_and_unsigned_at_zero():
     assert rounded(Fraction(35, 1000), 2) == Decimal("0.04")
     assert rounded(Fraction(-1, 1000), 2) == Decimal("0.00")
     assert str(rounded(Fraction(-1, 1000), 2)) == "0.00"
-
-
-def test_growth_is_the_change_over_the_base_in_percent():
-    assert growth(1_480_054, 1_126_355) == Decimal("31.4")  # 31.40...%
-    assert growth(110, 100) == Decimal("10.0")
-    assert growth(90, 100) == Decimal("-10.0")
-    assert growth(100_050, 100_000) == Decimal("0.0")  # 0.05 % rounds half-even to 0.0
-    with pytest.raises(ValueError):
-        growth(1, 0)
-
-
-def test_ratio_is_a_share_in_percent_to_two_places():
-    # 1,502,072 / 109,244,695 = 1.37496...%
-    assert ratio(1_502_072, Decimal("109244695")) == Decimal("1.37")
-    assert ratio(1, Decimal("200")) == Decimal("0.50")
-    assert ratio(1, Decimal("80000")) == Decimal("0.00")  # 0.00125 % rounds half-even to 0.00
-    with pytest.raises(ValueError):
-        ratio(1, Decimal(0))
 
 
 def _weeks(values: list[int], newest: date = date(2026, 10, 13)) -> dict[date, int]:
@@ -95,4 +76,55 @@ def test_a_week_without_a_report_has_no_percentile():
     week = date(2026, 10, 20)
     assert (
         percentile(week, values, values.__contains__, FIRST).reason == "the week of 2026-10-20 has no report"
+    )
+
+
+SESSIONS_2000 = sessions_within(date(2000, 1, 1), date(2026, 10, 20))
+NEWEST = len(SESSIONS_2000) - 1  # 2026-10-20
+
+
+def _closes(values: list[str], end: int = NEWEST) -> dict[date, Decimal]:
+    """``values`` as the closes of the sessions ending with ``SESSIONS_2000[end]``."""
+    days = SESSIONS_2000[end - len(values) + 1 : end + 1]
+    return {day: Decimal(value) for day, value in zip(days, values, strict=True)}
+
+
+def test_the_session_percentile_counts_the_other_251_sessions_strictly_below():
+    rising = _closes([f"{10 + index}.00" for index in range(SESSIONS)])
+    found = session_percentile(SESSIONS_2000, NEWEST, rising)
+    assert (found.value, found.n, found.reason) == (Decimal("100.0"), SESSIONS - 1, None)
+    falling = _closes([f"{300 - index}.00" for index in range(SESSIONS)])
+    assert session_percentile(SESSIONS_2000, NEWEST, falling).value == Decimal("0.0")
+    # 126 of the 251 others below: 100 x 126 / 251 = 50.199...
+    middle = _closes([*("40.00",) * 126, *("90.00",) * 125, "50.00"])
+    assert session_percentile(SESSIONS_2000, NEWEST, middle).value == Decimal("50.2")
+    flat = _closes(["20.00"] * SESSIONS)  # equal closes are not counted below
+    assert session_percentile(SESSIONS_2000, NEWEST, flat).value == Decimal("0.0")
+
+
+def test_a_session_needs_a_close_on_every_one_of_the_252_sessions():
+    closes = _closes([f"{10 + index}.00" for index in range(SESSIONS)])
+    gone = SESSIONS_2000[NEWEST - 10]
+    del closes[gone]
+    found = session_percentile(SESSIONS_2000, NEWEST, closes)
+    assert (found.value, found.reason) == (
+        None,
+        f"1 of the 252 sessions to 2026-10-20 has no close in Cboe's file, the first {gone}",
+    )
+    short = _closes(["20.00"] * 10)
+    assert session_percentile(SESSIONS_2000, NEWEST, short).reason == (
+        f"242 of the 252 sessions to 2026-10-20 have no close in Cboe's file, the first "
+        f"{SESSIONS_2000[NEWEST - 251]}"
+    )
+    assert session_percentile(SESSIONS_2000, NEWEST, {}).reason == "Cboe's file holds no close of 2026-10-20"
+
+
+def test_the_first_251_sessions_of_the_calendar_have_no_percentile():
+    closes = _closes(["20.00"] * SESSIONS, end=SESSIONS - 1)
+    first = session_percentile(SESSIONS_2000, SESSIONS - 1, closes)  # 2000-12-29: the 252nd session
+    assert first.value == Decimal("0.0") and SESSIONS_2000[SESSIONS - 1] == date(2000, 12, 29)
+    before = session_percentile(SESSIONS_2000, SESSIONS - 2, closes)
+    assert before.reason == (
+        "the 252 sessions to 2000-12-28 begin before 2000-01-03, the first session of the XNYS calendar the "
+        "domain uses"
     )

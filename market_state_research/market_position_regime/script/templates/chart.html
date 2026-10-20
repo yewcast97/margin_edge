@@ -119,7 +119,7 @@ footer a { color: var(--text-secondary); }
 <main>
 <header>
 <h1>{{HEADING}}</h1>
-<p class="subtitle">Two charts, read together: FINRA margin debt by month, its year-over-year growth and its ratio to the market value of US corporate equities; and S&amp;P 500 futures positioning by week, asset managers' net long and leveraged funds' net short as percentiles over 52 weeks · {{START}} → {{END}}</p>
+<p class="subtitle">Three charts, read together: FINRA margin debt by month, in $ millions; S&amp;P 500 futures positioning by week, asset managers' net long and leveraged funds' net short as percentiles over 52 weeks; and the VIX by XNYS session, its close as a percentile over 252 sessions · {{START}} → {{END}}</p>
 <dl class="meta">
 <div><dt>Window</dt><dd>{{START}} → {{END}}</dd></div>
 <div><dt>Coverage</dt><dd>{{COVERAGE}}</dd></div>
@@ -137,17 +137,14 @@ footer a { color: var(--text-secondary); }
 <div class="toolbar">
 <div class="readout" id="margin-readout" aria-live="polite">
 <span class="when"><span id="margin-readout-date">{{MARGIN_DATE}}</span> <span class="label" id="margin-readout-detail">{{MARGIN_DETAIL}}</span></span>
-<span class="item"><span class="key" style="background: var(--series-1)"></span><span class="value" id="margin-readout-value-0">{{MARGIN_VALUE_0}}</span><span class="label">Year-over-year growth, %</span></span>
-<span class="item"><span class="key" style="background: var(--series-2)"></span><span class="value" id="margin-readout-value-1">{{MARGIN_VALUE_1}}</span><span class="label">Ratio to market value, %</span></span>
-<span class="item"><span class="value" id="margin-readout-value-2">{{MARGIN_VALUE_2}}</span><span class="label">Debit balances, $M</span></span>
-<span class="item"><span class="value" id="margin-readout-value-3">{{MARGIN_VALUE_3}}</span><span class="label">Market value, $M</span></span>
+<span class="item"><span class="key" style="background: var(--series-1)"></span><span class="value" id="margin-readout-value-0">{{MARGIN_VALUE_0}}</span><span class="label">Debit balances, $M</span></span>
 </div>
 <div class="controls">
 <button type="button" id="margin-fit">Fit all</button>
 </div>
 </div>
-<div class="chart" id="chart-margin" tabindex="0" role="group" aria-describedby="margin-hint" aria-label="Margin debt by month: its year-over-year growth in percent on the right scale and its ratio to the market value of US corporate equities in percent on the left scale"></div>
-<p class="hint" id="margin-hint">The year-over-year growth is on the right scale, with a line at 0; the ratio to market value on the left scale. Each month is drawn on its last day. A line breaks where a month has no value: a month not fetched, or a fetched month without the growth or the ratio (a quarter end the Fed has not published yet). The readout names the quarter end whose market value the month's ratio rests on.</p>
+<div class="chart" id="chart-margin" tabindex="0" role="group" aria-describedby="margin-hint" aria-label="Margin debt by month: FINRA's debit balances in customers' securities margin accounts, in millions of dollars"></div>
+<p class="hint" id="margin-hint">FINRA's debit balances in customers' securities margin accounts, in $ millions as published, each month drawn on its last day. A line breaks where a month is not fetched.</p>
 </section>
 <section class="card" aria-labelledby="futures-heading">
 <h2 id="futures-heading">S&amp;P 500 futures positioning · weekly</h2>
@@ -167,14 +164,31 @@ footer a { color: var(--text-secondary); }
 <div class="chart" id="chart-futures" tabindex="0" role="group" aria-describedby="futures-hint" aria-label="S&amp;P 500 futures positioning by week: asset managers' net long and leveraged funds' net short positions, each as its percentile over 52 weeks"></div>
 <p class="hint" id="futures-hint">Both percentiles are on a fixed 0–100 scale with a line at 50; each rests on the 52 weekly reports ending with the week, positions in E-mini equivalents ($50 times the index). Each week is drawn on its report's date. A line breaks where a week has no value: a week not fetched, or a fetched week without the 52 reports its percentile needs.</p>
 </section>
+<section class="card" aria-labelledby="vix-heading">
+<h2 id="vix-heading">VIX · daily</h2>
+<div class="toolbar">
+<div class="readout" id="vix-readout" aria-live="polite">
+<span class="when"><span id="vix-readout-date">{{VIX_DATE}}</span> <span class="label" id="vix-readout-detail">{{VIX_DETAIL}}</span></span>
+<span class="item"><span class="key" style="background: var(--series-2)"></span><span class="value" id="vix-readout-value-0">{{VIX_VALUE_0}}</span><span class="label">VIX close, percentile over 252 sessions</span></span>
+<span class="item"><span class="value" id="vix-readout-value-1">{{VIX_VALUE_1}}</span><span class="label">VIX close</span></span>
+</div>
+<div class="controls">
+<button type="button" id="vix-fit">Fit all</button>
+</div>
+</div>
+<div class="chart" id="chart-vix" tabindex="0" role="group" aria-describedby="vix-hint" aria-label="The VIX by XNYS session: its close as a percentile over 252 sessions"></div>
+<p class="hint" id="vix-hint">The percentile is on a fixed 0–100 scale with a line at 50; each rests on the closes of the 252 XNYS sessions ending with the session, from Cboe's daily history of the index. A line breaks where a session has no value: a session not fetched, or one without a close on every one of the 252 sessions.</p>
+</section>
 <p class="hint">Drag to pan, scroll or pinch to zoom. With a chart focused, left and right arrow keys step through its points, Home and End jump to the first and last, Escape returns to the latest. The data tables list every value.</p>
 <noscript><p class="hint">JavaScript is required for the interactive charts; the data tables list every value.</p></noscript>
 <details>
-<summary>Data tables ({{MONTHS}} months, {{WEEKS}} weeks)</summary>
+<summary>Data tables ({{MONTHS}} months, {{WEEKS}} weeks, {{SESSIONS}} sessions)</summary>
 <h2>Margin debt</h2>
 {{MARGIN_TABLE}}
 <h2>S&amp;P 500 futures positioning</h2>
 {{FUTURES_TABLE}}
+<h2>VIX</h2>
+{{VIX_TABLE}}
 <h2>Gaps</h2>
 {{GAP_ROWS}}
 </details>
@@ -195,16 +209,16 @@ footer a { color: var(--text-secondary); }
   const data = JSON.parse(document.getElementById("position-chart-data").textContent);
   const LWC = window.LightweightCharts;
   const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-  // Two charts, each on its own time axis: monthly margin debt and weekly futures positioning.
-  // A series names its scale; `range` fixes that scale, `reference` draws a line at a value.
+  // Three charts, each on its own time axis: monthly margin debt, weekly futures positioning
+  // and the VIX by session. A series names its scale; `range` fixes that scale, `reference`
+  // draws a line at a value, `grouped` writes whole numbers with thousands separators.
   const CHARTS = [
     {
       id: "margin",
       points: data.margin,
-      title: "Margin debt · year-over-year growth (%, right scale) · ratio to market value (%, left scale)",
+      title: "Margin debt · FINRA's debit balances in customers' securities margin accounts ($ millions)",
       series: [
-        { key: "yoy_pct", color: "--series-1", scale: "right", reference: 0 },
-        { key: "ratio_pct", color: "--series-2", scale: "left" },
+        { key: "debit_balances_musd", color: "--series-1", scale: "right", grouped: true },
       ],
     },
     {
@@ -216,7 +230,16 @@ footer a { color: var(--text-secondary); }
         { key: "lev_money_net_short_52w_percentile", color: "--series-4", scale: "right", range: [0, 100] },
       ],
     },
+    {
+      id: "vix",
+      points: data.vix,
+      title: "VIX · close as a percentile over 252 XNYS sessions (0–100)",
+      series: [
+        { key: "close_252s_percentile", color: "--series-2", scale: "right", range: [0, 100], reference: 50 },
+      ],
+    },
   ];
+  const GROUPED = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
   const MARGINS = { top: 0.08, bottom: 0.08 };
   // A point's colour styles the segment that leaves it, so a transparent point before a point
   // without a value leaves a visible gap instead of a line through it.
@@ -307,7 +330,9 @@ footer a { color: var(--text-secondary); }
         most,
         point[item.key] === null ? 0 : decimals(point[item.key]),
       ), 0);
-      const priceFormat = { type: "price", precision, minMove: Math.pow(10, -precision) };
+      const priceFormat = item.grouped
+        ? { type: "custom", minMove: 1, formatter: (price) => GROUPED.format(price) }
+        : { type: "price", precision, minMove: Math.pow(10, -precision) };
       const color = css(item.color);
       const options = {
         priceScaleId: item.scale,

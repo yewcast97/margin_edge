@@ -1,21 +1,17 @@
 """HTTPS to the domain's three sources: every request ``fetch`` sends.
 
-Three fixed endpoints, each read with one plain GET: FINRA's margin statistics workbook
-(``www.finra.org``, public, no key), the CFTC's Traders in Financial Futures dataset through
-its public Socrata API (``publicreporting.cftc.gov``, no key) and FRED's series observations
-(``api.stlouisfed.org``) under the user's own key, ``FRED_API``, from the ignored
-repository-root ``.env``. FRED takes the key only as the ``api_key`` query parameter, so it
-is appended to a FRED URL at send time and nowhere else: every URL this package builds,
-prints or stores is key-free, a URL that already carries ``api_key`` is refused, and every
-message passes through ``redact``. The key is checked before any request (``check_api_key``:
-FRED's form, 32 lowercase ASCII letters or digits) and is printed only as ``set``.
+Three fixed endpoints, each read with one plain GET and none with a key: FINRA's margin
+statistics workbook (``www.finra.org``), the CFTC's Traders in Financial Futures dataset
+through its public Socrata API (``publicreporting.cftc.gov``) and Cboe's daily history of
+the VIX (``cdn-api.cboe.com``). So the domain reads no setting, and no URL it builds, prints
+or stores carries a secret.
 
 Requests go only to the three paths of ``ENDPOINTS``, over HTTPS, without credentials, a
-port or a fragment in the URL; no redirect is followed. A body is accepted only as sent (a
-``Content-Encoding`` other than ``identity`` is refused), with status 200, at most its
-endpoint's limit and not shorter than its ``Content-Length``. Any other status, a network
-failure, a timeout and a body cut short fail with one ``SourceError`` line naming the
-key-free URL and the next step.
+port or a fragment in the URL, and with a query only where the endpoint takes one; no
+redirect is followed. A body is accepted only as sent (a ``Content-Encoding`` other than
+``identity`` is refused), with status 200, at most its endpoint's limit and not shorter than
+its ``Content-Length``. Any other status, a network failure, a timeout and a body cut short
+fail with one ``SourceError`` line naming the URL and the next step.
 
 The HTTP layer is a ``Fetch`` callable, so tests replace it (and the clock) and never reach
 the network. The HTTP reading helpers are copies of the stock IV regime domain's: domains
@@ -31,19 +27,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.message import Message
 from typing import IO, Final
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import urlsplit
 
 from market_state_research.common.text import printable
 from market_state_research.common.times import to_eastern
 
-API_KEY_SETTING: Final = "FRED_API"
-KEY_PARAMETER: Final = "api_key"
 TIMEOUT: Final = 60  # seconds per request
-REDACTED: Final = f"<{API_KEY_SETTING}>"
-API_KEY_UNSET: Final = (
-    f'{API_KEY_SETTING} is not set; add {API_KEY_SETTING}="..." to the repository-root .env'
-)
-API_KEY_MALFORMED: Final = f"{API_KEY_SETTING} must be 32 lowercase ASCII letters or digits"
 REDIRECT_NOT_FOLLOWED: Final = "redirect not followed"
 
 
@@ -75,23 +64,22 @@ CFTC: Final = Endpoint(
     16 * 1024 * 1024,  # a full page of 5,000 rows is about 2.6 MB
     "application/json",
 )
-FRED: Final = Endpoint(
-    "FRED",
-    "api.stlouisfed.org",
-    "/fred/series/observations",
-    True,
-    4 * 1024 * 1024,  # a series of 323 quarters is about 32 KB
-    "application/json",
+CBOE: Final = Endpoint(
+    "Cboe",
+    "cdn-api.cboe.com",
+    "/api/global/us_indices/daily_prices/VIX_History.csv",
+    False,
+    8 * 1024 * 1024,  # the history since 1990 is about 0.5 MB and grows by about 12 KB a year
+    "text/csv",
 )
-ENDPOINTS: Final = (FINRA, CFTC, FRED)
+ENDPOINTS: Final = (FINRA, CFTC, CBOE)
 
 # Explicit ASCII classes: \d would also match other Unicode digits.
-_API_KEY = re.compile(r"[a-z0-9]{32}", re.ASCII)
 _BYTE_COUNT = re.compile(r"[0-9]+", re.ASCII)
 
 
 class SourceError(Exception):
-    """A request failed or was refused; the message is one line without the key."""
+    """A request failed or was refused; the message is one line."""
 
 
 class TransportError(Exception):
@@ -108,28 +96,14 @@ class Response:
     body: bytes
 
 
-# (url, with the key for FRED; headers; limit) -> Response; a network failure raises TransportError.
+# (url, headers, limit) -> Response; a network failure raises TransportError.
 Fetch = Callable[[str, Mapping[str, str], int], Response]
 
 
-def check_api_key(value: str | None) -> str:
-    """``value`` when it can be a FRED key; never echoed."""
-    if not value:
-        raise SourceError(API_KEY_UNSET)
-    if not isinstance(value, str) or not _API_KEY.fullmatch(value):
-        raise SourceError(API_KEY_MALFORMED)
-    return value
-
-
-def redact(text: str, key: str) -> str:
-    """``text`` with every occurrence of ``key`` replaced by ``<FRED_API>``."""
-    return text.replace(key, REDACTED) if key else text
-
-
 def endpoint_of(url: str) -> Endpoint | None:
-    """The endpoint ``url`` is a key-free HTTPS URL of, or None: printable ASCII, no spaces,
-    credentials, port or fragment, its host and path exactly an endpoint's, a query only where
-    the endpoint takes one, and no ``api_key`` parameter."""
+    """The endpoint ``url`` is an HTTPS URL of, or None: printable ASCII, no spaces, credentials,
+    port or fragment, its host and path exactly an endpoint's, and a query only where the
+    endpoint takes one."""
     if not isinstance(url, str) or not (url.isascii() and url.isprintable()) or " " in url:
         return None
     parts = urlsplit(url)
@@ -137,15 +111,8 @@ def endpoint_of(url: str) -> Endpoint | None:
         return None
     for endpoint in ENDPOINTS:
         if parts.netloc == endpoint.host and parts.path == endpoint.path:
-            if bool(parts.query) != endpoint.query:
-                return None
-            names = [name for name, _ in parse_qsl(parts.query, keep_blank_values=True)]
-            return None if KEY_PARAMETER in names else endpoint
+            return endpoint if bool(parts.query) == endpoint.query else None
     return None
-
-
-def _with_key(url: str, key: str) -> str:
-    return f"{url}&{KEY_PARAMETER}={key}"
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -213,7 +180,7 @@ def urllib_fetch(url: str, headers: Mapping[str, str], limit: int) -> Response:
     An HTTP error status is returned (with an empty body) for the client to judge; a
     network failure, a timeout, a redirect and a body within the limit that ended before
     the length http.client framed it by raise ``TransportError``, whose message never
-    names the URL (a FRED URL carries the key).
+    names the URL.
     """
     request = urllib.request.Request(url, headers=dict(headers), method="GET")
     try:
@@ -244,9 +211,7 @@ def _status_problem(url: str, endpoint: Endpoint, response: Response) -> str:
     status = f"GET {url}: HTTP {response.status}"
     if response.reason:
         status += f" {printable(response.reason)}"
-    if endpoint is FRED and response.status in (400, 401, 403):
-        return f"{status}; FRED refused the request: check {API_KEY_SETTING}"
-    if response.status == 404:
+    if response.status in (403, 404):
         return f"{status}; {endpoint.name} no longer serves this address: report it"
     if response.status == 429:
         return f"{status}; {endpoint.name}'s rate limit: wait some minutes and run fetch again"
@@ -256,15 +221,9 @@ def _status_problem(url: str, endpoint: Endpoint, response: Response) -> str:
 
 
 class Client:
-    """Requests to the three sources under one checked FRED key; see the module docstring."""
+    """Requests to the three sources; see the module docstring."""
 
-    def __init__(
-        self,
-        api_key: str | None,
-        fetch: Fetch = urllib_fetch,
-        clock: Callable[[], datetime] = _now,
-    ) -> None:
-        self._key = check_api_key(api_key)
+    def __init__(self, fetch: Fetch = urllib_fetch, clock: Callable[[], datetime] = _now) -> None:
         self._fetch = fetch
         self._clock = clock
         self._requests = 0
@@ -282,22 +241,19 @@ class Client:
         return to_eastern(self._clock(), "now")
 
     def get(self, url: str) -> bytes:
-        """GET the key-free ``url`` of an endpoint (status 200, identity encoding, whole, at most
-        the endpoint's limit) and return its body, or raise ``SourceError``."""
+        """GET the ``url`` of an endpoint (status 200, identity encoding, whole, at most the
+        endpoint's limit) and return its body, or raise ``SourceError``."""
         endpoint = endpoint_of(url)
         if endpoint is None:
             hosts = ", ".join(f"https://{item.host}{item.path}" for item in ENDPOINTS)
-            raise SourceError(
-                f"GET {printable(redact(url, self._key))}: only key-free URLs of {hosts} are requested"
-            )
+            raise SourceError(f"GET {printable(url)}: only URLs of {hosts} are requested")
         self._requests += 1
-        sent = _with_key(url, self._key) if endpoint is FRED else url
         try:
-            response = self._fetch(sent, {"Accept": endpoint.accept}, endpoint.limit)
+            response = self._fetch(url, {"Accept": endpoint.accept}, endpoint.limit)
         except TransportError as error:
-            raise SourceError(f"GET {url}: {redact(str(error), self._key)}; run fetch again") from None
+            raise SourceError(f"GET {url}: {error}; run fetch again") from None
         if response.status != 200:
-            raise SourceError(redact(_status_problem(url, endpoint, response), self._key))
+            raise SourceError(_status_problem(url, endpoint, response))
         headers = {name.lower(): value for name, value in response.headers.items()}
         if headers.get("content-encoding", "identity").strip().lower() != "identity":
             raise SourceError(f"GET {url}: the body is encoded (Content-Encoding); only identity is accepted")

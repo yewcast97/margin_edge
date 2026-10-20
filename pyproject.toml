@@ -1,7 +1,7 @@
 [project]
 name = "margin-edge"
 version = "0.4.0"
-description = "Market state research: stock option-implied volatility regimes (EODHD, Tiingo), market positioning from margin debt and S&P 500 futures (FINRA, CFTC, FRED) and issuer fundamentals (SEC EDGAR, EarningsCalls.dev) with hardcoded validation, charts and reports; nominated posters' statements, archived and fact-checked by the bot."
+description = "Market state research: stock option-implied volatility regimes (EODHD, Tiingo), market positioning from margin debt, S&P 500 futures and the VIX (FINRA, CFTC, Cboe) and issuer fundamentals (SEC EDGAR, EarningsCalls.dev) with hardcoded validation, charts and reports; nominated posters' statements, archived and fact-checked by the bot."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

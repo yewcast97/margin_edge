@@ -1,4 +1,4 @@
-"""Months, weeks and quarter ends, and when each source's document is due."""
+"""Months, weeks and XNYS sessions, and when each source's document is due."""
 
 from datetime import date
 
@@ -8,17 +8,14 @@ from market_state_research.market_position_regime.script.periods import (
     Month,
     cftc_release,
     finra_due,
-    is_quarter_end,
     months_ending_within,
-    observation_date,
-    quarter_end_at,
-    quarter_end_of,
-    quarter_ends_from,
+    sessions_within,
+    vix_due,
+    vix_is_due,
     week_days,
     week_of,
     weeks_ending,
     weeks_within,
-    z1_due,
 )
 
 from .support import edt, est
@@ -79,34 +76,24 @@ def test_a_cftc_week_is_due_its_friday_at_half_past_three_new_york_time():
         cftc_release(date(2026, 10, 12))
 
 
-def test_a_month_rests_on_the_latest_quarter_end_on_or_before_its_last_day():
-    assert quarter_end_of(Month(2026, 9)) == date(2026, 9, 30)
-    assert quarter_end_of(Month(2026, 8)) == date(2026, 6, 30)
-    assert quarter_end_of(Month(2026, 7)) == date(2026, 6, 30)
-    assert quarter_end_of(Month(2026, 1)) == date(2025, 12, 31)
-    assert quarter_end_of(Month(2026, 2)) == date(2025, 12, 31)
-    assert quarter_end_of(Month(2026, 3)) == date(2026, 3, 31)
-    assert quarter_ends_from(date(2025, 12, 31), date(2026, 9, 29)) == (
-        date(2025, 12, 31),
-        date(2026, 3, 31),
-        date(2026, 6, 30),
+def test_the_sessions_of_a_span_are_xnys_sessions_from_2000():
+    assert sessions_within(date(2026, 9, 3), date(2026, 9, 9)) == (
+        date(2026, 9, 3),
+        date(2026, 9, 4),
+        date(2026, 9, 8),  # Labor Day and the weekend are no sessions
+        date(2026, 9, 9),
     )
+    assert sessions_within(date(1997, 1, 1), date(2000, 1, 4)) == (date(2000, 1, 3), date(2000, 1, 4))
+    assert sessions_within(date(1990, 1, 2), date(1999, 12, 31)) == ()
 
 
-def test_z1_is_due_from_the_15th_of_the_third_month_after_the_quarter():
-    assert z1_due(date(2026, 6, 30)) == date(2026, 9, 15)
-    assert z1_due(date(2026, 9, 30)) == date(2026, 12, 15)
-    assert z1_due(date(2025, 12, 31)) == date(2026, 3, 15)
-    assert z1_due(date(2026, 3, 31)) == date(2026, 6, 15)
+def test_a_sessions_vix_is_due_a_quarter_of_an_hour_after_its_close():
+    assert vix_due(date(2026, 10, 20)) == edt(2026, 10, 20, 16, 15)
+    assert vix_due(date(2026, 11, 27)) == est(2026, 11, 27, 13, 15)  # an early close
+    assert vix_due(date(2026, 11, 2)) == est(2026, 11, 2, 16, 15)  # after the clocks fell back
     with pytest.raises(ValueError):
-        z1_due(date(2026, 6, 29))
-
-
-def test_fred_dates_a_quarter_by_its_first_day():
-    assert observation_date(date(2026, 6, 30)) == date(2026, 4, 1)
-    assert quarter_end_at(date(2026, 4, 1)) == date(2026, 6, 30)
-    assert quarter_end_at(date(1945, 10, 1)) == date(1945, 12, 31)
-    assert is_quarter_end(date(2026, 12, 31)) and not is_quarter_end(date(2026, 11, 30))
-    for day in (date(2026, 4, 2), date(2026, 5, 1)):
-        with pytest.raises(ValueError):
-            quarter_end_at(day)
+        vix_due(date(2026, 9, 7))  # Labor Day is no session
+    assert not vix_is_due(date(2026, 10, 20), edt(2026, 10, 20, 16, 14, 59))
+    assert vix_is_due(date(2026, 10, 20), edt(2026, 10, 20, 16, 15))
+    assert vix_is_due(date(2026, 10, 19), edt(2026, 10, 20, 9, 0))
+    assert not vix_is_due(date(2026, 10, 21), edt(2026, 10, 20, 23, 0))

@@ -32,7 +32,7 @@ def host_time_zone(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    """No test reaches FINRA, the CFTC or FRED: the real HTTP layer refuses every request."""
+    """No test reaches FINRA, the CFTC or Cboe: the real HTTP layer refuses every request."""
 
     def refuse(url, headers, limit):
         raise AssertionError("a test tried to reach the network")

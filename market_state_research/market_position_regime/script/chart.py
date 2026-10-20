@@ -1,19 +1,19 @@
-"""The report of one window: a self-contained page of two charts and its Markdown twin.
+"""The report of one window: a self-contained page of three charts and its Markdown twin.
 
 ``render_html`` is a pure function of a ``ChartSpec`` and the vendored library and page
 template (``templates/chart.html``, read with the library by ``load_library``): the same
 inputs always produce the same text. The pinned library (``common.chart``) is inlined so the
-page opens offline and from ``file://`` indefinitely. The page holds two charts, each on its
-own time axis and always served together: margin debt by month (its year-over-year growth on
-the right scale, its ratio to the market value of US corporate equities on the left) and S&P
-500 futures positioning by week (asset managers' net long and leveraged funds' net short, as
-percentiles over 52 weeks on a fixed 0–100 scale). Their data are embedded as JSON, which the
-page's own script draws (nothing reads it back), and repeated as static data tables.
-Everything the page shows beyond plotting is computed here: each point's readout line and
-values, the tables, the banners and the gaps, so the page only plots numbers and text that
-Python produced and tests checked. ``render_markdown`` writes the same window, coverage and
-gaps as Markdown. Times are New York time: ISO text with its EDT/EST offset in the data, and
-the generation time to the second with its zone in the headers.
+page opens offline and from ``file://`` indefinitely. The page holds three charts, each on
+its own time axis and always served together: margin debt by month (FINRA's debit balances
+in $ millions); S&P 500 futures positioning by week (asset managers' net long and leveraged
+funds' net short, as percentiles over 52 weeks on a fixed 0–100 scale); and the VIX by XNYS
+session (its close as a percentile over 252 sessions, on the same scale). Their data are
+embedded as JSON, which the page's own script draws (nothing reads it back), and repeated as
+static data tables. Everything the page shows beyond plotting is computed here: each point's
+readout line and values, the tables, the banners and the gaps, so the page only plots
+numbers and text that Python produced and tests checked. ``render_markdown`` writes the same
+window, coverage and gaps as Markdown. Times are New York time: ISO text with its EDT/EST
+offset in the data, and the generation time to the second with its zone in the headers.
 """
 
 from dataclasses import dataclass
@@ -33,44 +33,37 @@ from market_state_research.common.chart import (
 )
 from market_state_research.common.times import et_display, et_isoformat
 
-from . import cftc, fred
-from .indicators import PERCENTILE_PLACES, RATIO_PLACES, WEEKS, YOY_PLACES
+from . import cftc
+from .indicators import PERCENTILE_PLACES, SESSIONS, WEEKS
 from .periods import Month
-from .store import FuturesRow, MarginRow
+from .store import FuturesRow, MarginRow, VixRow
 
 TEMPLATE_PATH: Final = Path(__file__).resolve().parent / "templates" / "chart.html"
-TITLE: Final = "US equity positioning · margin debt and S&P 500 futures"
+TITLE: Final = "US equity positioning · margin debt, S&P 500 futures and the VIX"
 SOURCE_DESCRIPTION: Final = (
     "FINRA margin statistics (customer margin balances of member firms, monthly) · "
     f"CFTC Traders in Financial Futures, futures only, {cftc.MARKET} ({cftc.CONTRACT}, weekly) · "
-    f"Federal Reserve Z.1 through FRED: {fred.NONFINANCIAL} + {fred.FINANCIAL} (quarterly)"
+    "Cboe VIX daily history (VIX_History.csv, daily)"
 )
 METHOD: Final = (
     "Margin debt is FINRA's debit balances in customers' securities margin accounts, in $ millions, as of "
-    "each month's last business day. Its year-over-year growth is (the month's debit balances ÷ those of "
-    f"the same month a year before − 1) × 100, rounded half-even to {YOY_PLACES} decimal place. Its ratio "
-    "to market value is the month's debit balances ÷ the market value of US corporate equities at the latest "
-    "quarter end on or before the month's last day × 100, rounded half-even to "
-    f"{RATIO_PLACES} decimal places; the market value is the sum of the Federal Reserve's Z.1 series "
-    f"{fred.NONFINANCIAL} (nonfinancial corporate business, public and closely held) and {fred.FINANCIAL} "
-    "(domestic financial sectors), in $ millions, and a month whose quarter end is not published yet has "
-    "no ratio. Asset managers' net position is their long minus their short futures positions, and "
-    "leveraged funds' net short position their short minus their long, from the CFTC's weekly report of "
-    "positions as of each Tuesday (Monday in a week whose Tuesday is a holiday), in E-mini equivalents: "
-    f"each count times its contract's dollars per index point ÷ {cftc.EMINI} (the CFTC counted contracts "
-    f"of $250 times the index until 2023-04-25 and of ${cftc.EMINI} from 2023-05-02). A percentile is 100 "
-    f"times the share of the other {WEEKS - 1} weeks of the {WEEKS} weeks ending with the week whose value "
-    "is strictly below the week's, rounded half-even to "
-    f"{PERCENTILE_PLACES} decimal place; it needs every one of the {WEEKS} weeks' reports. Values are "
-    "computed exactly and rounded once."
+    "each month's last business day, as published. Asset managers' net position is their long minus their "
+    "short futures positions, and leveraged funds' net short position their short minus their long, from the "
+    "CFTC's weekly report of positions as of each Tuesday (Monday in a week whose Tuesday is a holiday), in "
+    f"E-mini equivalents: each count times its contract's dollars per index point ÷ {cftc.EMINI} (the CFTC "
+    f"counted contracts of $250 times the index until 2023-04-25 and of ${cftc.EMINI} from 2023-05-02). A "
+    f"week's percentile is 100 times the share of the other {WEEKS - 1} weeks of the {WEEKS} weeks ending "
+    "with the week whose value is strictly below the week's, rounded half-even to "
+    f"{PERCENTILE_PLACES} decimal place; it needs every one of the {WEEKS} weeks' reports. A session's VIX "
+    f"percentile is 100 times the share of the other {SESSIONS - 1} of the {SESSIONS} XNYS sessions ending "
+    "with the session whose close, in Cboe's daily history of the index, is strictly below the session's "
+    f"close, rounded half-even to {PERCENTILE_PLACES} decimal place; it needs a close on every one of the "
+    f"{SESSIONS} sessions, and Cboe's rows of days XNYS does not trade are not used. Values are computed "
+    "exactly and rounded once."
 )
 MARGIN_COLUMNS: Final = (
     "Month",
     "Debit balances ($M)",
-    "Year-over-year growth (%)",
-    "Ratio to market value (%)",
-    "Market value ($M)",
-    "Quarter end",
     "Free credit, cash accounts ($M)",
     "Free credit, margin accounts ($M)",
     "Source",
@@ -90,11 +83,11 @@ FUTURES_COLUMNS: Final = (
     "Fetched (ET)",
     "Source",
 )
+VIX_COLUMNS: Final = ("Session", "VIX close", f"Close percentile ({SESSIONS}s)", "Source")
 LABELS: Final = {
-    "yoy_pct": "year-over-year growth",
-    "ratio_pct": "ratio to market value",
     "asset_mgr_net_52w_percentile": "asset managers' net percentile",
     "lev_money_net_short_52w_percentile": "leveraged funds' net short percentile",
+    "close_252s_percentile": "VIX close percentile",
 }
 GAPS_NOTE: Final = "Points of the window without a value, per series, and why."
 NO_GAPS: Final = "None: every point of the window has every value."
@@ -128,6 +121,14 @@ class WeekEntry:
 
 
 @dataclass(frozen=True)
+class SessionEntry:
+    """One XNYS session of the window that is stored or due: its row, or None when it is not fetched."""
+
+    session: date
+    row: VixRow | None
+
+
+@dataclass(frozen=True)
 class Gap:
     """One point's series without a value, and why."""
 
@@ -138,10 +139,11 @@ class Gap:
 
 @dataclass(frozen=True)
 class ChartSpec:
-    """One window's months and weeks, what is not due yet, the files they come from and the tables.
+    """One window's months, weeks and sessions, what is not due yet, the files they come from and
+    the tables.
 
     ``upcoming`` names, as text, what the window holds that its sources are not due to publish
-    yet; ``csv`` names the two tables relative to the data directory.
+    yet; ``csv`` names the three tables relative to the data directory.
     """
 
     start: date
@@ -149,18 +151,20 @@ class ChartSpec:
     generated_at: datetime
     months: tuple[MonthEntry, ...]
     weeks: tuple[WeekEntry, ...]
+    sessions: tuple[SessionEntry, ...]
     upcoming: tuple[str, ...]
     workbook: str | None
-    series: tuple[str, ...]
-    csv: tuple[str, str]
+    history: str | None
+    csv: tuple[str, str, str]
 
     def __post_init__(self) -> None:
         if self.start > self.end:
             raise ValueError("the window's start is after its end")
         months = [entry.month for entry in self.months]
         weeks = [entry.week for entry in self.weeks]
-        if months != sorted(set(months)) or weeks != sorted(set(weeks)):
-            raise ValueError("chart months and weeks must be unique and ascending")
+        sessions = [entry.session for entry in self.sessions]
+        if months != sorted(set(months)) or weeks != sorted(set(weeks)) or sessions != sorted(set(sessions)):
+            raise ValueError("chart months, weeks and sessions must be unique and ascending")
 
     @property
     def months_fetched(self) -> int:
@@ -171,6 +175,15 @@ class ChartSpec:
         return sum(1 for entry in self.weeks if entry.row is not None)
 
     @property
+    def sessions_fetched(self) -> int:
+        return sum(1 for entry in self.sessions if entry.row is not None)
+
+    @property
+    def fetched(self) -> int:
+        """The stored points of the three charts."""
+        return self.months_fetched + self.weeks_fetched + self.sessions_fetched
+
+    @property
     def missing_months(self) -> tuple[Month, ...]:
         return tuple(entry.month for entry in self.months if entry.row is None)
 
@@ -179,14 +192,12 @@ class ChartSpec:
         return tuple(entry.week for entry in self.weeks if entry.row is None)
 
     @property
+    def missing_sessions(self) -> tuple[date, ...]:
+        return tuple(entry.session for entry in self.sessions if entry.row is None)
+
+    @property
     def gaps(self) -> tuple[Gap, ...]:
         found = []
-        for entry in self.months:
-            if entry.row is None:
-                continue
-            for key, value in (("yoy_pct", entry.row.yoy), ("ratio_pct", entry.row.ratio)):
-                if value.value is None:
-                    found.append(Gap(entry.month.isoformat(), key, value.reason or ""))
         for week in self.weeks:
             if week.row is None:
                 continue
@@ -196,6 +207,11 @@ class ChartSpec:
             ):
                 if item.value is None:
                     found.append(Gap(week.time.isoformat(), key, item.reason or ""))
+        for entry in self.sessions:
+            if entry.row is not None and entry.row.percentile.value is None:
+                found.append(
+                    Gap(entry.session.isoformat(), "close_252s_percentile", entry.row.percentile.reason or "")
+                )
         return tuple(found)
 
 
@@ -212,10 +228,12 @@ def _count(value: int | Decimal | None) -> str:
     return NO_VALUE if value is None else f"{value:,}"
 
 
-def _month_detail(entry: MonthEntry) -> str:
-    if entry.row is None:
-        return "not fetched"
-    return f"market value of {entry.row.quarter_end.isoformat()}"
+def _close(row: VixRow) -> str:
+    """The close as Cboe wrote it, without the trailing zeros beyond two places (exact), or ``—``."""
+    if row.bar is None:
+        return NO_VALUE
+    whole, _, places = row.bar.close.partition(".")
+    return f"{whole}.{places.rstrip('0').ljust(2, '0')}"
 
 
 def _week_detail(entry: WeekEntry) -> str:
@@ -224,16 +242,13 @@ def _week_detail(entry: WeekEntry) -> str:
     return f"week of {entry.week.isoformat()}"
 
 
+def _detail(row: object) -> str:
+    """A month's or a session's readout detail: empty, or ``not fetched``."""
+    return "not fetched" if row is None else ""
+
+
 def _margin_readout(entry: MonthEntry) -> tuple[str, ...]:
-    row = entry.row
-    if row is None:
-        return (NO_VALUE,) * 4
-    return (
-        _shown(row.yoy.value),
-        _shown(row.ratio.value),
-        _count(row.balance.debit),
-        _count(row.market_value.value),
-    )
+    return (NO_VALUE,) if entry.row is None else (_count(entry.row.balance.debit),)
 
 
 def _futures_readout(entry: WeekEntry) -> tuple[str, ...]:
@@ -250,6 +265,11 @@ def _futures_readout(entry: WeekEntry) -> tuple[str, ...]:
     )
 
 
+def _vix_readout(entry: SessionEntry) -> tuple[str, ...]:
+    row = entry.row
+    return (NO_VALUE,) * 2 if row is None else (_shown(row.percentile.value), _close(row))
+
+
 def payload(spec: ChartSpec, library_version: str = LIBRARY_VERSION) -> dict[str, Any]:
     """The JSON embedded in the page; decimals stay strings, readout texts are given whole."""
     return {
@@ -264,9 +284,8 @@ def payload(spec: ChartSpec, library_version: str = LIBRARY_VERSION) -> dict[str
             {
                 "time": entry.month.last_day().isoformat(),
                 "label": entry.month.isoformat(),
-                "detail": _month_detail(entry),
-                "yoy_pct": None if entry.row is None else _text(entry.row.yoy.value),
-                "ratio_pct": None if entry.row is None else _text(entry.row.ratio.value),
+                "detail": _detail(entry.row),
+                "debit_balances_musd": None if entry.row is None else _text(entry.row.balance.debit),
                 "readout": list(_margin_readout(entry)),
             }
             for entry in spec.months
@@ -286,6 +305,16 @@ def payload(spec: ChartSpec, library_version: str = LIBRARY_VERSION) -> dict[str
             }
             for entry in spec.weeks
         ],
+        "vix": [
+            {
+                "time": entry.session.isoformat(),
+                "label": entry.session.isoformat(),
+                "detail": _detail(entry.row),
+                "close_252s_percentile": None if entry.row is None else _text(entry.row.percentile.value),
+                "readout": list(_vix_readout(entry)),
+            }
+            for entry in spec.sessions
+        ],
         "gaps": [{"date": gap.date, "series": gap.series, "reason": gap.reason} for gap in spec.gaps],
         "upcoming": list(spec.upcoming),
     }
@@ -293,16 +322,7 @@ def payload(spec: ChartSpec, library_version: str = LIBRARY_VERSION) -> dict[str
 
 def _margin_cells(row: MarginRow) -> list[str]:
     balance = row.balance
-    return [
-        _count(balance.debit),
-        _shown(row.yoy.value),
-        _shown(row.ratio.value),
-        _count(row.market_value.value),
-        row.quarter_end.isoformat(),
-        _count(balance.free_cash),
-        _count(balance.free_margin),
-        row.source,
-    ]
+    return [_count(balance.debit), _count(balance.free_cash), _count(balance.free_margin), row.source]
 
 
 def _futures_cells(row: FuturesRow) -> list[str]:
@@ -321,6 +341,10 @@ def _futures_cells(row: FuturesRow) -> list[str]:
         et_isoformat(row.stored.fetched_at),
         row.stored.source,
     ]
+
+
+def _vix_cells(row: VixRow) -> list[str]:
+    return [_close(row), _shown(row.percentile.value), row.source]
 
 
 def _table(columns: tuple[str, ...], rows: list[tuple[str, list[str] | None]]) -> str:
@@ -357,6 +381,13 @@ def _futures_rows(spec: ChartSpec) -> list[tuple[str, list[str] | None]]:
     ]
 
 
+def _vix_rows(spec: ChartSpec) -> list[tuple[str, list[str] | None]]:
+    return [
+        (entry.session.isoformat(), None if entry.row is None else _vix_cells(entry.row))
+        for entry in spec.sessions
+    ]
+
+
 def _gap_rows(spec: ChartSpec) -> str:
     if not spec.gaps:
         return f'<p class="hint">{escape(NO_GAPS)}</p>'
@@ -385,6 +416,9 @@ def _missing_clauses(spec: ChartSpec) -> list[str]:
     if spec.missing_weeks:
         listed = ", ".join(week.isoformat() for week in spec.missing_weeks)
         clauses.append(f"{_plural(len(spec.missing_weeks), 'week')} of CFTC reports (the weeks of {listed})")
+    if spec.missing_sessions:
+        listed = ", ".join(session.isoformat() for session in spec.missing_sessions)
+        clauses.append(f"{_plural(len(spec.missing_sessions), 'session')} of Cboe's VIX ({listed})")
     return clauses
 
 
@@ -425,29 +459,32 @@ def _upcoming(spec: ChartSpec) -> str:
 def _newest(spec: ChartSpec) -> str:
     months = [entry.month for entry in spec.months if entry.row is not None]
     weeks = [entry.time for entry in spec.weeks if entry.row is not None]
+    sessions = [entry.session for entry in spec.sessions if entry.row is not None]
     month = months[-1].isoformat() if months else "none"
     week = weeks[-1].isoformat() if weeks else "none"
-    return f"month {month} · report {week}"
+    session = sessions[-1].isoformat() if sessions else "none"
+    return f"month {month} · report {week} · session {session}"
 
 
 def _files(spec: ChartSpec) -> str:
-    files = [spec.workbook or "no FINRA workbook", *(spec.series or ("no FRED answer",))]
-    return ", ".join(files)
+    return f"{spec.workbook or 'no FINRA workbook'}, {spec.history or 'no Cboe VIX file'}"
 
 
 def _coverage(spec: ChartSpec) -> str:
     return (
         f"{spec.months_fetched} of {len(spec.months)} months · "
-        f"{spec.weeks_fetched} of {len(spec.weeks)} weeks"
+        f"{spec.weeks_fetched} of {len(spec.weeks)} weeks · "
+        f"{spec.sessions_fetched} of {len(spec.sessions)} sessions"
     )
 
 
 def render_html(spec: ChartSpec, library: Library) -> str:
     """Render the complete, self-contained page."""
-    if spec.months_fetched + spec.weeks_fetched == 0:
-        raise ValueError("a report needs at least one fetched month or week in its window")
+    if spec.fetched == 0:
+        raise ValueError("a report needs at least one fetched month, week or session in its window")
     latest_month = next((entry for entry in reversed(spec.months) if entry.row is not None), None)
     latest_week = next((entry for entry in reversed(spec.weeks) if entry.row is not None), None)
+    latest_session = next((entry for entry in reversed(spec.sessions) if entry.row is not None), None)
     values = {
         "TITLE": escape(f"{TITLE} · {spec.start.isoformat()} to {spec.end.isoformat()}"),
         "HEADING": escape(TITLE),
@@ -465,23 +502,29 @@ def render_html(spec: ChartSpec, library: Library) -> str:
         "NOTICE": escape(library.notice),
         "BANNERS": _banners(spec),
         "MARGIN_DATE": escape(NO_VALUE if latest_month is None else latest_month.month.isoformat()),
-        "MARGIN_DETAIL": escape("no month fetched" if latest_month is None else _month_detail(latest_month)),
+        "MARGIN_DETAIL": escape("no month fetched" if latest_month is None else ""),
         "FUTURES_DATE": escape(NO_VALUE if latest_week is None else latest_week.time.isoformat()),
         "FUTURES_DETAIL": escape("no week fetched" if latest_week is None else _week_detail(latest_week)),
+        "VIX_DATE": escape(NO_VALUE if latest_session is None else latest_session.session.isoformat()),
+        "VIX_DETAIL": escape("no session fetched" if latest_session is None else ""),
         "MARGIN_TABLE": _table(MARGIN_COLUMNS, _margin_rows(spec)),
         "FUTURES_TABLE": _table(FUTURES_COLUMNS, _futures_rows(spec)),
+        "VIX_TABLE": _table(VIX_COLUMNS, _vix_rows(spec)),
         "MONTHS": escape(len(spec.months)),
         "WEEKS": escape(len(spec.weeks)),
+        "SESSIONS": escape(len(spec.sessions)),
         "GAP_ROWS": _gap_rows(spec),
         "PAYLOAD": embed_json(payload(spec, library.version)),
         "LIBRARY": library.script,
     }
-    margin = (NO_VALUE,) * 4 if latest_month is None else _margin_readout(latest_month)
-    futures = (NO_VALUE,) * 5 if latest_week is None else _futures_readout(latest_week)
-    for index, text in enumerate(margin):
-        values[f"MARGIN_VALUE_{index}"] = escape(text)
-    for index, text in enumerate(futures):
-        values[f"FUTURES_VALUE_{index}"] = escape(text)
+    readouts = {
+        "MARGIN": (NO_VALUE,) if latest_month is None else _margin_readout(latest_month),
+        "FUTURES": (NO_VALUE,) * 5 if latest_week is None else _futures_readout(latest_week),
+        "VIX": (NO_VALUE,) * 2 if latest_session is None else _vix_readout(latest_session),
+    }
+    for chart_name, texts in readouts.items():
+        for index, text in enumerate(texts):
+            values[f"{chart_name}_VALUE_{index}"] = escape(text)
     return substitute(library.template, values)
 
 
@@ -499,11 +542,11 @@ def _markdown_table(columns: tuple[str, ...], rows: list[tuple[str, list[str] | 
 
 
 def render_markdown(spec: ChartSpec) -> str:
-    """The window as Markdown: the sources, the method, coverage, the two tables and the gaps."""
+    """The window as Markdown: the sources, the method, coverage, the three tables and the gaps."""
     lines = [
         f"# {TITLE} · {spec.start.isoformat()} → {spec.end.isoformat()}",
         "",
-        f"Generated {et_display(spec.generated_at)} from {' and '.join(spec.csv)}.",
+        f"Generated {et_display(spec.generated_at)} from {', '.join(spec.csv)}.",
         f"Source: {SOURCE_DESCRIPTION}.",
         f"Raw files: {_files(spec)}.",
         f"Method: {METHOD}",
@@ -517,6 +560,8 @@ def render_markdown(spec: ChartSpec) -> str:
     lines.extend(_markdown_table(MARGIN_COLUMNS, _margin_rows(spec)))
     lines.extend(["", f"## S&P 500 futures positioning, weekly ({cftc.MARKET})", ""])
     lines.extend(_markdown_table(FUTURES_COLUMNS, _futures_rows(spec)))
+    lines.extend(["", "## VIX, by XNYS session", ""])
+    lines.extend(_markdown_table(VIX_COLUMNS, _vix_rows(spec)))
     lines.extend(["", "## Gaps", "", GAPS_NOTE, ""])
     if spec.gaps:
         lines.append(_markdown_row(["Point", "Series", "Reason"]))

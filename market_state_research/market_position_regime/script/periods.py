@@ -1,14 +1,17 @@
 """The dates the three sources publish by, and when each document is due.
 
 FINRA dates its balances by month (``Month``, as of the month's last business day), the CFTC
-its positions by week, and the Fed's Financial Accounts (Z.1, through FRED) its market values
-by quarter end. The CFTC reports one week's positions as of its Tuesday, or as of its Monday
-when the Tuesday is a holiday, so a week is named by its Tuesday (``week_of``), whatever day
-its report is dated. A document is due from the earliest time its source publishes it: a
-FINRA month from the 15th of the month after it (FINRA publishes in the third week); a CFTC
-week from its Friday at 15:30 New York time; a Z.1 quarter from the 15th of the third month
-after its end (the Fed publishes in the second week of that month). A due document the
-source has not published yet is ``pending`` after a ``fetch``. Every function here is pure.
+its positions by week, and Cboe the VIX by day. The CFTC reports one week's positions as of
+its Tuesday, or as of its Monday when the Tuesday is a holiday, so a week is named by its
+Tuesday (``week_of``), whatever day its report is dated. The VIX is read by XNYS session
+(``common.sessions``): the calendar the domain uses knows the sessions from 2000-01-03, so
+a span of days holds only the sessions from then on (``sessions_within``). A document is due
+from the earliest time its source publishes it: a FINRA month from the 15th of the month
+after it (FINRA publishes in the third week); a CFTC week from its Friday at 15:30 New York
+time; a session's VIX from a quarter of an hour after its XNYS close (``vix_due``), when Cboe
+ends the day's calculation of the index (Cboe replaces its file later that evening). A due
+document the source has not published yet is ``pending`` after a ``fetch``. Every function
+here is pure.
 """
 
 import re
@@ -16,11 +19,12 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Final
 
+from market_state_research.common.sessions import session_close, sessions_between
 from market_state_research.common.times import NEW_YORK, to_eastern
 
 FINRA_DUE_DAY: Final = 15  # of the month after the month
-Z1_DUE_DAY: Final = 15  # of the third month after the quarter end
 CFTC_RELEASE: Final = time(15, 30)  # New York time, on the week's Friday
+VIX_SETTLE: Final = timedelta(minutes=15)  # Cboe calculates the VIX until 15 minutes after XNYS closes
 TUESDAY: Final = 1  # date.weekday()
 FRIDAY: Final = 4
 WEEK: Final = timedelta(days=7)
@@ -125,45 +129,20 @@ def week_days(week: date) -> tuple[date, date]:
     return week - timedelta(days=1), week + timedelta(days=5)
 
 
-def is_quarter_end(day: date) -> bool:
-    return day.month in (3, 6, 9, 12) and day == Month.of(day).last_day()
+def sessions_within(start: date, end: date) -> tuple[date, ...]:
+    """The XNYS sessions from ``start`` to ``end``, both included, ascending: those the calendar
+    the domain uses knows (from 2000-01-03)."""
+    return sessions_between(start, end)
 
 
-def quarter_end_of(month: Month) -> date:
-    """The latest quarter end on or before ``month``'s last day: the market value a month's
-    balances are divided by."""
-    return month.shifted(-(month.month % 3)).last_day()
+def vix_due(session: date) -> datetime:
+    """When the VIX of ``session`` is due: a quarter of an hour after its XNYS close (16:15 New
+    York time on a full day), when Cboe ends the day's calculation of the index."""
+    return to_eastern(session_close(session) + VIX_SETTLE)
 
 
-def quarter_ends_from(start: date, end: date) -> tuple[date, ...]:
-    """The quarter ends from ``start`` to ``end``, both included, ascending."""
-    ends = []
-    current = Month.of(start)
-    while current.first_day() <= end:
-        day = current.last_day()
-        if current.month % 3 == 0 and start <= day <= end:
-            ends.append(day)
-        current = current.shifted(1)
-    return tuple(ends)
-
-
-def z1_due(quarter_end: date) -> date:
-    """The day the Z.1 values of ``quarter_end`` are due: the 15th of the third month after it."""
-    if not is_quarter_end(quarter_end):
-        raise ValueError(f"{quarter_end} is not a quarter end")
-    later = Month.of(quarter_end).shifted(3)
-    return date(later.year, later.month, Z1_DUE_DAY)
-
-
-def observation_date(quarter_end: date) -> date:
-    """FRED's date of a quarterly value as of ``quarter_end``: the quarter's first day."""
-    if not is_quarter_end(quarter_end):
-        raise ValueError(f"{quarter_end} is not a quarter end")
-    return Month.of(quarter_end).shifted(-2).first_day()
-
-
-def quarter_end_at(observation: date) -> date:
-    """The quarter end of FRED's quarterly observation dated ``observation`` (a quarter's first day)."""
-    if observation.day != 1 or observation.month not in (1, 4, 7, 10):
-        raise ValueError(f"{observation} is not the first day of a quarter")
-    return Month.of(observation).shifted(2).last_day()
+def vix_is_due(session: date, at: datetime) -> bool:
+    """Whether the VIX of ``session`` is due at ``at``; only a session of ``at``'s New York day
+    needs its close looked up."""
+    day = to_eastern(at, "at").date()
+    return session < day or (session == day and vix_due(session) <= at)

@@ -46,12 +46,12 @@ For market state research, follow [market_state_research/AGENTS.md](market_state
 the domain's `AGENTS.md` and its `PROCEDURE.md`. For hypothesis tests with seikan, follow
 [explore_hypothesis/AGENTS.md](explore_hypothesis/AGENTS.md).
 Never invent observations, edit stored values directly or weaken validation to
-admit a failed file. A domain that reads a session's market data (`stock_iv_regime`) works
-as of the last completed XNYS session and never stores intraday live values; a domain that
-reads none (`market_position_regime`, `fundamentals`, `posts`) has no session logic and dates
-its documents by their own dates (see
-[market_state_research/AGENTS.md](market_state_research/AGENTS.md)). Detailed procedures
-belong to their domain.
+admit a failed file. Market data of a session (`stock_iv_regime`'s chains and prices,
+`market_position_regime`'s VIX) is read as of the last completed XNYS session, and no
+intraday live value is stored; a document that is no session's (`market_position_regime`'s
+months and weeks, `fundamentals`, `posts`) has no session logic and is dated by its own date
+(see [market_state_research/AGENTS.md](market_state_research/AGENTS.md)). Detailed
+procedures belong to their domain.
 
 ## Repository layout
 
@@ -68,14 +68,14 @@ belong to their domain.
 | `tests/conftest.py` | Repository-wide guard: the run fails if any test changes a `market_state_research/*/data` directory, a poster's folder `market_state_research/posts/*/` or an `explore_hypothesis/*/data` directory, and every test fails when no `market_state_research/*/data` directory is found, so that a rename cannot switch the guard off. |
 | `tests/common/` | Offline pytest suite for the shared package; host time-zone fixture in `conftest.py`; New York clock readings, foreign-digit text (`foreign_digits`), a zone without an offset (`OffsetlessZone`) and file-tree helpers (`tree`, `snapshot`, `leftovers`, `mode`) in `support.py`. |
 | `tests/stock_iv_regime/` | Offline pytest suite for the stock IV regime domain; clock, data-directory, watchlist-file and host time-zone fixtures and a guard refusing any real request (EODHD or Tiingo) in `conftest.py`; clock readings, record builders from strike, delta and IV text (the hand-worked quotes `CALLS` and `PUTS`), chain builders and daily-bar and prices builders in `support.py`; a recording stand-in for EODHD's two options endpoints answering from records in memory in `fake_eodhd.py` and one for Tiingo's daily prices endpoint in `fake_tiingo.py` (no Tiingo answer is recorded: its data may not be redistributed); two pages recorded live from EODHD in `fixtures/`, pinned by SHA-256 and never edited. |
-| `tests/market_position_regime/` | Offline pytest suite for the market position regime domain; data-directory and host time-zone fixtures and a guard refusing any real request (FINRA, the CFTC or FRED) in `conftest.py`; clock readings, FINRA's workbook built byte by byte in its verified layout, TFF rows, FRED answers and raw-file savers in `support.py`; a recording stand-in for the three sources answering from data in memory in `fake_sources.py`; one CFTC answer recorded live in `fixtures/`, pinned by SHA-256 and never edited (no FINRA or FRED answer is kept). |
+| `tests/market_position_regime/` | Offline pytest suite for the market position regime domain; data-directory and host time-zone fixtures and a guard refusing any real request (FINRA, the CFTC or Cboe) in `conftest.py`; clock readings, FINRA's workbook built byte by byte in its verified layout, TFF rows, Cboe's VIX file and raw-file savers in `support.py`; a recording stand-in for the three sources answering from data in memory in `fake_sources.py`; one CFTC answer recorded live in `fixtures/`, pinned by SHA-256 and never edited (no FINRA or Cboe answer is kept). |
 | `tests/fundamentals/` | Offline pytest suite for the fundamentals domain; clock, data-directory and host time-zone fixtures in `conftest.py`; EDGAR JSON, synthetic inline-XBRL filings, 8-K filing index pages and earnings-release exhibits in `edgar_support.py`; a recording fake of the EDGAR HTTP layer in `fake_edgar.py`; a recording fake of EarningsCalls.dev's HTTP layer in `fake_earningscalls.py`; call lists and transcripts in the provider's verified layout with synthetic turns of known speakers in `calls_support.py`; urllib driven offline over a fake HTTPS handler in `transport_support.py`; workflow fixtures in `workflow_support.py`. No test reaches the network or reads the real `.env`. |
 | `pyproject.toml`, `uv.lock` | Python 3.13 or newer, the dependencies (seikan from its GitHub `main` branch, pinned to one commit by the lock), the `dev` group (pytest, Ruff, mypy), their configuration and the reproducible lock. |
 
 The implemented domains are [stock_iv_regime](market_state_research/stock_iv_regime/AGENTS.md)
 (EODHD's options API and Tiingo's daily prices),
 [market_position_regime](market_state_research/market_position_regime/AGENTS.md) (FINRA's
-margin statistics, the CFTC's Traders in Financial Futures and FRED),
+margin statistics, the CFTC's Traders in Financial Futures and Cboe's VIX history),
 [fundamentals](market_state_research/fundamentals/AGENTS.md) (SEC EDGAR and the
 EarningsCalls.dev transcript API) and [posts](market_state_research/posts/AGENTS.md) (what
 nominated posters say, read by the bot's own route and fact-checked by hand). Each domain's

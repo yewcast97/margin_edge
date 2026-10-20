@@ -26,23 +26,11 @@ from market_state_research.market_position_regime.script.__main__ import (
 from market_state_research.market_position_regime.script.store import DATA_DIRECTORY
 
 from .fake_sources import FakeSources
-from .support import KEY, NOW, save_all, workbook_bytes
+from .support import NOW, history_bytes, save_all, workbook_bytes
 
 MODULE = "market_state_research.market_position_regime.script"
 SCRIPT_DIRECTORY = Path(script_package.__file__).resolve().parent
 COMMON_DIRECTORY = Path(common_package.__file__).resolve().parent
-
-
-class Settings:
-    """Records every setting asked for and answers with the canary key."""
-
-    def __init__(self, **values: str | None) -> None:
-        self.asked: list[str] = []
-        self.values = {"FRED_API": KEY, **values}
-
-    def __call__(self, name: str) -> str | None:
-        self.asked.append(name)
-        return self.values.get(name)
 
 
 def run(capsys, *argv, **options):
@@ -83,12 +71,12 @@ def test_parse_errors_are_one_labelled_line(capsys):
     ],
 )
 def test_a_refused_window_is_one_line_before_any_work(capsys, tmp_path, argv, message):
-    settings = Settings()
     target = tmp_path / "file"
     target.write_text("x")
-    code, out, err = run(capsys, "fetch", *argv, "--data-dir", str(target), settings=settings)
+    fake = FakeSources()
+    code, out, err = run(capsys, "fetch", *argv, "--data-dir", str(target), client=fake.client())
     assert (code, out, err) == (2, "", f"{LABEL}: {message}\n")
-    assert settings.asked == []
+    assert fake.calls == []
 
 
 def test_the_default_window_is_three_years_to_today(capsys, layout):
@@ -98,43 +86,27 @@ def test_the_default_window_is_three_years_to_today(capsys, layout):
     assert (window["from"], window["to"]) == ("2023-10-20", "2026-10-20")
 
 
-@pytest.mark.parametrize(
-    ("values", "message"),
-    [
-        ({"FRED_API": None}, 'FRED_API is not set; add FRED_API="..." to the repository-root .env'),
-        ({"FRED_API": "bad key!"}, "FRED_API must be 32 lowercase ASCII letters or digits"),
-    ],
-)
-def test_fetch_without_a_valid_key_sends_nothing(capsys, layout, values, message):
-    code, out, err = run(capsys, "fetch", "--data-dir", str(layout.root), settings=Settings(**values))
-    assert (code, out, err) == (2, "", f"{LABEL}: {message}\n")
-    assert not layout.root.exists()
-
-
-def test_fetch_never_prints_or_stores_the_key(capsys, layout, monkeypatch):
-    fake = FakeSources(workbook=workbook_bytes())
+def test_fetch_needs_no_key_and_asks_each_source(capsys, layout, monkeypatch):
+    fake = FakeSources(workbook=workbook_bytes(), history=history_bytes())
     defaults = client_module.Client.__init__.__defaults__
-    # The client is built from the settings; the fake answers through its HTTP layer.
+    # The client is built by main; the fake answers through its HTTP layer.
     monkeypatch.setattr(client_module.Client.__init__, "__defaults__", (fake, lambda: NOW) + defaults[2:])
-    settings = Settings()
-    code, out, err = run(capsys, "fetch", "--data-dir", str(layout.root), settings=settings)
+    code, out, err = run(capsys, "fetch", "--data-dir", str(layout.root))
     assert (code, err) == (0, "")
-    assert settings.asked == ["FRED_API"]
     output = json.loads(out)
-    assert output["fred_key"] == "set" and KEY not in out
-    assert output["sources"]["finra"]["status"] == "new"
-    assert output["sources"]["NCBEILQ027S"]["status"] == "failed"  # the fake has no FRED series
-    assert fake.keys == [KEY, KEY] and all(KEY not in call for call in fake.calls)
-    for path in layout.root.rglob("*"):
-        assert path.is_dir() or KEY.encode() not in path.read_bytes()
+    assert output["requests"] == 3
+    assert [output["sources"][name]["status"] for name in ("finra", "cftc", "cboe")] == [
+        "new",
+        "verified",
+        "new",
+    ]
+    assert len(fake.calls) == 3  # the fake holds no CFTC row: nothing new from the CFTC
 
 
-@pytest.mark.parametrize("command", [["plan"], ["record"], ["show"]])
-def test_offline_commands_read_no_setting(capsys, layout, command):
-    save_all(layout)
-    settings = Settings()
-    code, out, err = run(capsys, *command, "--data-dir", str(layout.root), settings=settings)
-    assert (code, err, settings.asked) == (0, "", [])
+def test_the_package_reads_no_setting():
+    for path in SCRIPT_DIRECTORY.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "common.env" not in text and "import env" not in text, path
 
 
 def test_show_prints_markdown_and_the_others_ascii_json(capsys, layout):
@@ -156,10 +128,8 @@ def test_a_file_as_data_directory_is_refused(capsys, tmp_path):
 def test_record_without_data_is_one_line(capsys, layout):
     code, out, err = run(capsys, "record", "--data-dir", str(layout.root))
     assert (code, out) == (2, "")
-    assert (
-        err
-        == f"{LABEL}: no month or week of the window 2023-10-20 to 2026-10-20 is fetched; run fetch first\n"
-    )
+    window = "the window 2023-10-20 to 2026-10-20"
+    assert err == f"{LABEL}: no month, week or session of {window} is fetched; run fetch first\n"
 
 
 def snapshot(root: Path) -> dict[str, bytes]:
@@ -177,11 +147,11 @@ def test_module_entry_point_uses_its_own_data_directory(tmp_path):
     (root / "market_state_research" / "__init__.py").write_text("")
     # The subprocess runs on the real clock: the raw files are saved as fetched a minute ago.
     fetched = to_eastern(datetime.now(UTC) - timedelta(minutes=1)).replace(microsecond=0)
-    save_all(DataLayout(domain / "data"), fetched_at=fetched)
+    save_all(DataLayout(domain / "data"), fetched_at=fetched, vix_fetched_at=fetched)
     working = tmp_path / "elsewhere"
     working.mkdir()
     before = snapshot(root)
-    environment = {**os.environ, "PYTHONPATH": str(root), "PYTHONDONTWRITEBYTECODE": "1", "FRED_API": ""}
+    environment = {**os.environ, "PYTHONPATH": str(root), "PYTHONDONTWRITEBYTECODE": "1"}
     result = subprocess.run(
         [sys.executable, "-m", MODULE, "plan", "--from", "2026-01-01"],
         cwd=working,
@@ -195,6 +165,7 @@ def test_module_entry_point_uses_its_own_data_directory(tmp_path):
     output = json.loads(result.stdout)
     assert output["invalid_files"] == []
     assert output["sources"]["finra"]["path"].startswith(str(domain / "data" / "raw" / "market"))
+    assert output["sources"]["cboe"]["path"].startswith(str(domain / "data" / "raw" / "market"))
     assert output["window"]["from"] == "2026-01-01"
     assert list(working.iterdir()) == []
     assert snapshot(root) == before

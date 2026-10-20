@@ -1,21 +1,25 @@
-"""Raw files: reading and validation, selection, derivation and the two tables.
+"""Raw files: reading and validation, selection, derivation and the three tables.
 
 The domain has one subject, the market, so each section of ``data/`` holds one folder,
 ``market/``, where a ticker domain holds one per ticker. ``fetch`` writes FINRA's workbooks
-(``finra``), the CFTC's answers (``cftc``) and FRED's answers (``fred``) to ``raw/market/``.
-Every read validates every listed raw file; a file that fails is reported, never skipped
-silently, until it is renamed with ``.rejected``, after which every read skips it.
+(``finra``), the CFTC's answers (``cftc``) and Cboe's VIX files (``cboe``) to
+``raw/market/``. Every read validates every listed raw file; a file that fails is reported,
+never skipped silently, until it is renamed with ``.rejected``, after which every read skips
+it.
 
-Selection: the newest valid workbook (by ``fetched_at``, then by name) is the workbook; per
-series, the newest valid FRED answer is the series; per week, the report of the newest valid
-CFTC answer holding that week is the week's report. Nothing else records what was fetched.
+Selection: the newest valid workbook (by ``fetched_at``, then by name) is the workbook; the
+newest valid VIX file, likewise, is the VIX history; per week, the report of the newest
+valid CFTC answer holding that week is the week's report. Nothing else records what was
+fetched.
 
-``derive_margin`` gives every month of the workbook its row (the balances, the
-year-over-year growth, the market value of its quarter end and the ratio, ``indicators``),
-and ``derive_futures`` every stored week its row (the positions, the two nets and their
-percentiles over 52 weeks), so a row rests on the whole archive, not on a report's window.
-``formatted/market/margin_debt.csv`` and ``formatted/market/index_futures.csv`` hold them in
-date order and are rewritten from ``raw/`` by ``record``, each only when its bytes change.
+``derive_margin`` gives every month of the workbook its row (its balances as FINRA
+published them), ``derive_futures`` every stored week its row (the positions, the two nets
+and their percentiles over 52 weeks) and ``derive_vix`` every XNYS session from the first of
+the calendar the domain uses to the newest day of the VIX history its row (the close and its
+percentile over 252 sessions), so a row rests on the whole archive, not on a report's
+window. ``formatted/market/margin_debt.csv``, ``formatted/market/index_futures.csv`` and
+``formatted/market/vix.csv`` hold them in date order and are rewritten from ``raw/`` by
+``record``, each only when its bytes change.
 """
 
 import csv
@@ -28,31 +32,29 @@ from pathlib import Path
 from typing import Final
 
 from market_state_research.common.layout import DataLayout, listed, write_file
+from market_state_research.common.sessions import FIRST_SUPPORTED_DATE
 from market_state_research.common.times import et_isoformat
 
-from . import cftc, finra, fred
+from . import cboe, cftc, finra
+from .cboe import Bar, History
 from .cftc import Answer, Report
 from .finra import Balance, Workbook
-from .indicators import Percentile, Value, growth, percentile, ratio
-from .periods import Month, quarter_end_of, week_of, z1_due
+from .indicators import Percentile, percentile, session_percentile
+from .periods import Month, sessions_within, week_of
 
 DATA_DIRECTORY: Final = Path(__file__).resolve().parent.parent / "data"
 FOLDER: Final = "market"  # the one folder of each section
 MARGIN_CSV: Final = "margin_debt.csv"
 FUTURES_CSV: Final = "index_futures.csv"
-RAW_NAMES: Final = "finra_margin_TOKEN.xlsx, cftc_tff_FIRST_LAST_TOKEN.json or fred_SERIES_TOKEN.json"
+VIX_CSV: Final = "vix.csv"
+RAW_NAMES: Final = "finra_margin_TOKEN.xlsx, cftc_tff_FIRST_LAST_TOKEN.json or cboe_vix_TOKEN.csv.gz"
 FIRST_WEEK: Final = week_of(cftc.FIRST_REPORT)
 MARGIN_COLUMNS: Final = (
     "month",
     "debit_balances_musd",
     "free_credit_cash_musd",
     "free_credit_margin_musd",
-    "yoy_pct",
-    "market_value_quarter_end",
-    "market_value_musd",
-    "ratio_pct",
     "source",
-    "market_value_sources",
 )
 FUTURES_COLUMNS: Final = (
     "report_date",
@@ -72,6 +74,7 @@ FUTURES_COLUMNS: Final = (
     "fetched_at",
     "source",
 )
+VIX_COLUMNS: Final = ("date", "close", "close_252s_percentile", "source")
 
 
 @dataclass(frozen=True)
@@ -87,8 +90,8 @@ class AnswerFile:
 
 
 @dataclass(frozen=True)
-class SeriesFile:
-    series: fred.Series
+class HistoryFile:
+    history: History
     source: str
 
 
@@ -100,11 +103,12 @@ class InvalidFile:
 
 @dataclass(frozen=True)
 class Raw:
-    """Every listed raw file, validated: the workbooks, the CFTC and FRED answers and the invalid files."""
+    """Every listed raw file, validated: the workbooks, the CFTC answers, the VIX files and the
+    invalid files."""
 
     workbooks: tuple[WorkbookFile, ...]
     answers: tuple[AnswerFile, ...]
-    series: tuple[SeriesFile, ...]
+    histories: tuple[HistoryFile, ...]
     invalid: tuple[InvalidFile, ...]
 
 
@@ -119,15 +123,10 @@ class Stored:
 
 @dataclass(frozen=True)
 class MarginRow:
-    """One month of the workbook: its balances, its growth and its ratio to the market value."""
+    """One month of the workbook: its balances and the workbook's file name."""
 
     balance: Balance
-    yoy: Value
-    quarter_end: date
-    market_value: Value
-    ratio: Value
     source: str
-    market_value_sources: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -143,20 +142,36 @@ class FuturesRow:
         return self.stored.report
 
 
+@dataclass(frozen=True)
+class VixRow:
+    """One XNYS session the VIX history reaches: its bar (None when Cboe's file holds none), the
+    percentile of its close over 252 sessions, and the file's name."""
+
+    session: date
+    bar: Bar | None
+    percentile: Percentile
+    source: str
+
+    @property
+    def close(self) -> Decimal | None:
+        return None if self.bar is None else self.bar.close_value
+
+
 def raw_directory(layout: DataLayout) -> Path:
     return layout.raw(FOLDER)
 
 
-def csv_paths(layout: DataLayout) -> tuple[Path, Path]:
-    """The margin debt table and the index futures table."""
-    return layout.formatted(FOLDER) / MARGIN_CSV, layout.formatted(FOLDER) / FUTURES_CSV
+def csv_paths(layout: DataLayout) -> tuple[Path, Path, Path]:
+    """The margin debt table, the index futures table and the VIX table."""
+    directory = layout.formatted(FOLDER)
+    return directory / MARGIN_CSV, directory / FUTURES_CSV, directory / VIX_CSV
 
 
 def read_raw(layout: DataLayout, now: datetime) -> Raw:
     """Every listed raw file, validated (see the module docstring)."""
     workbooks: list[WorkbookFile] = []
     answers: list[AnswerFile] = []
-    series: list[SeriesFile] = []
+    histories: list[HistoryFile] = []
     invalid: list[InvalidFile] = []
     for path in listed(raw_directory(layout)):
         name = path.name
@@ -165,13 +180,13 @@ def read_raw(layout: DataLayout, now: datetime) -> Raw:
                 workbooks.append(WorkbookFile(finra.read_workbook(path.read_bytes(), name, now), name))
             elif cftc.RAW_NAME.fullmatch(name):
                 answers.append(AnswerFile(cftc.read_answer(path.read_bytes(), name, now), name))
-            elif fred.RAW_NAME.fullmatch(name):
-                series.append(SeriesFile(fred.read_answer(path.read_bytes(), name, now), name))
+            elif cboe.RAW_NAME.fullmatch(name):
+                histories.append(HistoryFile(cboe.read_history(path.read_bytes(), name, now), name))
             else:
                 invalid.append(InvalidFile(path, f"not a raw file name ({RAW_NAMES})"))
         except ValueError as error:
             invalid.append(InvalidFile(path, str(error)))
-    return Raw(tuple(workbooks), tuple(answers), tuple(series), tuple(invalid))
+    return Raw(tuple(workbooks), tuple(answers), tuple(histories), tuple(invalid))
 
 
 def select_workbook(files: Iterable[WorkbookFile]) -> WorkbookFile | None:
@@ -179,12 +194,9 @@ def select_workbook(files: Iterable[WorkbookFile]) -> WorkbookFile | None:
     return max(files, key=lambda item: (item.workbook.fetched_at, item.source), default=None)
 
 
-def select_series(files: Iterable[SeriesFile]) -> dict[str, SeriesFile]:
-    """Per series, its newest answer (by ``fetched_at``, then by name)."""
-    chosen: dict[str, SeriesFile] = {}
-    for item in sorted(files, key=lambda item: (item.series.fetched_at, item.source)):
-        chosen[item.series.series] = item  # ascending: the newest wins
-    return chosen
+def select_history(files: Iterable[HistoryFile]) -> HistoryFile | None:
+    """The newest VIX file (by ``fetched_at``, then by name), or None."""
+    return max(files, key=lambda item: (item.history.fetched_at, item.source), default=None)
 
 
 def select_reports(files: Iterable[AnswerFile]) -> dict[date, Stored]:
@@ -197,59 +209,13 @@ def select_reports(files: Iterable[AnswerFile]) -> dict[date, Stored]:
     return dict(sorted(weeks.items()))
 
 
-def _market_value(quarter_end: date, series: Mapping[str, SeriesFile]) -> tuple[Value, tuple[str, ...]]:
-    """The market value at ``quarter_end``: the sum of the two series, or None and why."""
-    total = Decimal(0)
-    for name in fred.SERIES:
-        found = series.get(name)
-        if found is None:
-            return Value(None, f"no FRED answer of {name} is stored"), ()
-        observations = found.series.observations
-        observation = found.series.by_quarter_end().get(quarter_end)
-        if observation is None and quarter_end < observations[0].quarter_end:
-            return Value(
-                None, f"the stored {name} starts {observations[0].quarter_end}, after {quarter_end}"
-            ), ()
-        if observation is None:
-            due = z1_due(quarter_end)
-            last = observations[-1].quarter_end
-            return Value(None, f"the stored {name} ends {last}, before {quarter_end} (Z.1 due {due})"), ()
-        if observation.value is None:
-            return Value(None, f"FRED gives no value of {name} for {quarter_end}"), ()
-        total += observation.value
-    if total <= 0:
-        return Value(None, f"the market value of {quarter_end} is not positive"), ()
-    return Value(total), tuple(series[name].source for name in fred.SERIES)
-
-
-def derive_margin(workbook: WorkbookFile | None, series: Mapping[str, SeriesFile]) -> dict[Month, MarginRow]:
-    """Every month of the workbook's row, by month, ascending (see the module docstring)."""
+def derive_margin(workbook: WorkbookFile | None) -> dict[Month, MarginRow]:
+    """Every month of the workbook's row, by month, ascending."""
     if workbook is None:
         return {}
-    balances = workbook.workbook.by_month()
-    values: dict[date, tuple[Value, tuple[str, ...]]] = {}
-    rows: dict[Month, MarginRow] = {}
-    for month, balance in balances.items():
-        earlier = month.shifted(-12)
-        base = balances.get(earlier)
-        if base is None:
-            start = finra.FIRST_MONTH.isoformat()
-            yoy = Value(None, f"no balance of {earlier.isoformat()} (FINRA's table starts {start})")
-        elif base.debit <= 0:
-            yoy = Value(None, f"the debit balance of {earlier.isoformat()} is not positive")
-        else:
-            yoy = Value(growth(balance.debit, base.debit))
-        quarter_end = quarter_end_of(month)
-        if quarter_end not in values:
-            values[quarter_end] = _market_value(quarter_end, series)
-        market_value, sources = values[quarter_end]
-        share = (
-            Value(None, market_value.reason)
-            if market_value.value is None
-            else Value(ratio(balance.debit, market_value.value))
-        )
-        rows[month] = MarginRow(balance, yoy, quarter_end, market_value, share, workbook.source, sources)
-    return rows
+    return {
+        month: MarginRow(balance, workbook.source) for month, balance in workbook.workbook.by_month().items()
+    }
 
 
 def derive_futures(reports: Mapping[date, Stored]) -> dict[date, FuturesRow]:
@@ -270,6 +236,22 @@ def derive_futures(reports: Mapping[date, Stored]) -> dict[date, FuturesRow]:
     }
 
 
+def derive_vix(history: HistoryFile | None) -> dict[date, VixRow]:
+    """Every XNYS session's row from the first of the calendar the domain uses to the newest
+    day of the VIX history, ascending (see the module docstring)."""
+    if history is None:
+        return {}
+    bars = history.history.by_day()
+    sessions = sessions_within(FIRST_SUPPORTED_DATE, history.history.newest)
+    closes = {session: bars[session].close_value for session in sessions if session in bars}
+    return {
+        session: VixRow(
+            session, bars.get(session), session_percentile(sessions, index, closes), history.source
+        )
+        for index, session in enumerate(sessions)
+    }
+
+
 def _text(value: Decimal | int | None) -> str:
     return "" if value is None else str(value)
 
@@ -287,12 +269,7 @@ def margin_text(rows: Iterable[MarginRow]) -> str:
                 balance.debit,
                 balance.free_cash,
                 _text(balance.free_margin),
-                _text(row.yoy.value),
-                row.quarter_end.isoformat(),
-                _text(row.market_value.value),
-                _text(row.ratio.value),
                 row.source,
-                " ".join(row.market_value_sources),
             ]
         )
     return buffer.getvalue()
@@ -325,6 +302,17 @@ def futures_text(rows: Iterable[FuturesRow]) -> str:
                 row.stored.source,
             ]
         )
+    return buffer.getvalue()
+
+
+def vix_text(rows: Iterable[VixRow]) -> str:
+    """The VIX table of ``rows`` in the given order: the close as Cboe wrote it."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(VIX_COLUMNS)
+    for row in rows:
+        close = "" if row.bar is None else row.bar.close
+        writer.writerow([row.session.isoformat(), close, _text(row.percentile.value), row.source])
     return buffer.getvalue()
 
 

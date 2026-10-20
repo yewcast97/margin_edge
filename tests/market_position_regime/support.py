@@ -3,8 +3,8 @@
 Expected instants are written with fixed ``EDT``/``EST`` offsets, independently of
 ``zoneinfo`` and of the code under test. FINRA's workbook is built byte by byte in the layout
 verified live (inline strings, whole numbers, the free credits split from February 2010),
-CFTC rows and FRED answers from small numbers, so every expected value in a test can be
-worked out by hand. No FINRA or FRED answer is recorded; one CFTC answer is (``fixtures/``).
+CFTC rows and Cboe's VIX file from small numbers, so every expected value in a test can be
+worked out by hand. No FINRA or Cboe answer is recorded; one CFTC answer is (``fixtures/``).
 """
 
 import io
@@ -15,13 +15,18 @@ from datetime import date, datetime, timedelta, timezone
 from xml.sax.saxutils import escape
 
 from market_state_research.common.layout import DataLayout
-from market_state_research.market_position_regime.script import cftc, finra, fred
-from market_state_research.market_position_regime.script.periods import Month, observation_date, week_of
+from market_state_research.common.sessions import completed_session
+from market_state_research.market_position_regime.script import cboe, cftc, finra
+from market_state_research.market_position_regime.script.periods import (
+    VIX_SETTLE,
+    Month,
+    sessions_within,
+    week_of,
+)
 from market_state_research.market_position_regime.script.store import raw_directory
 
 EDT = timezone(timedelta(hours=-4), "EDT")
 EST = timezone(timedelta(hours=-5), "EST")
-KEY = "canary0key1canary0key1canary0key"  # 32 lowercase letters and digits: FRED's form
 
 
 def edt(*fields: int) -> datetime:
@@ -33,13 +38,14 @@ def est(*fields: int) -> datetime:
 
 
 # Tuesday evening: FINRA's 2026-09 is due (since 2026-10-15), the CFTC week of 2026-10-13 is
-# due (since Friday 2026-10-16 15:30) and that of 2026-10-20 is not, Z.1's 2026-06-30 is due
-# (since 2026-09-15) and 2026-09-30 is not (2026-12-15).
+# due (since Friday 2026-10-16 15:30) and that of 2026-10-20 is not, and the VIX of the session
+# 2026-10-20 is due (since 16:15). The VIX file is fetched after that, the other sources before.
 NOW = edt(2026, 10, 20, 18, 0)
 FETCHED = edt(2026, 10, 20, 12, 0)
+VIX_FETCHED = edt(2026, 10, 20, 17, 0)
 NEWEST_MONTH = Month(2026, 9)
 NEWEST_WEEK = date(2026, 10, 13)
-NEWEST_QUARTER = date(2026, 6, 30)
+NEWEST_SESSION = date(2026, 10, 20)
 
 # --------------------------------------------------------------------------------------- FINRA
 
@@ -222,80 +228,49 @@ def weeks_back(newest: date, count: int) -> list[date]:
     return [newest - timedelta(weeks=offset) for offset in range(count - 1, -1, -1)]
 
 
-# ---------------------------------------------------------------------------------------- FRED
-
-NONFINANCIAL_VALUE = "80000000"
-FINANCIAL_VALUE = "20000000.0"
+# ---------------------------------------------------------------------------------------- Cboe
 
 
-def fred_response(values: Mapping[date, str]) -> dict[str, object]:
-    """FRED's answer of observations at consecutive quarter ends (``values`` by quarter end)."""
-    observations = [
-        {
-            "realtime_start": "2026-10-20",
-            "realtime_end": "2026-10-20",
-            "date": observation_date(end).isoformat(),
-            "value": values[end],
-        }
-        for end in sorted(values)
+def vix_close(index: int) -> str:
+    """Synthetic closes as Cboe writes them: 10.00 on the first session, rising by 0.01 a session."""
+    cents = 1_000 + index
+    return f"{cents // 100}.{cents % 100:02d}0000"
+
+
+def history_bytes(
+    newest: date = date(2026, 10, 20),
+    close: Callable[[int], str] = vix_close,
+    extra: Mapping[date, str] | None = None,
+) -> bytes:
+    """Cboe's file in its verified layout: a row of 1990-01-02, then one row per XNYS session from
+    2000-01-03 to ``newest``, the ``index``-th session's values all ``close(index)``; ``extra``
+    adds rows of other days (a holiday Cboe calculated the index on) with the close given."""
+    rows = {cboe.FIRST_DAY: "20.000000"}
+    rows |= {session: close(index) for index, session in enumerate(sessions_within(date(2000, 1, 3), newest))}
+    rows |= dict(extra or {})
+    lines = [
+        cboe.HEADER,
+        *(f"{day:%m/%d/%Y},{value},{value},{value},{value}" for day, value in sorted(rows.items())),
     ]
-    return {
-        "realtime_start": "2026-10-20",
-        "realtime_end": "2026-10-20",
-        "observation_start": "1600-01-01",
-        "observation_end": "9999-12-31",
-        "units": "lin",
-        "output_type": 1,
-        "file_type": "json",
-        "order_by": "observation_date",
-        "sort_order": "asc",
-        "count": len(observations),
-        "offset": 0,
-        "limit": 100000,
-        "observations": observations,
-    }
+    return ("\n".join(lines) + "\n").encode("ascii")
 
 
-def quarter_values(
-    newest: date = NEWEST_QUARTER, first: date = date(2019, 12, 31), value: str = "1"
-) -> dict[date, str]:
-    """``value`` at every quarter end from ``first`` to ``newest``."""
-    ends = {}
-    month = Month.of(first)
-    while month.last_day() <= newest:
-        ends[month.last_day()] = value
-        month = month.shifted(3)
-    return ends
-
-
-def series_value(
-    series: str, values: Mapping[date, str], fetched_at: datetime = FETCHED
-) -> dict[str, object]:
-    return {
-        "series": series,
-        "request": fred.observations_url(series),
-        "fetched_at": fetched_at.isoformat(),
-        "response": fred_response(values),
-    }
-
-
-def save_series(
-    layout: DataLayout, series: str, values: Mapping[date, str] | None = None, fetched_at: datetime = FETCHED
-) -> str:
-    """Write a FRED answer raw file as ``fetch`` names it; its name."""
-    if values is None:
-        values = quarter_values(value=NONFINANCIAL_VALUE if series == fred.NONFINANCIAL else FINANCIAL_VALUE)
-    name = fred.raw_name(series, fetched_at)
+def save_history(layout: DataLayout, data: bytes | None = None, fetched_at: datetime = VIX_FETCHED) -> str:
+    """Write a Cboe raw file as ``fetch`` names and compresses it; its name. By default the file
+    holds every session whose VIX was due at ``fetched_at``."""
+    if data is None:
+        data = history_bytes(completed_session(fetched_at, VIX_SETTLE))
+    name = cboe.raw_name(fetched_at)
     directory = raw_directory(layout)
     directory.mkdir(parents=True, exist_ok=True)
-    payload = series_value(series, values, fetched_at)
-    (directory / name).write_bytes(json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode())
+    (directory / name).write_bytes(cboe.dump(data))
     return name
 
 
-def save_all(layout: DataLayout, fetched_at: datetime = FETCHED) -> None:
-    """A complete archive as of ``NOW``: the workbook, three years of weeks and both series."""
+def save_all(
+    layout: DataLayout, fetched_at: datetime = FETCHED, vix_fetched_at: datetime = VIX_FETCHED
+) -> None:
+    """A complete archive as of ``NOW``: the workbook, 220 weeks of reports and the VIX history."""
     save_workbook(layout, fetched_at=fetched_at)
     save_answer(layout, weekly_rows(weeks_back(NEWEST_WEEK, 220)), fetched_at=fetched_at)
-    for series in fred.SERIES:
-        save_series(layout, series, fetched_at=fetched_at)
+    save_history(layout, fetched_at=vix_fetched_at)

@@ -1,21 +1,21 @@
 """Plan, fetch, record and show: one window of dates over the raw files.
 
 The window runs from ``--from`` to ``--to`` (``Window``): its months are those whose last day
-lies in it and its weeks those whose Tuesday does. What its indicators rest on reaches
-further back: each month's year-over-year base twelve months before, each month's quarter
-end, and the 51 weeks before its first week. A document of the window or of what it rests on
+lies in it, its weeks those whose Tuesday does, and its sessions the XNYS sessions in it.
+What its percentiles rest on reaches further back: the 51 weeks before its first week and
+the 251 sessions before its first session. A document of the window or of what it rests on
 is due from the time ``periods`` gives; one that is due and not stored is lacking.
 
 ``plan`` (read-only) says, per source, what is lacking, which raw files are invalid, whether
-the two tables and the newest report of the window are current, and the action: ``fetch``
-while a document is lacking (or with ``refresh``), ``record`` when the tables or the report
-are not current, ``reuse`` otherwise. ``fetch`` requests from each source what is lacking:
-FINRA's workbook whole, the CFTC's rows from the first lacking week to the last, each FRED
-series whole. It writes an answer only when it holds something ``raw/`` does not (``new``),
-compares it otherwise (``verified``), and names every due document the source has not
-published yet (``pending``); a source that fails does not stop the others. ``record``
-rewrites the two tables from ``raw/`` and writes a new report (the page and its Markdown
-twin) each time it runs, naming whatever is lacking in it. ``show`` prints the twin.
+the three tables and the newest report of the window are current, and the action:
+``fetch`` while a document is lacking (or with ``refresh``), ``record`` when the tables or
+the report are not current, ``reuse`` otherwise. ``fetch`` requests from each source what is
+lacking: FINRA's workbook whole, the CFTC's rows from the first lacking week to the last,
+Cboe's VIX history whole. It writes an answer only when it holds something ``raw/`` does
+not (``new``), compares it otherwise (``verified``), and names every due document the source
+has not published yet (``pending``); a source that fails does not stop the others.
+``record`` rewrites the three tables from ``raw/`` and writes a new report (the page and its
+Markdown twin) each time it runs, naming whatever is lacking in it. ``show`` prints the twin.
 
 A report is fresh while its twin and its page are exactly what ``record`` would write now,
 at the time in the report's name. Reports are never overwritten; every time printed is New
@@ -36,42 +36,47 @@ from market_state_research.common.layout import (
     stamped,
     write_file,
 )
+from market_state_research.common.sessions import FIRST_SUPPORTED_DATE
 from market_state_research.common.times import et_display, et_isoformat, to_eastern
 
-from . import cftc, finra, fred
-from .chart import ChartSpec, MonthEntry, WeekEntry, load_library, render_html, render_markdown
+from . import cboe, cftc, finra
+from .chart import ChartSpec, MonthEntry, SessionEntry, WeekEntry, load_library, render_html, render_markdown
 from .client import Client, SourceError
-from .indicators import WEEKS
+from .indicators import SESSIONS, WEEKS
 from .periods import (
     Month,
     cftc_release,
     finra_due,
     months_ending_within,
-    quarter_end_of,
+    sessions_within,
+    vix_due,
+    vix_is_due,
     week_days,
     weeks_ending,
     weeks_within,
-    z1_due,
 )
 from .store import (
     FIRST_WEEK,
     FOLDER,
     FuturesRow,
+    HistoryFile,
     InvalidFile,
     MarginRow,
-    SeriesFile,
     Stored,
+    VixRow,
     WorkbookFile,
     csv_paths,
     derive_futures,
     derive_margin,
+    derive_vix,
     futures_text,
     margin_text,
     raw_directory,
     read_raw,
+    select_history,
     select_reports,
-    select_series,
     select_workbook,
+    vix_text,
     write_table,
 )
 
@@ -99,20 +104,24 @@ class Window:
         return weeks_within(self.start, self.end)
 
     @property
-    def base_months(self) -> tuple[Month, ...]:
-        """The months the window's growths rest on: twelve months before each."""
-        return tuple(month.shifted(-12) for month in self.months)
-
-    @property
-    def quarter_ends(self) -> tuple[date, ...]:
-        """The quarter ends the window's ratios rest on, ascending."""
-        return tuple(sorted({quarter_end_of(month) for month in self.months}))
+    def sessions(self) -> tuple[date, ...]:
+        return sessions_within(self.start, self.end)
 
     @property
     def span_weeks(self) -> tuple[date, ...]:
         """The window's weeks and the ``WEEKS - 1`` before the first, which its percentiles rest on."""
         found = self.weeks
         return weeks_ending(found[-1], len(found) + WEEKS - 1) if found else ()
+
+    @property
+    def span_sessions(self) -> tuple[date, ...]:
+        """The window's sessions and the ``SESSIONS - 1`` before the first (as many as the
+        calendar the domain uses holds), which their percentiles rest on."""
+        found = self.sessions
+        if not found:
+            return ()
+        earlier = sessions_within(FIRST_SUPPORTED_DATE, found[0])[:-1]
+        return earlier[max(0, len(earlier) - (SESSIONS - 1)) :] + found
 
 
 def default_window(today: date) -> Window:
@@ -144,20 +153,22 @@ class State:
     window: Window
     now: datetime
     workbook: WorkbookFile | None
-    series: dict[str, SeriesFile]
     reports: dict[date, Stored]
+    history: HistoryFile | None
     invalid: tuple[InvalidFile, ...]
     margin: dict[Month, MarginRow]
     futures: dict[date, FuturesRow]
-    tables: tuple[Path, Path]
+    vix: dict[date, VixRow]
+    tables: tuple[Path, Path, Path]
 
     # ------------------------------------------------------------------ what is due and lacking
 
     def due_months(self, at: datetime) -> tuple[Month, ...]:
-        """The months the window and its growths need that are due at ``at``, ascending."""
-        needed = sorted(set(self.window.months) | set(self.window.base_months))
+        """The months of the window that are due at ``at``, ascending."""
         return tuple(
-            month for month in needed if month >= finra.FIRST_MONTH and finra_due(month) <= at.date()
+            month
+            for month in self.window.months
+            if month >= finra.FIRST_MONTH and finra_due(month) <= at.date()
         )
 
     def lacking_months(self, at: datetime | None = None) -> tuple[Month, ...]:
@@ -175,36 +186,38 @@ class State:
     def lacking_weeks(self, at: datetime | None = None) -> tuple[date, ...]:
         return tuple(week for week in self.due_weeks(at or self.now) if week not in self.reports)
 
-    def due_quarters(self, at: datetime) -> tuple[date, ...]:
-        """The quarter ends the window's ratios need that are due at ``at``, ascending."""
-        return tuple(end for end in self.window.quarter_ends if z1_due(end) <= at.date())
+    def due_sessions(self, at: datetime) -> tuple[date, ...]:
+        """The sessions the window and its percentiles need that are due at ``at``, ascending."""
+        return tuple(session for session in self.window.span_sessions if vix_is_due(session, at))
 
-    def _held(self, series: str) -> set[date]:
-        """The quarter ends the stored answer of ``series`` holds."""
-        found = self.series.get(series)
-        return set() if found is None else set(found.series.by_quarter_end())
-
-    def lacking_quarters(self, series: str, at: datetime | None = None) -> tuple[date, ...]:
-        held = self._held(series)
-        return tuple(end for end in self.due_quarters(at or self.now) if end not in held)
+    def lacking_sessions(self, at: datetime | None = None) -> tuple[date, ...]:
+        """The due sessions after the VIX history's newest day: Cboe's file holds every day it
+        published, so an earlier session without a close is a gap, never lacking."""
+        newest_day = None if self.history is None else self.history.history.newest
+        return tuple(
+            session
+            for session in self.due_sessions(at or self.now)
+            if newest_day is None or session > newest_day
+        )
 
     @property
     def lacking(self) -> bool:
-        return bool(
-            self.lacking_months()
-            or self.lacking_weeks()
-            or any(self.lacking_quarters(series) for series in fred.SERIES)
-        )
+        return bool(self.lacking_months() or self.lacking_weeks() or self.lacking_sessions())
 
     # ------------------------------------------------------------------ the tables and the report
 
+    def table_texts(self) -> tuple[str, str, str]:
+        """What ``record`` writes to the three tables."""
+        return (
+            margin_text(self.margin.values()),
+            futures_text(self.futures.values()),
+            vix_text(self.vix.values()),
+        )
+
     @property
     def tables_current(self) -> bool:
-        """Whether both tables hold exactly what ``record`` would write."""
-        margin, futures = self.tables
-        return _holds(margin, margin_text(self.margin.values())) and _holds(
-            futures, futures_text(self.futures.values())
-        )
+        """Whether the three tables hold exactly what ``record`` would write."""
+        return all(_holds(path, text) for path, text in zip(self.tables, self.table_texts(), strict=True))
 
     def action(self, report: Report) -> str:
         if self.lacking:
@@ -224,41 +237,49 @@ class State:
         if late:
             listed = ", ".join(f"{week} (due {et_display(cftc_release(week))})" for week in late)
             items.append(f"the CFTC reports of the weeks of {listed}")
-        quarters = [
-            end
-            for end in self.window.quarter_ends
-            if z1_due(end) > at.date() and any(end not in self._held(name) for name in fred.SERIES)
+        sessions = [
+            session
+            for session in self.window.sessions
+            if not vix_is_due(session, at) and session not in self.vix
         ]
-        if quarters:
-            listed = ", ".join(f"{end} (due {z1_due(end)})" for end in quarters)
-            items.append(f"the Z.1 market values of {listed}")
+        if sessions:
+            listed = ", ".join(f"{session} (due {et_display(vix_due(session))})" for session in sessions)
+            items.append(f"Cboe's VIX of {listed}")
         return tuple(items)
 
     def spec(self, layout: DataLayout, at: datetime) -> ChartSpec:
-        """The report of the window as rendered at ``at``: the months and weeks stored or due then."""
+        """The report of the window as rendered at ``at``: the months, weeks and sessions stored
+        or due then."""
         due_months = set(self.due_months(at))
         due_weeks = set(self.due_weeks(at))
+        due_sessions = set(self.due_sessions(at))
         months = tuple(
             MonthEntry(month, self.margin.get(month))
             for month in self.window.months
             if month in self.margin or month in due_months
         )
-        entries = tuple(
+        weeks = tuple(
             WeekEntry(week, self.futures.get(week))
             for week in self.window.weeks
             if week in self.futures or week in due_weeks
         )
-        margin, futures = self.tables
+        sessions = tuple(
+            SessionEntry(session, self.vix.get(session))
+            for session in self.window.sessions
+            if session in self.vix or session in due_sessions
+        )
+        margin, futures, vix = (path.relative_to(layout.root).as_posix() for path in self.tables)
         return ChartSpec(
             start=self.window.start,
             end=self.window.end,
             generated_at=at,
             months=months,
-            weeks=entries,
+            weeks=weeks,
+            sessions=sessions,
             upcoming=self.upcoming(at),
             workbook=None if self.workbook is None else self.workbook.source,
-            series=tuple(self.series[name].source for name in fred.SERIES if name in self.series),
-            csv=(margin.relative_to(layout.root).as_posix(), futures.relative_to(layout.root).as_posix()),
+            history=None if self.history is None else self.history.source,
+            csv=(margin, futures, vix),
         )
 
     def refuse_invalid(self) -> None:
@@ -283,17 +304,18 @@ def resolve(layout: DataLayout, window: Window, now: datetime) -> State:
     now = to_eastern(now, "now")
     raw = read_raw(layout, now)
     workbook = select_workbook(raw.workbooks)
-    series = select_series(raw.series)
     reports = select_reports(raw.answers)
+    history = select_history(raw.histories)
     return State(
         window=window,
         now=now,
         workbook=workbook,
-        series=series,
         reports=reports,
+        history=history,
         invalid=raw.invalid,
-        margin=derive_margin(workbook, series),
+        margin=derive_margin(workbook),
         futures=derive_futures(reports),
+        vix=derive_vix(history),
         tables=csv_paths(layout),
     )
 
@@ -308,7 +330,7 @@ def _report(layout: DataLayout, state: State, now: datetime) -> Report:
     if made is None:
         return stale
     spec = state.spec(layout, made)
-    if spec.months_fetched + spec.weeks_fetched == 0:
+    if spec.fetched == 0:
         return stale
     if not (
         _holds(path.with_suffix(".md"), render_markdown(spec))
@@ -328,27 +350,29 @@ def _span(items: Sequence[date] | Sequence[Month]) -> dict[str, Any]:
 
 
 def _window(window: Window) -> dict[str, Any]:
-    span = window.span_weeks
     starts = [window.start]
-    if window.base_months:
-        starts.append(window.base_months[0].first_day())
-    if span:
-        starts.append(week_days(span[0])[0])
+    weeks, sessions = window.span_weeks, window.span_sessions
+    if weeks:
+        starts.append(week_days(weeks[0])[0])
+    if sessions:
+        starts.append(sessions[0])
     return {
         "from": window.start.isoformat(),
         "to": window.end.isoformat(),
         "months": len(window.months),
         "weeks": len(window.weeks),
+        "sessions": len(window.sessions),
         "span_start": min(starts).isoformat(),
     }
 
 
 def _sources(layout: DataLayout, state: State) -> dict[str, Any]:
-    workbook = state.workbook
+    workbook, history = state.workbook, state.history
     lacking_months = state.lacking_months()
     lacking_weeks = state.lacking_weeks()
+    lacking_sessions = state.lacking_sessions()
     newest_week = max(state.reports, default=None)
-    sources: dict[str, Any] = {
+    return {
         "finra": {
             "status": "lacking" if lacking_months else "current",
             "path": None if workbook is None else str(raw_directory(layout) / workbook.source),
@@ -361,17 +385,13 @@ def _sources(layout: DataLayout, state: State) -> dict[str, Any]:
             "newest": None if newest_week is None else state.reports[newest_week].report.as_of.isoformat(),
             "lacking": _span(lacking_weeks),
         },
+        "cboe": {
+            "status": "lacking" if lacking_sessions else "current",
+            "path": None if history is None else str(raw_directory(layout) / history.source),
+            "newest": None if history is None else history.history.newest.isoformat(),
+            "lacking": _span(lacking_sessions),
+        },
     }
-    for name in fred.SERIES:
-        found = state.series.get(name)
-        lacking = state.lacking_quarters(name)
-        sources[name] = {
-            "status": "lacking" if lacking else "current",
-            "path": None if found is None else str(raw_directory(layout) / found.source),
-            "newest": None if found is None else found.series.observations[-1].quarter_end.isoformat(),
-            "lacking": _span(lacking),
-        }
-    return sources
 
 
 def _gaps(spec: ChartSpec) -> list[dict[str, str]]:
@@ -383,10 +403,9 @@ def _invalid(state: State) -> list[dict[str, str]]:
 
 
 def _tables(state: State) -> dict[str, str | None]:
-    margin, futures = state.tables
+    names = ("margin_debt", "index_futures", "vix")
     return {
-        "margin_debt": str(margin) if margin.is_file() else None,
-        "index_futures": str(futures) if futures.is_file() else None,
+        name: str(path) if path.is_file() else None for name, path in zip(names, state.tables, strict=True)
     }
 
 
@@ -426,11 +445,15 @@ def _outcome(status: str, path: Path | None = None, reason: str | None = None) -
     return {"status": status, "path": None if path is None else str(path), "reason": reason}
 
 
+def _failed(url: str, error: SourceError | ValueError) -> dict[str, Any]:
+    return _outcome("failed", reason=f"{url}: {error}" if isinstance(error, ValueError) else str(error))
+
+
 def _fetch_finra(client: Client, layout: DataLayout, state: State, refresh: bool) -> dict[str, Any]:
+    stored = state.workbook
+    stored_path = None if stored is None else raw_directory(layout) / stored.source
     if not (refresh or state.lacking_months()):
-        result = _outcome(
-            "reused", None if state.workbook is None else raw_directory(layout) / state.workbook.source
-        )
+        result = _outcome("reused", stored_path)
         result["pending"] = _span(())
         return result
     try:
@@ -438,16 +461,11 @@ def _fetch_finra(client: Client, layout: DataLayout, state: State, refresh: bool
         fetched_at = client.now().replace(microsecond=0)
         workbook = finra.check_workbook(data, fetched_at, fetched_at)
     except (SourceError, ValueError) as error:
-        result = _outcome(
-            "failed", reason=f"{finra.URL}: {error}" if isinstance(error, ValueError) else str(error)
-        )
+        result = _failed(finra.URL, error)
         result["pending"] = _span(state.lacking_months())
         return result
-    stored = None if state.workbook is None else state.workbook.workbook.balances
-    if stored == workbook.balances:
-        result = _outcome(
-            "verified", raw_directory(layout) / state.workbook.source if state.workbook else None
-        )
+    if stored is not None and stored.workbook.balances == workbook.balances:
+        result = _outcome("verified", stored_path)
     else:
         names = [finra.raw_name(fetched_at, "" if n == 0 else f"_{n}") for n in range(finra.MAX_SUFFIX + 1)]
         result = _outcome("new", _write_raw(raw_directory(layout), names, data))
@@ -478,7 +496,7 @@ def _fetch_cftc(client: Client, layout: DataLayout, state: State, refresh: bool)
             }
             answer = cftc.check_answer(value, None, fetched_at)
     except (SourceError, ValueError) as error:
-        result = _outcome("failed", reason=f"{url}: {error}" if isinstance(error, ValueError) else str(error))
+        result = _failed(url, error)
         result["pending"] = _span(state.lacking_weeks())
         return result
     received = set() if answer is None else {report.week for report in answer.reports}
@@ -500,34 +518,30 @@ def _fetch_cftc(client: Client, layout: DataLayout, state: State, refresh: bool)
     return result
 
 
-def _fetch_series(
-    client: Client, layout: DataLayout, state: State, name: str, refresh: bool
-) -> dict[str, Any]:
-    stored = state.series.get(name)
+def _fetch_cboe(client: Client, layout: DataLayout, state: State, refresh: bool) -> dict[str, Any]:
+    stored = state.history
     stored_path = None if stored is None else raw_directory(layout) / stored.source
-    if not (refresh or state.lacking_quarters(name)):
+    if not (refresh or state.lacking_sessions()):
         result = _outcome("reused", stored_path)
         result["pending"] = _span(())
         return result
-    url = fred.observations_url(name)
     try:
-        response = fred.parse_response(client.get(url))
+        data = client.get(cboe.URL)
         fetched_at = client.now().replace(microsecond=0)
-        value = {"series": name, "request": url, "fetched_at": et_isoformat(fetched_at), "response": response}
-        item = fred.check_answer(value, None, fetched_at)
+        history = cboe.check_history(data, fetched_at, fetched_at)
     except (SourceError, ValueError) as error:
-        result = _outcome("failed", reason=f"{url}: {error}" if isinstance(error, ValueError) else str(error))
-        result["pending"] = _span(state.lacking_quarters(name))
+        result = _failed(cboe.URL, error)
+        result["pending"] = _span(state.lacking_sessions())
         return result
-    if stored is not None and stored.series.content() == item.content():
+    if stored is not None and stored.history.bars == history.bars:
         result = _outcome("verified", stored_path)
     else:
-        names = [
-            fred.raw_name(name, fetched_at, "" if n == 0 else f"_{n}") for n in range(fred.MAX_SUFFIX + 1)
-        ]
-        result = _outcome("new", _write_raw(raw_directory(layout), names, fred.dump(item)))
-    held = set(item.by_quarter_end())
-    result["pending"] = _span(tuple(end for end in state.due_quarters(state.now) if end not in held))
+        names = [cboe.raw_name(fetched_at, "" if n == 0 else f"_{n}") for n in range(cboe.MAX_SUFFIX + 1)]
+        result = _outcome("new", _write_raw(raw_directory(layout), names, cboe.dump(data)))
+    newest_day = history.newest
+    result["pending"] = _span(
+        tuple(session for session in state.due_sessions(state.now) if session > newest_day)
+    )
     return result
 
 
@@ -538,17 +552,15 @@ def fetch(
     what is new (see the module docstring)."""
     now = to_eastern(now, "now")
     state = resolve(layout, window, now)
-    sources: dict[str, Any] = {
+    sources = {
         "finra": _fetch_finra(client, layout, state, refresh),
         "cftc": _fetch_cftc(client, layout, state, refresh),
+        "cboe": _fetch_cboe(client, layout, state, refresh),
     }
-    for name in fred.SERIES:
-        sources[name] = _fetch_series(client, layout, state, name, refresh)
     return {
         "generated_at": et_isoformat(now),
         "window": _window(window),
         "refresh": refresh,
-        "fred_key": "set",
         "requests": client.requests,
         "sources": sources,
         "invalid_files": _invalid(state),
@@ -559,15 +571,7 @@ def fetch(
 
 
 def _month(row: MarginRow) -> dict[str, Any]:
-    balance = row.balance
-    return {
-        "month": balance.month.isoformat(),
-        "debit_balances_musd": balance.debit,
-        "yoy_pct": None if row.yoy.value is None else str(row.yoy.value),
-        "market_value_quarter_end": row.quarter_end.isoformat(),
-        "market_value_musd": None if row.market_value.value is None else str(row.market_value.value),
-        "ratio_pct": None if row.ratio.value is None else str(row.ratio.value),
-    }
+    return {"month": row.balance.month.isoformat(), "debit_balances_musd": row.balance.debit}
 
 
 def _week(row: FuturesRow) -> dict[str, Any]:
@@ -583,48 +587,56 @@ def _week(row: FuturesRow) -> dict[str, Any]:
     }
 
 
-def record(layout: DataLayout, window: Window, now: datetime) -> dict[str, Any]:
-    """Rewrite the two tables from ``raw/`` and write a new report of the window.
+def _session(row: VixRow) -> dict[str, Any]:
+    return {
+        "date": row.session.isoformat(),
+        "close": None if row.bar is None else row.bar.close,
+        "close_252s_percentile": None if row.percentile.value is None else str(row.percentile.value),
+    }
 
-    Every raw file must be valid and the window must hold a fetched month or week. The report
-    is rendered in memory before any write, and a report of the same second refuses the run.
+
+def record(layout: DataLayout, window: Window, now: datetime) -> dict[str, Any]:
+    """Rewrite the three tables from ``raw/`` and write a new report of the window.
+
+    Every raw file must be valid and the window must hold a fetched month, week or session.
+    The report is rendered in memory before any write, and a report of the same second
+    refuses the run.
     """
     now = to_eastern(now, "now")
     state = resolve(layout, window, now)
     state.refuse_invalid()
     spec = state.spec(layout, now.replace(microsecond=0))  # the instant its name gives
-    if spec.months_fetched + spec.weeks_fetched == 0:
+    if spec.fetched == 0:
         raise ValueError(
-            f"no month or week of the window {window.start} to {window.end} is fetched; run fetch first"
+            f"no month, week or session of the window {window.start} to {window.end} is fetched; "
+            "run fetch first"
         )
     stem, directory = _report_stem(window), layout.reports(FOLDER)
     twin, page = directory / stamped(stem, now, ".md"), directory / stamped(stem, now, ".html")
     # The twin first, so a page's presence (what freshness reads) implies its twin's.
     documents = [(twin, render_markdown(spec)), (page, render_html(spec, load_library()))]
-    margin, futures = state.tables
+    names = ("margin_debt", "index_futures", "vix")
+    counts = (len(state.margin), len(state.futures), len(state.vix))
     written = {
-        "margin_debt": {
-            "path": str(margin),
-            "rows": len(state.margin),
-            "written": write_table(margin, margin_text(state.margin.values())),
-        },
-        "index_futures": {
-            "path": str(futures),
-            "rows": len(state.futures),
-            "written": write_table(futures, futures_text(state.futures.values())),
-        },
+        name: {"path": str(path), "rows": rows, "written": write_table(path, text)}
+        for name, path, rows, text in zip(names, state.tables, counts, state.table_texts(), strict=True)
     }
     for path, document in documents:
         write_file(path, document)
+    stored_sessions = [entry.row for entry in spec.sessions if entry.row is not None]
     return {
         "generated_at": et_isoformat(now),
         "window": _window(window),
         "months": [_month(entry.row) for entry in spec.months if entry.row is not None],
         "weeks": [_week(entry.row) for entry in spec.weeks if entry.row is not None],
+        "vix": {
+            "sessions": len(stored_sessions),
+            "newest": _session(stored_sessions[-1]) if stored_sessions else None,
+        },
         "lacking": {
             "months": [month.isoformat() for month in spec.missing_months],
             "weeks": [week.isoformat() for week in spec.missing_weeks],
-            **{name: [end.isoformat() for end in state.lacking_quarters(name)] for name in fred.SERIES},
+            "sessions": [session.isoformat() for session in spec.missing_sessions],
         },
         "not_due": list(spec.upcoming),
         "gaps": _gaps(spec),
@@ -639,13 +651,13 @@ def show(layout: DataLayout, window: Window, now: datetime) -> str:
     state = resolve(layout, window, now)
     state.refuse_invalid()
     report = _report(layout, state, now)
-    margin, futures = state.tables
-    tables = " and ".join(str(path) for path in (margin, futures) if path.is_file()) or "none"
+    tables = ", ".join(str(path) for path in state.tables if path.is_file()) or "none"
     status = (
         f"Action: {state.action(report)}. Tables: {tables}. "
         f"Report: {report.path or 'none'} ({report.status})."
     )
     spec = state.spec(layout, now)
-    if spec.months_fetched + spec.weeks_fetched == 0:
-        return f"{status}\n\nNo month or week of the window {window.start} to {window.end} is fetched.\n"
+    if spec.fetched == 0:
+        empty = f"No month, week or session of the window {window.start} to {window.end} is fetched."
+        return f"{status}\n\n{empty}\n"
     return f"{status}\n\n{render_markdown(spec)}"

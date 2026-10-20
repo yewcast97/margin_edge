@@ -30,6 +30,7 @@ from market_state_research.common.sessions import (
     session_close,
     session_open,
     session_window,
+    sessions_between,
 )
 
 from .support import (
@@ -535,6 +536,32 @@ def test_neighbouring_sessions_stop_at_the_ends_of_the_supported_calendar():
     with pytest.raises(ValueError) as caught:
         previous_session(FIRST_SESSION)
     assert str(caught.value) == "no XNYS session before 2000-01-03 in the supported calendar range"
+
+
+# --- sessions_between ---------------------------------------------------------------------------
+
+
+def test_the_sessions_between_two_days_follow_the_published_schedule():
+    found = sessions_between(SCHEDULE_START, SCHEDULE_END)
+    assert type(found) is tuple and all(type(day) is date for day in found)
+    assert list(found) == published_sessions()
+    assert sessions_between(date(2026, 9, 4), date(2026, 9, 8)) == (date(2026, 9, 4), date(2026, 9, 8))
+    assert sessions_between(date(2026, 9, 5), date(2026, 9, 7)) == ()  # a weekend and Labor Day
+    assert sessions_between(END, END) == (END,)
+    assert sessions_between(MONDAY, END) == ()  # the end before the start
+
+
+def test_a_span_beyond_the_supported_calendar_holds_only_the_sessions_inside_it():
+    assert sessions_between(date(1997, 1, 1), date(2000, 1, 5)) == (
+        FIRST_SESSION,
+        date(2000, 1, 4),
+        date(2000, 1, 5),
+    )
+    assert sessions_between(date(2099, 12, 30), date(2100, 1, 31)) == (date(2099, 12, 30), LAST_SESSION)
+    assert sessions_between(date(1990, 1, 2), date(1999, 12, 31)) == ()
+    whole = sessions_between(FIRST_SUPPORTED_DATE, LAST_SUPPORTED_DATE)
+    assert (whole[0], whole[-1]) == (FIRST_SESSION, LAST_SESSION)
+    assert whole == session_window(LAST_SESSION, len(whole))
 
 
 # --- completed_session --------------------------------------------------------------------------

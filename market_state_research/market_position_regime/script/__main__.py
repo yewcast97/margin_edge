@@ -1,35 +1,31 @@
 """Command line for the market position regime pipeline; see the domain's PROCEDURE.md.
 
-Two charts of the US equity market's positioning over a window of New York dates: FINRA's
-monthly margin debt, as its year-over-year growth and its ratio to the market value of US
-corporate equities (the Federal Reserve's Z.1, through FRED), and the CFTC's weekly S&P 500
-futures positions, as the percentiles over 52 weeks of asset managers' net long and
-leveraged funds' net short positions. Every command takes the window as --from and --to,
-dates written YYYY-MM-DD (both included): --to defaults to today and must not be after it,
-and --from defaults to the same day three years before --to and must not be after --to; a
-refused window is one MARKET_POSITION_REGIME: line before any work.
+Three charts of the US equity market's positioning over a window of New York dates: FINRA's
+monthly margin debt; the CFTC's weekly S&P 500 futures positions, as the percentiles over 52
+weeks of asset managers' net long and leveraged funds' net short positions; and Cboe's daily
+VIX, its close as a percentile over 252 XNYS sessions. Every command takes the window as
+--from and --to, dates written YYYY-MM-DD (both included): --to defaults to today and must
+not be after it, and --from defaults to the same day three years before --to and must not be
+after --to; a refused window is one MARKET_POSITION_REGIME: line before any work.
 
-fetch is the one command that uses the network. It reads FINRA's workbook and the CFTC's
-public API without a key, and FRED's API under FRED_API (from the environment or the
-ignored repository-root .env), which no other command reads, which is checked before any
-request and never printed. It writes what is new to data/raw/market/. plan, record and show
-work offline: they plan the next step, record the raw files into the two formatted tables
-and a report, and show the window. The clock is read in New York time, and every time
-printed is New York time.
+fetch is the one command that uses the network. It reads FINRA's workbook, the CFTC's public
+API and Cboe's VIX history, none of which needs a key, so no command reads a setting. It
+writes what is new to data/raw/market/. plan, record and show work offline: they plan the
+next step, record the raw files into the three formatted tables and a report, and show the
+window. The clock is read in New York time, and every time printed is New York time.
 """
 
 import argparse
 import json
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from datetime import MINYEAR, date, datetime
 
 from market_state_research.common.cli import Parser, calendar_date, directory_path, fail
-from market_state_research.common.env import setting
 from market_state_research.common.layout import DataLayout
 from market_state_research.common.times import NEW_YORK, to_eastern
 
-from .client import API_KEY_SETTING, Client, SourceError
+from .client import Client, SourceError
 from .store import DATA_DIRECTORY
 from .workflow import DEFAULT_YEARS, Window, default_window, fetch, plan, record, show
 
@@ -84,15 +80,14 @@ def build_parser() -> argparse.ArgumentParser:
     command(
         "fetch",
         [common, refresh],
-        "write what the window lacks from FINRA, the CFTC and FRED to raw/market/ (uses the network; "
-        f"needs {API_KEY_SETTING})",
+        "write what the window lacks from FINRA, the CFTC and Cboe to raw/market/ (uses the network)",
     )
     command(
         "plan",
         [common, refresh],
         "list what each source lacks, the tables, the report and the action (read-only)",
     )
-    command("record", [common], "rewrite the two tables from raw/ and write a new report of the window")
+    command("record", [common], "rewrite the three tables from raw/ and write a new report of the window")
     command("show", [common], "print one status line and the window as Markdown (read-only)")
     return parser
 
@@ -114,21 +109,20 @@ def main(
     argv: Sequence[str] | None = None,
     now: datetime | None = None,
     client: Client | None = None,
-    settings: Callable[[str], str | None] = setting,
 ) -> int:
     args = build_parser().parse_args(argv)
     try:
         moment = to_eastern(now if now is not None else datetime.now(NEW_YORK), "now")
-        # The window is checked before any work: no directory, setting or request.
+        # The window is checked before any work: no directory or request.
         window = _window(args.window_from, args.window_to, moment.date())
         data_dir = args.data_dir.absolute()
         if data_dir.exists() and not data_dir.is_dir():
             return fail(LABEL, f"{data_dir} is not a directory")
         layout = DataLayout(data_dir)
         if args.command == "fetch":
-            # The key is checked here, before any raw file is read or request sent; it is never printed.
-            sources = client if client is not None else Client(settings(API_KEY_SETTING))
-            output = fetch(layout, window, moment, sources, refresh=args.refresh)
+            output = fetch(
+                layout, window, moment, client if client is not None else Client(), refresh=args.refresh
+            )
         elif args.command == "plan":
             output = plan(layout, window, moment, refresh=args.refresh)
         elif args.command == "record":

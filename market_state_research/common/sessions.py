@@ -1,5 +1,5 @@
 """XNYS cash sessions: opens, closes, completed-session resolution, closed periods,
-neighbours and windows.
+neighbours, spans and windows.
 
 Trading days, holidays, early closes and daylight-saving transitions come from the
 ``exchange-calendars`` XNYS calendar. Freshness follows exchange closes, never local
@@ -115,6 +115,17 @@ def session_window(end: date, lookback: int) -> tuple[date, ...]:
             f"a {lookback}-session window ending {end} starts before the supported calendar range"
         )
     return tuple(session.date() for session in sessions)
+
+
+def sessions_between(start: date, end: date) -> tuple[date, ...]:
+    """The XNYS sessions from ``start`` to ``end``, both included, ascending.
+
+    Only the sessions of the supported calendar range are known: a span reaching beyond it
+    holds the sessions inside it, and one wholly outside it, or ending before it starts,
+    holds none.
+    """
+    sessions = _sessions()
+    return sessions[bisect_left(sessions, start) : bisect_right(sessions, end)]
 
 
 def next_session(day: date) -> date:
