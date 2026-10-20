@@ -1,17 +1,19 @@
-"""The report: payload, HTML and Markdown, the pinned library and determinism."""
+"""The report: payload, HTML and Markdown, the domain's page template and determinism.
 
-import hashlib
+The vendored library's pin and the page helpers are tested with ``common.chart``.
+"""
+
 import json
 import re
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
 from market_state_research.common.sessions import session_window
 from market_state_research.stock_iv_regime.script import chart
 from market_state_research.stock_iv_regime.script.chart import (
-    LIBRARY_PATH,
-    LIBRARY_SHA256,
+    TEMPLATE_PATH,
     ChartSpec,
     load_library,
     payload,
@@ -40,10 +42,11 @@ PRICES = "prices_2026-10-16_20261017T100000EDT.json.gz"
 CONSTANT_CALL = "the return or the 14-DTE call IV change is constant over the 15 sessions to 2026-10-14"
 
 
-def test_the_library_is_pinned():
-    assert hashlib.sha256(LIBRARY_PATH.read_bytes()).hexdigest() == LIBRARY_SHA256
+def test_the_library_comes_with_this_domains_template():
     library = load_library()
     assert library.version == "5.2.1" and "TradingView" in library.notice
+    assert library.template == TEMPLATE_PATH.read_text(encoding="utf-8")
+    assert Path(chart.__file__).resolve().parent / "templates" / "chart.html" == TEMPLATE_PATH
 
 
 def test_payload(state, layout):
@@ -145,14 +148,6 @@ def test_spec_checks(state, layout):
         ChartSpec(spec.ticker, spec.as_of, spec.lookback, spec.window[1:], spec.rows, NOW, spec.csv)
     with pytest.raises(ValueError, match="unique, ascending"):
         ChartSpec(spec.ticker, spec.as_of, spec.lookback, spec.window, spec.rows[::-1], NOW, spec.csv)
-
-
-def test_a_tampered_library_is_refused(monkeypatch, tmp_path):
-    copy = tmp_path / "lightweight-charts.js"
-    copy.write_bytes(LIBRARY_PATH.read_bytes() + b"\n")
-    monkeypatch.setattr(chart, "LIBRARY_PATH", copy)
-    with pytest.raises(ValueError, match="differs from the pinned"):
-        load_library()
 
 
 def test_gaps_are_listed_per_series(layout):

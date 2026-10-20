@@ -25,13 +25,13 @@ market_state_research/
 ├── AGENTS.md
 ├── TODO.md             (the maintainer's backlog, ignored by Git)
 ├── common/             shared Python package, bound to no domain
+│   └── vendor/             (the chart library every report page inlines)
 ├── <domain>/           a scripted domain: stock_iv_regime, fundamentals
 │   ├── AGENTS.md
 │   ├── PROCEDURE.md
 │   ├── watchlist.json      (the bot's: the stock tickers, ignored by Git)
 │   ├── script/
-│   │   ├── templates/      (optional)
-│   │   └── vendor/         (optional)
+│   │   └── templates/      (optional)
 │   └── data/
 │       ├── .gitignore
 │       ├── raw/{TICKER}/
@@ -53,23 +53,23 @@ market_state_research/
 | --- | --- |
 | `AGENTS.md` | Shared principles of the research, the domain folder conventions and the data layout. |
 | `TODO.md` | The maintainer's research scope and backlog, ignored by Git. |
-| `common/` | Python shared by every domain: New York time and file-name tokens (`times`), XNYS sessions and market status for the domains that work by session (`sessions`), the three sections of a domain's `data/` with their one write rule (`layout`), ticker and one-line message text (`text`), the one-line `LABEL: ...` command-line conventions, with each domain's own label (`cli`), the reader of a ticker domain's watchlist (`watchlist`), and the personal settings of the ignored repository-root `.env` (`env`). It knows no source, no raw format and no domain's data directory, and sends no network request. |
+| `common/` | Python shared by every domain: New York time and file-name tokens (`times`), XNYS sessions and market status for the domains that work by session (`sessions`), the three sections of a domain's `data/` with their one write rule (`layout`), ticker and one-line message text (`text`), the one-line `LABEL: ...` command-line conventions, with each domain's own label (`cli`), the reader of a ticker domain's watchlist (`watchlist`), the personal settings of the ignored repository-root `.env` (`env`), and the chart library with the page text every report page shares (`chart`, over `vendor/`). It knows no source, no raw format and no domain's data directory, and sends no network request. |
+| `common/vendor/` | Third-party files copied unmodified from a pinned release, with their licence, notice and provenance: TradingView Lightweight Charts, which `common.chart` verifies and every domain's chart inlines. |
 | `<domain>/AGENTS.md` | The domain's guidance: first the aim, the outputs and what they mean, the commands; then the method, the module boundaries, the raw files, each source's formats and facts verified live, the fixtures and vendored libraries. |
 | `<domain>/PROCEDURE.md` | The domain's operations: settings, parameters, commands and their output fields (in `posts`, the steps the bot takes by hand), the routines, failure handling and the report back. |
 | `<domain>/watchlist.json` | The domain's watchlist, maintained by the bot and ignored by Git (Watchlists): the stock tickers in `stock_iv_regime` and in `fundamentals`, the posters and their accounts in `posts`. |
 | `<domain>/script/` | A scripted domain's Python package and supporting code; `posts` has none. |
 | `<domain>/script/templates/` | Optional output templates read by the code, such as an HTML page. |
-| `<domain>/script/vendor/` | Optional third-party files copied unmodified from a pinned release, with their licence, notice and provenance. |
 | `<domain>/data/` | Runtime files in three sections, `raw/`, `formatted/` and `reports/` (Data layout). |
 | `posts/<poster>/` | One nominated poster, the bot's and ignored by Git whole: `profile.md` (who the poster is, their accounts and the count of verdicts so far) and `data/` in the three sections. |
 
 Domains import shared code from `market_state_research.common` instead of copying it, never
 import one another, and `common` never imports from a domain. Keep generated data out of
-`script/`, `common/` and documentation directories. `templates/` and `vendor/` hold static
-assets owned by the code: change them together with the code and tests that use them. Keep
-vendored files byte-identical to their upstream release, record their source and hashes
-beside them, and have the code verify a pinned checksum before using a vendored library.
-Ignore runtime data in Git; retain a `data/.gitignore` so a scripted domain's empty data
+`script/`, `common/` and documentation directories. `templates/` and `common/vendor/` hold
+static assets owned by the code: change them together with the code and tests that use
+them. Keep vendored files byte-identical to their upstream release, record their source and
+hashes beside them, and have the code verify a pinned checksum before using a vendored
+library. Ignore runtime data in Git; retain a `data/.gitignore` so a scripted domain's empty data
 directory is present in fresh checkouts (a poster's folder in `posts` is the bot's, ignored
 whole, and needs none). Scripts resolve their default data directory and their assets
 relative to their own domain, independently of the current working directory. Tests live

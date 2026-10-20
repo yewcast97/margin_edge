@@ -1,7 +1,7 @@
 # TradingView Lightweight Charts 5.2.1
 
-Vendored unmodified for this domain's chart (`script/chart.py`), which verifies the
-bundle's SHA-256 before inlining it into each chart.
+Vendored unmodified for the domains' charts: `common/chart.py` verifies the bundle's
+SHA-256 before a domain inlines it into each chart.
 
 | Item | Value |
 | --- | --- |

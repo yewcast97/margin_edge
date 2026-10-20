@@ -1,10 +1,11 @@
 """The report of one window: a self-contained interactive HTML chart and its Markdown twin.
 
 ``render_html`` is a pure function of a ``ChartSpec`` and the vendored library and page
-template (``templates/chart.html``): the same inputs always produce the same text. The
-pinned library is inlined so a chart opens offline and from ``file://`` indefinitely. The
-time series is embedded as JSON, which the page's own script draws (nothing reads it back),
-and repeated as a static data table. Everything the page shows beyond plotting is computed
+template (``templates/chart.html``, read with the library by ``load_library``): the same
+inputs always produce the same text. The pinned library (``common.chart``) is inlined so a
+chart opens offline and from ``file://`` indefinitely. The time series is embedded as JSON,
+which the page's own script draws (nothing reads it back), and repeated as a static data
+table. Everything the page shows beyond plotting is computed
 here: each session's readout line (its method and bracket expiries, or why it has no value),
 the readings at each bracket expiry and the strikes they were read at, the 14-DTE call and put
 IVs, the daily return and the adjusted close, and the table's header, so the page only plots
@@ -15,10 +16,6 @@ Markdown. Times are New York time: ISO text with its EDT/EST offset in the data,
 generation time to the second with its zone in the headers.
 """
 
-import hashlib
-import html
-import json
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -26,6 +23,15 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Final
 
+from market_state_research.common import chart as common_chart
+from market_state_research.common.chart import (
+    LIBRARY_NAME,
+    LIBRARY_VERSION,
+    Library,
+    embed_json,
+    escape,
+    substitute,
+)
 from market_state_research.common.sessions import session_window
 from market_state_research.common.times import et_display, et_isoformat
 
@@ -36,12 +42,6 @@ from .prices import RETURN_PLACES
 from .store import LABELS, REASONS, SERIES, VALUES, Row, Series
 from .surface import HORIZON, ExpiryReading, Target, rounded
 
-LIBRARY_NAME = "lightweight-charts"
-LIBRARY_VERSION = "5.2.1"
-LIBRARY_SHA256 = "e21cc5caa0226ef30bd8549c50b9ef926615f2a4ee6b4e486353477a55f598cf"
-VENDOR_DIRECTORY = Path(__file__).resolve().parent / "vendor" / LIBRARY_NAME / LIBRARY_VERSION
-LIBRARY_PATH = VENDOR_DIRECTORY / "lightweight-charts.standalone.production.js"
-NOTICE_PATH = VENDOR_DIRECTORY / "NOTICE"
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "chart.html"
 SOURCE_DESCRIPTION = (
     'EODHD "US Stock Options Data" (UnicornBay) · end-of-day option chains · every contract of every '
@@ -105,33 +105,10 @@ CHARTED: Final[tuple[Series, ...]] = (
     "put25_corr_15s",
 )
 
-_UNSAFE_IN_SCRIPT = re.compile(r"</script|<script|<!--", re.IGNORECASE)
-_PLACEHOLDER = re.compile(r"\{\{([A-Z_0-9]+)\}\}")
-
-
-@dataclass(frozen=True)
-class Library:
-    """The vendored chart library, the attribution its licence requires and the page template."""
-
-    script: str
-    notice: str
-    template: str
-    version: str = LIBRARY_VERSION
-
 
 def load_library() -> Library:
-    """Read the vendored library (verifying the pinned checksum) and the page template."""
-    raw = LIBRARY_PATH.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != LIBRARY_SHA256:
-        raise ValueError(f"{LIBRARY_PATH.name} differs from the pinned {LIBRARY_NAME} {LIBRARY_VERSION}")
-    script = raw.decode("utf-8")
-    if _UNSAFE_IN_SCRIPT.search(script):
-        raise ValueError(f"{LIBRARY_PATH.name} contains markup that would end its script element")
-    return Library(
-        script=script,
-        notice=NOTICE_PATH.read_text(encoding="utf-8").strip(),
-        template=TEMPLATE_PATH.read_text(encoding="utf-8"),
-    )
+    """The vendored library, its pinned checksum verified, and this domain's page template."""
+    return common_chart.load_library(TEMPLATE_PATH)
 
 
 @dataclass(frozen=True)
@@ -260,16 +237,6 @@ def payload(spec: ChartSpec, library_version: str = LIBRARY_VERSION) -> dict[str
     }
 
 
-def embed_json(value: object) -> str:
-    """JSON that cannot terminate or comment out its ``<script>`` element."""
-    text = json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
-    return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-
-
-def _escape(value: object) -> str:
-    return html.escape(str(value), quote=True)
-
-
 def _value(row: Row, series: Series) -> str:
     if series in ("skew_14d_percentile", "atm_iv_14d_percentile"):
         return _percentile_text(row, series)
@@ -304,7 +271,7 @@ def _readout(row: Row) -> tuple[str, ...]:
 
 
 def _table_head() -> str:
-    cells = "".join(f'<th scope="col">{_escape(column)}</th>' for column in TABLE_COLUMNS)
+    cells = "".join(f'<th scope="col">{escape(column)}</th>' for column in TABLE_COLUMNS)
     return f"<thead><tr>{cells}</tr></thead>"
 
 
@@ -317,20 +284,20 @@ def _table_rows(spec: ChartSpec) -> str:
             cells = [f'<td class="missing" colspan="{len(TABLE_COLUMNS) - 1}">missing</td>']
         else:
             values = _cells(row)
-            cells = [f"<td>{_escape(value)}</td>" for value in values]
-            cells.append(f'<td class="reason">{_escape(readings_text(row))}</td>')
-            cells.append(f"<td>{_escape(et_isoformat(row.fetched_at))}</td>")
-            cells.append(f'<td class="reason">{_escape(row.source)}</td>')
-        lines.append(f'<tr><th scope="row">{_escape(session.isoformat())}</th>{"".join(cells)}</tr>')
+            cells = [f"<td>{escape(value)}</td>" for value in values]
+            cells.append(f'<td class="reason">{escape(readings_text(row))}</td>')
+            cells.append(f"<td>{escape(et_isoformat(row.fetched_at))}</td>")
+            cells.append(f'<td class="reason">{escape(row.source)}</td>')
+        lines.append(f'<tr><th scope="row">{escape(session.isoformat())}</th>{"".join(cells)}</tr>')
     return "\n".join(lines)
 
 
 def _gap_rows(spec: ChartSpec) -> str:
     if not spec.gaps:
-        return f'<p class="hint">{_escape(NO_GAPS)}</p>'
+        return f'<p class="hint">{escape(NO_GAPS)}</p>'
     rows = "\n".join(
-        f'<tr><th scope="row">{_escape(gap.date.isoformat())}</th><td>{_escape(LABELS[gap.series])}</td>'
-        f'<td class="reason">{_escape(gap.reason)}</td></tr>'
+        f'<tr><th scope="row">{escape(gap.date.isoformat())}</th><td>{escape(LABELS[gap.series])}</td>'
+        f'<td class="reason">{escape(gap.reason)}</td></tr>'
         for gap in spec.gaps
     )
     return (
@@ -353,7 +320,7 @@ def _banners(spec: ChartSpec) -> str:
         banners.append(
             '<p class="banner" role="status"><span class="banner-icon" aria-hidden="true">⚠</span> '
             f"<strong>Partial chart.</strong> {len(missing)} of {spec.lookback} sessions are missing: "
-            f"{_escape(listed)}.</p>"
+            f"{escape(listed)}.</p>"
         )
     # One clause per set of series missing together, in the order the gaps list them.
     by_session: dict[date, list[Series]] = {}
@@ -370,7 +337,7 @@ def _banners(spec: ChartSpec) -> str:
         ]
         banners.append(
             '<p class="banner" role="status"><span class="banner-icon" aria-hidden="true">⚠</span> '
-            f"<strong>Gaps.</strong> {_escape('; '.join(clauses))}. The gaps below the data table give each "
+            f"<strong>Gaps.</strong> {escape('; '.join(clauses))}. The gaps below the data table give each "
             "reason.</p>"
         )
     return "\n".join(banners)
@@ -395,22 +362,22 @@ def render_html(spec: ChartSpec, library: Library) -> str:
         raise ValueError("a chart needs at least one fetched session in its window")
     latest = spec.rows[-1]
     values = {
-        "TITLE": _escape(f"{_title(spec)} to {spec.as_of.isoformat()}"),
-        "TICKER": _escape(spec.ticker),
-        "LOOKBACK": _escape(spec.lookback),
-        "WINDOW_START": _escape(spec.window[0].isoformat()),
-        "AS_OF": _escape(spec.as_of.isoformat()),
-        "GENERATED": _escape(et_display(spec.generated_at)),
-        "CSV": _escape(spec.csv),
-        "PRICES": _escape(spec.prices or "none fetched"),
-        "SOURCE": _escape(SOURCE_DESCRIPTION),
-        "METHOD": _escape(METHOD),
-        "LIBRARY_VERSION": _escape(library.version),
-        "NOTICE": _escape(library.notice),
+        "TITLE": escape(f"{_title(spec)} to {spec.as_of.isoformat()}"),
+        "TICKER": escape(spec.ticker),
+        "LOOKBACK": escape(spec.lookback),
+        "WINDOW_START": escape(spec.window[0].isoformat()),
+        "AS_OF": escape(spec.as_of.isoformat()),
+        "GENERATED": escape(et_display(spec.generated_at)),
+        "CSV": escape(spec.csv),
+        "PRICES": escape(spec.prices or "none fetched"),
+        "SOURCE": escape(SOURCE_DESCRIPTION),
+        "METHOD": escape(METHOD),
+        "LIBRARY_VERSION": escape(library.version),
+        "NOTICE": escape(library.notice),
         "BANNERS": _banners(spec),
-        "LATEST_DATE": _escape(latest.date.isoformat()),
-        "LATEST_DETAIL": _escape(latest.surface.detail()),
-        "COVERAGE": _escape(_coverage(spec)),
+        "LATEST_DATE": escape(latest.date.isoformat()),
+        "LATEST_DETAIL": escape(latest.surface.detail()),
+        "COVERAGE": escape(_coverage(spec)),
         "TABLE_HEAD": _table_head(),
         "TABLE_ROWS": _table_rows(spec),
         "GAP_ROWS": _gap_rows(spec),
@@ -418,9 +385,8 @@ def render_html(spec: ChartSpec, library: Library) -> str:
         "LIBRARY": library.script,
     }
     for index, text in enumerate(_readout(latest)):
-        values[f"LATEST_VALUE_{index}"] = _escape(text)
-    # One pass over the template: substituted values are never rescanned for placeholders.
-    return _PLACEHOLDER.sub(lambda match: values[match.group(1)], library.template)
+        values[f"LATEST_VALUE_{index}"] = escape(text)
+    return substitute(library.template, values)
 
 
 def _markdown_row(cells: list[object]) -> str:

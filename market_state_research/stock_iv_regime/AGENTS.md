@@ -227,7 +227,7 @@ The package `market_state_research.stock_iv_regime.script`:
 | `percentile` | The 252-session percentile. |
 | `correlation` | The IV change and the 15-session correlation. |
 | `store` | Reading and validating every raw file of a ticker, the selection of each session's chain and of the prices, the rows (values, percentiles, returns and correlations over the whole archive), the six series a report states (`SERIES`), the CSV. |
-| `chart` and `templates/chart.html` | The report (two charts on one page) and its twin; the vendored TradingView Lightweight Charts 5.2.1 in `vendor/`, pinned by SHA-256. |
+| `chart` and `templates/chart.html` | The report (two charts on one page) and its twin, over `common.chart`: the vendored TradingView Lightweight Charts 5.2.1, pinned by SHA-256, and the page text helpers. |
 | `fetch` | The two ways a chain is fetched (below), writing each chain as it completes, and the prices request. |
 | `workflow` | `plan`, `fetch`, `record`, `show`. |
 
