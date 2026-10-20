@@ -1,0 +1,62 @@
+[project]
+name = "margin-edge"
+version = "0.3.0"
+description = "Market state research: options-implied regime (EODHD, Tiingo) and issuer fundamentals (SEC EDGAR, EarningsCalls.dev) with hardcoded validation, charts and reports; nominated posters' statements, archived and fact-checked by the bot."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "exchange-calendars==4.13.2",
+    "pydantic>=2.12,<3",
+    "seikan",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4",
+    "pytest>=9",
+    "ruff>=0.16",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+seikan = { git = "https://github.com/yewcast97/seikan", branch = "main" }
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+xfail_strict = true
+filterwarnings = ["error"]
+# A test blocked forever (a deadlock, say) ends the run with every thread's
+# traceback instead of hanging it; the slowest test takes a few seconds.
+faulthandler_timeout = 120
+faulthandler_exit_on_timeout = true
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+extend-exclude = ["**/vendor/**"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = [
+    "market_state_research/common",
+    "market_state_research/market_regime/script",
+    "market_state_research/fundamentals/script",
+]
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+# Installed without a py.typed marker or a stub package in the lock: their values enter as Any.
+module = [
+    "exchange_calendars.*",
+    "pandas.*",
+]
+ignore_missing_imports = true

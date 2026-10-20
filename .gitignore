@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.env
+.env.*
+/watchlist.json
+/market_state_research/*/watchlist.json
+/market_state_research/TODO.md
+/explore_hypothesis/*
+!/explore_hypothesis/AGENTS.md
+/market_state_research/posts/*
+!/market_state_research/posts/AGENTS.md
+!/market_state_research/posts/PROCEDURE.md
+.DS_Store

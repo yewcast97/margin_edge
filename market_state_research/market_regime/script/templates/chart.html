@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{{TITLE}}</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #7b4fd1;
+  --series-4: #c93f7c;
+  --price: #898781;
+  --warning: #fab219;
+  --focus: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #9670e0;
+    --series-4: #d9558f;
+    --price: #898781;
+    --focus: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface-1: #1a1a19;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.10);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #9670e0;
+  --series-4: #d9558f;
+  --price: #898781;
+  --focus: #3987e5;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--page);
+  color: var(--text-primary);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 32px; }
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+.subtitle { margin: 0 0 12px; color: var(--text-secondary); }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 16px; font-size: 12px; }
+.meta div { display: flex; gap: 6px; min-width: 0; }
+.meta dt { color: var(--text-secondary); }
+.meta dd { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
+.banner {
+  margin: 0 0 16px; padding: 8px 12px; border-left: 3px solid var(--warning);
+  background: var(--surface-1); border-radius: 4px;
+}
+.banner-icon { color: var(--warning); }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 0 4px 10px; }
+.readout {
+  flex: 1 1 420px; min-width: 0; display: flex; flex-wrap: wrap; align-content: flex-start;
+  align-items: baseline; gap: 6px 20px; font-variant-numeric: tabular-nums;
+}
+.readout .when { font-weight: 600; }
+.readout .item { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; white-space: nowrap; }
+.readout .key { display: inline-block; width: 14px; height: 2px; border-radius: 1px; align-self: center; }
+.readout .value { font-weight: 600; }
+.controls { flex: none; display: flex; align-items: center; gap: 16px; margin-left: auto; }
+.label { color: var(--text-secondary); font-size: 12px; }
+.styles { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 0 4px 8px; }
+.styles .item { display: inline-flex; align-items: center; gap: 6px; }
+.styles .key { display: inline-block; width: 24px; height: 2px; }
+.styles .solid { background: var(--text-secondary); }
+.key.dotted { height: 0; background: none; border-top: 2px dotted var(--price); }
+button {
+  font: inherit; font-size: 12px; color: var(--text-secondary); background: transparent;
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; cursor: pointer;
+}
+button:hover { background: var(--grid); }
+button:focus-visible, #chart:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+#chart { position: relative; height: clamp(600px, 92vh, 960px); border-radius: 6px; }
+.hint { margin: 8px 4px 0; color: var(--text-secondary); font-size: 12px; }
+details { margin-top: 16px; }
+summary { cursor: pointer; color: var(--text-secondary); }
+.table-wrap { overflow-x: auto; margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+thead th { color: var(--text-secondary); font-weight: 600; border-bottom-color: var(--axis); }
+tbody th { text-align: left; font-weight: 400; }
+td.missing { text-align: left; color: var(--text-secondary); }
+td.reason { text-align: left; white-space: normal; min-width: 240px; }
+table.gaps { width: auto; }
+table.gaps th, table.gaps td { text-align: left; }
+h2 { font-size: 14px; font-weight: 600; margin: 16px 4px 4px; color: var(--text-secondary); }
+footer { margin-top: 20px; color: var(--text-secondary); font-size: 12px; }
+footer p { margin: 4px 0; }
+footer a { color: var(--text-secondary); }
+.notice { white-space: pre-line; }
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>{{TICKER}} · 14-DTE implied volatility</h1>
+<p class="subtitle">Two charts over the adjusted close, read together: the 252-session percentiles of the 14-DTE 25Δ skew and ATM IV, and the 15-session correlations of the daily return with the changes of the 14-DTE 25Δ call and put IVs · {{LOOKBACK}} trading sessions · {{WINDOW_START}} → {{AS_OF}}</p>
+<dl class="meta">
+<div><dt>As of</dt><dd>{{AS_OF}}</dd></div>
+<div><dt>Coverage</dt><dd>{{COVERAGE}} sessions</dd></div>
+<div><dt>Generated</dt><dd>{{GENERATED}}</dd></div>
+<div><dt>Data</dt><dd>{{CSV}}</dd></div>
+<div><dt>Prices</dt><dd>{{PRICES}}</dd></div>
+<div><dt>Source</dt><dd>{{SOURCE}}</dd></div>
+</dl>
+</header>
+{{BANNERS}}
+<section class="card" aria-label="Interactive chart">
+<div class="toolbar">
+<div class="readout" id="readout" aria-live="polite">
+<span class="when"><span id="readout-date">{{LATEST_DATE}}</span> <span class="label" id="readout-detail">{{LATEST_DETAIL}}</span></span>
+<span class="item"><span class="key" style="background: var(--series-1)"></span><span class="value" id="readout-value-0">{{LATEST_VALUE_0}}</span><span class="label">Skew percentile</span></span>
+<span class="item"><span class="key" style="background: var(--series-2)"></span><span class="value" id="readout-value-1">{{LATEST_VALUE_1}}</span><span class="label">ATM IV percentile</span></span>
+<span class="item"><span class="key" style="background: var(--series-3)"></span><span class="value" id="readout-value-2">{{LATEST_VALUE_2}}</span><span class="label">Return–Δ call IV correlation, 15s</span></span>
+<span class="item"><span class="key" style="background: var(--series-4)"></span><span class="value" id="readout-value-3">{{LATEST_VALUE_3}}</span><span class="label">Return–Δ put IV correlation, 15s</span></span>
+<span class="item"><span class="key dotted"></span><span class="value" id="readout-value-4">{{LATEST_VALUE_4}}</span><span class="label">Adjusted close</span></span>
+<span class="item"><span class="value" id="readout-value-5">{{LATEST_VALUE_5}}</span><span class="label">Daily return, %</span></span>
+</div>
+<div class="controls">
+<button type="button" id="fit">Fit all</button>
+</div>
+</div>
+<div class="styles" aria-hidden="true">
+<span class="item"><span class="key solid"></span><span class="label">A percentile over 252 sessions (0–100) or a correlation over 15 sessions (−1 to 1), on the right scale</span></span>
+<span class="item"><span class="key dotted"></span><span class="label">The adjusted close, on the left scale of each chart</span></span>
+</div>
+<div id="chart" tabindex="0" role="group" aria-describedby="chart-hint" aria-label="{{TICKER}} by session, two charts over the adjusted close: the 14-day 25-delta skew and ATM implied volatility percentiles, and the correlations of the daily return with the changes of the 25-delta call and put implied volatilities"></div>
+<p class="hint" id="chart-hint">Drag to pan, scroll or pinch to zoom; drag the line between the two charts to share the height differently. With the chart focused, left and right arrow keys step through sessions. A line breaks where a session has no value: a missing session, or a fetched session without the percentile, the correlation or the close. The readout names how the values of the session under the cursor were read (the bracket expiries and the method), or why there are none, and the count n of other sessions each percentile rests on; the data table lists every value, the 14-DTE skew and ATM IV that the percentiles rank among them, with the bracket readings.</p>
+<noscript><p class="hint">JavaScript is required for the interactive chart; the data table lists every value.</p></noscript>
+</section>
+<details>
+<summary>Data table ({{COVERAGE}} sessions)</summary>
+<div class="table-wrap">
+<table>
+{{TABLE_HEAD}}
+<tbody>
+{{TABLE_ROWS}}
+</tbody>
+</table>
+</div>
+<h2>Gaps</h2>
+{{GAP_ROWS}}
+</details>
+<footer>
+<p>{{METHOD}}</p>
+<p>Every value is computed from the providers' end-of-day quotes and prices kept in the raw files, as stated above. The chart adds no thresholds, labels or judgments.</p>
+<p>Charting by TradingView Lightweight Charts™ {{LIBRARY_VERSION}} (Apache License 2.0), <a href="https://www.tradingview.com/">www.tradingview.com</a>.</p>
+<p class="notice">{{NOTICE}}</p>
+</footer>
+</main>
+<script id="regime-chart-data" type="application/json">{{PAYLOAD}}</script>
+<script>
+{{LIBRARY}}
+</script>
+<script>
+(() => {
+  "use strict";
+  const container = document.getElementById("chart");
+  const data = JSON.parse(document.getElementById("regime-chart-data").textContent);
+  const LWC = window.LightweightCharts;
+  if (!LWC || !data.rows.length) {
+    container.textContent = "The chart could not be drawn; the data table lists every value.";
+    return;
+  }
+  const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+  // Two charts, one per pane, on one time axis. Each draws its two series on a right scale
+  // fixed to `range`, over the adjusted close (PRICE) on a left scale of its own.
+  // `n`: the series is a percentile, shown with the count of sessions it rests on.
+  // `reference` draws a line at that value.
+  const PANES = [
+    {
+      title: "14-DTE 25Δ skew and ATM IV · percentiles over 252 sessions (0–100)",
+      range: [0, 100],
+      series: [
+        { key: "skew_14d_percentile", color: "--series-1", n: "skew_window_n" },
+        { key: "atm_iv_14d_percentile", color: "--series-2", n: "atm_window_n" },
+      ],
+    },
+    {
+      title: "Daily return vs Δ 14-DTE 25Δ call and put IV · correlations over 15 sessions (−1 to 1)",
+      range: [-1, 1],
+      reference: 0,
+      series: [
+        { key: "call25_corr_15s", color: "--series-3" },
+        { key: "put25_corr_15s", color: "--series-4" },
+      ],
+    },
+  ];
+  // `precision` fixes the decimals of the close's scale; the readout shows the close as written.
+  const PRICE = { key: "adj_close", color: "--price", precision: 2 };
+  const PRICE_NOTE = "Dotted: the adjusted close, on the left scale";
+  // The readout's values, in its order: the four series, the adjusted close, the daily return.
+  const READOUT = [...PANES.flatMap((pane) => pane.series), PRICE, { key: "daily_return_pct" }];
+  // A pane's series: solid, on the right scale. The close: dotted, on the pane's left scale.
+  const SOLID = { scale: "right", width: 2, lineStyle: LWC.LineStyle.Solid, marker: 4, dot: 3 };
+  const DOTTED = { scale: "left", width: 2, lineStyle: LWC.LineStyle.Dotted, marker: 3, dot: 2 };
+  const MARGINS = { top: 0.08, bottom: 0.08 };
+  const rows = data.rows;
+  const byDate = new Map(rows.map((row) => [row.date, row]));
+  const timeline = rows.map((row) => row.date).concat(data.missing_sessions).sort();
+  const latest = rows[rows.length - 1];
+  const lastObserved = timeline.lastIndexOf(latest.date);
+  // The value of one series at one session, or null: a missing session or a blank value.
+  const valueAt = (key, index) => {
+    const row = byDate.get(timeline[index]);
+    return row && row[key] !== null ? row[key] : null;
+  };
+  // A point's colour styles the segment that leaves it, so a transparent point before a
+  // session without a value leaves a visible gap instead of a line through it.
+  const GAP = "rgba(0, 0, 0, 0)";
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const decimals = (text) => {
+    const point = text.indexOf(".");
+    return point < 0 ? 0 : text.length - point - 1;
+  };
+  // A series shows as many decimals as its most precise value, unless its spec fixes them.
+  const precisionOf = (spec) => spec.precision ?? rows.reduce((most, row) => Math.max(
+    most,
+    row[spec.key] === null ? 0 : decimals(row[spec.key]),
+  ), 0);
+  const pad = (number) => String(number).padStart(2, "0");
+  const timeKey = (time) => {
+    if (typeof time === "string") return time;
+    if (time && typeof time === "object" && "year" in time) return `${time.year}-${pad(time.month)}-${pad(time.day)}`;
+    return undefined;
+  };
+  const palette = () => ({
+    surface: css("--surface-1"),
+    secondary: css("--text-secondary"),
+    muted: css("--text-muted"),
+    grid: css("--grid"),
+    axis: css("--axis"),
+  });
+  const themed = (colors) => ({
+    layout: {
+      background: { type: LWC.ColorType.Solid, color: colors.surface },
+      textColor: colors.secondary,
+      panes: { separatorColor: colors.grid, separatorHoverColor: colors.axis },
+    },
+    grid: {
+      vertLines: { color: colors.grid, style: LWC.LineStyle.Solid },
+      horzLines: { color: colors.grid, style: LWC.LineStyle.Solid },
+    },
+    leftPriceScale: { borderColor: colors.axis },
+    rightPriceScale: { borderColor: colors.axis },
+    timeScale: { borderColor: colors.axis },
+    crosshair: {
+      vertLine: { color: colors.muted, style: LWC.LineStyle.Solid, labelBackgroundColor: colors.secondary },
+      horzLine: { color: colors.muted, style: LWC.LineStyle.Solid, labelBackgroundColor: colors.secondary },
+    },
+  });
+
+  let colors = palette();
+  const base = themed(colors);
+  const chart = LWC.createChart(container, {
+    autoSize: true,
+    layout: {
+      ...base.layout,
+      fontFamily: FONT,
+      fontSize: 12,
+      attributionLogo: true,
+      panes: { ...base.layout.panes, enableResize: true },
+    },
+    grid: base.grid,
+    leftPriceScale: { ...base.leftPriceScale, minimumWidth: 64 },
+    rightPriceScale: { ...base.rightPriceScale, minimumWidth: 64 },
+    timeScale: {
+      ...base.timeScale,
+      timeVisible: false,
+      fixLeftEdge: true,
+      // The right edge sits at the last observed session; pinning it would hide trailing gaps.
+      fixRightEdge: byDate.has(timeline[timeline.length - 1]),
+      lockVisibleTimeRangeOnResize: true,
+    },
+    // Vertical swipes scroll the page on touch screens instead of being captured by the chart.
+    handleScroll: { vertTouchDrag: false },
+    crosshair: {
+      mode: LWC.CrosshairMode.Magnet,
+      vertLine: { ...base.crosshair.vertLine, width: 1 },
+      horzLine: { ...base.crosshair.horzLine, width: 1 },
+    },
+    // A later series is drawn over an earlier one, so each pane's two lines lie over the close;
+    // the library would otherwise draw the series under the pointer over every other one.
+    hoveredSeriesOnTop: false,
+    localization: { locale: "en-US", dateFormat: "yyyy-MM-dd" },
+  });
+
+  const lines = [];
+  const markers = [];
+  const references = [];
+  // One series in one pane: a line through the sessions with a value; a value followed by a
+  // session without one is transparent, so the line breaks there, and each value beside a
+  // break gets a dot, so segment ends and isolated sessions stay visible (a lone value is never
+  // a dash). The axis label shows the latest fetched session's value, never an earlier one
+  // carried forward. `range` fixes the scale.
+  const draw = (spec, pane, style, range) => {
+    const precision = precisionOf(spec);
+    const priceFormat = { type: "price", precision, minMove: Math.pow(10, -precision) };
+    const has = (index) => index >= 0 && index < timeline.length && valueAt(spec.key, index) !== null;
+    const lone = (index) => has(index) && !has(index - 1) && !has(index + 1);
+    const color = css(spec.color);
+    const options = {
+      priceScaleId: style.scale,
+      color,
+      priceLineColor: color,
+      lineWidth: style.width,
+      lineStyle: style.lineStyle,
+      priceLineVisible: false,
+      lastValueVisible: has(lastObserved),
+      crosshairMarkerRadius: style.marker,
+      crosshairMarkerBorderWidth: 2,
+      crosshairMarkerBorderColor: colors.surface,
+      crosshairMarkerBackgroundColor: color,
+      priceFormat,
+    };
+    if (range) {
+      options.autoscaleInfoProvider = () => ({ priceRange: { minValue: range[0], maxValue: range[1] } });
+    }
+    const line = chart.addSeries(LWC.LineSeries, options, pane);
+    let last = -1;
+    timeline.forEach((_, index) => { if (has(index)) last = index; });
+    line.setData(timeline.map((time, index) => {
+      if (!has(index)) return { time };
+      const point = { time, value: Number(valueAt(spec.key, index)) };
+      if (index < last && !has(index + 1)) point.color = GAP;
+      return point;
+    }));
+    line.priceScale().applyOptions({ visible: true, scaleMargins: MARGINS });
+    lines.push({ series: line, token: spec.color });
+    const edges = timeline.map((time, index) => ({ time, index })).filter(({ index }) =>
+      has(index) && (
+        (index > 0 && !has(index - 1)) || (index < timeline.length - 1 && !has(index + 1)) || lone(index)
+      ));
+    if (edges.length) {
+      const ends = chart.addSeries(LWC.LineSeries, {
+        priceScaleId: style.scale,
+        color,
+        lineVisible: false,
+        pointMarkersVisible: true,
+        pointMarkersRadius: style.dot,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+        priceFormat,
+      }, pane);
+      ends.setData(edges.map(({ time, index }) => ({ time, value: Number(valueAt(spec.key, index)) })));
+      markers.push({ series: ends, token: spec.color });
+    }
+    return line;
+  };
+  // Panes are created in order: the pane index is clamped to the pane count. The close is drawn
+  // first, under the pane's two series.
+  const drawn = PANES.map((spec, pane) => {
+    const price = draw(PRICE, pane, DOTTED);
+    const series = spec.series.map((item) => draw(item, pane, SOLID, spec.range));
+    if (spec.reference !== undefined) {
+      references.push(series[0].createPriceLine({
+        price: spec.reference,
+        color: colors.axis,
+        lineWidth: 1,
+        lineStyle: LWC.LineStyle.Solid,
+        axisLabelVisible: false,
+      }));
+    }
+    return { price, series };
+  });
+
+  const titleLines = (spec, theme) => [
+    { text: spec.title, color: theme.secondary, fontSize: 12, fontFamily: FONT, fontStyle: "600" },
+    { text: PRICE_NOTE, color: theme.muted, fontSize: 12, fontFamily: FONT },
+  ];
+  const panes = chart.panes();
+  panes.forEach((pane) => pane.setStretchFactor(1));
+  const titles = PANES.map((spec, pane) => LWC.createTextWatermark(panes[pane], {
+    horzAlign: "left", vertAlign: "top", lines: titleLines(spec, colors),
+  }));
+
+  const readout = {
+    date: document.getElementById("readout-date"),
+    detail: document.getElementById("readout-detail"),
+    values: READOUT.map((_, index) => document.getElementById(`readout-value-${index}`)),
+  };
+  // `view` is the readout, or the hidden copy of it that `reserve` measures.
+  const show = (time, view = readout) => {
+    const row = time === undefined ? latest : byDate.get(time);
+    view.date.textContent = time === undefined ? latest.date : time;
+    view.detail.textContent = row ? row.detail : "missing session";
+    READOUT.forEach((spec, index) => {
+      const value = row && row[spec.key] !== null ? row[spec.key] : null;
+      view.values[index].textContent = value === null ? "—" : (spec.n ? `${value} (n ${row[spec.n]})` : value);
+    });
+  };
+  // The readout keeps the height of its tallest session at the current width, so the chart
+  // below it never moves while the pointer or the arrow keys change the session shown: a
+  // hidden copy shows every timeline session in turn, missing ones included, and is measured
+  // on load and whenever the chart's width changes.
+  const readoutBox = document.getElementById("readout");
+  let measured = -1;
+  const reserve = () => {
+    const width = readoutBox.getBoundingClientRect().width;
+    if (width === measured) return;
+    measured = width;
+    const copy = readoutBox.cloneNode(true);
+    copy.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
+    copy.removeAttribute("id");
+    copy.removeAttribute("aria-live");
+    copy.setAttribute("aria-hidden", "true");
+    copy.style.cssText = `position: absolute; visibility: hidden; width: ${width}px;`;
+    readoutBox.after(copy);
+    const [date, detail] = copy.querySelector(".when").children;
+    const view = { date, detail, values: Array.from(copy.querySelectorAll(".value")) };
+    const tallest = timeline.reduce((most, time) => {
+      show(time, view);
+      return Math.max(most, copy.getBoundingClientRect().height);
+    }, 0);
+    copy.remove();
+    readoutBox.style.minHeight = `${Math.ceil(tallest)}px`;
+  };
+  reserve();
+  new ResizeObserver(reserve).observe(container);
+  // The crosshair is placed on the first series with a value at the session, else on the close.
+  const anchors = [
+    ...PANES.flatMap((spec, pane) => spec.series.map((item, index) => ({ key: item.key, line: drawn[pane].series[index] }))),
+    { key: PRICE.key, line: drawn[0].price },
+  ];
+  const place = (index) => {
+    const anchor = anchors.find(({ key }) => valueAt(key, index) !== null);
+    if (!anchor) return false;
+    chart.setCrosshairPosition(Number(valueAt(anchor.key, index)), timeline[index], anchor.line);
+    return true;
+  };
+
+  let cursor = -1;
+  const visible = () => chart.timeScale().getVisibleLogicalRange();
+  chart.subscribeCrosshairMove((param) => {
+    const time = timeKey(param.time);
+    if (cursor >= 0 && !param.sourceEvent && time !== undefined && time !== timeline[cursor]) {
+      // A fit, zoom, scroll or resize re-applied the keyboard crosshair to another session.
+      const range = visible();
+      if (!(range && cursor >= range.from && cursor <= range.to && place(cursor))) {
+        cursor = -1; // the selected session left the view: release the keyboard selection
+        chart.clearCrosshairPosition();
+        show(undefined);
+      }
+      return;
+    }
+    if (time === undefined) {
+      if (cursor < 0) show(undefined);
+      return;
+    }
+    show(time);
+  });
+  container.addEventListener("pointermove", () => { cursor = -1; });
+  const moveTo = (index) => {
+    cursor = Math.max(0, Math.min(timeline.length - 1, index));
+    const target = cursor;
+    const time = timeline[target];
+    const settle = () => {
+      if (cursor !== target) return;
+      // A zero-width pane has no visible range and cannot place a crosshair.
+      if (!(visible() && place(target))) chart.clearCrosshairPosition();
+      show(time);
+    };
+    const range = visible();
+    if (!range) {
+      show(time);
+    } else if (target < range.from || target > range.to) {
+      // Bring the session into view first; the chart applies a new range on its next frame.
+      // Past the last observation the view must still include it, or the chart clamps the range.
+      const span = Math.max(range.to - range.from, target > lastObserved ? target - lastObserved + 1.5 : 0);
+      chart.clearCrosshairPosition();
+      chart.timeScale().setVisibleLogicalRange(
+        target < range.from
+          ? { from: target - 0.5, to: target - 0.5 + span }
+          : { from: target + 0.5 - span, to: target + 0.5 },
+      );
+      show(time);
+      requestAnimationFrame(settle);
+    } else {
+      settle();
+    }
+  };
+  container.addEventListener("keydown", (event) => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return; // leave browser shortcuts alone
+    const last = timeline.length - 1;
+    const targets = {
+      ArrowLeft: cursor < 0 ? last : cursor - 1,
+      ArrowRight: cursor < 0 ? last : cursor + 1,
+      Home: 0,
+      End: last,
+    };
+    if (event.key in targets) {
+      event.preventDefault();
+      moveTo(targets[event.key]);
+    } else if (event.key === "Escape") {
+      cursor = -1;
+      chart.clearCrosshairPosition();
+      show(undefined);
+    }
+  });
+
+  const applyTheme = () => {
+    colors = palette();
+    chart.applyOptions(themed(colors));
+    lines.forEach(({ series: line, token }) => line.applyOptions({
+      color: css(token),
+      priceLineColor: css(token),
+      crosshairMarkerBorderColor: colors.surface,
+      crosshairMarkerBackgroundColor: css(token),
+    }));
+    markers.forEach(({ series: dots, token }) => dots.applyOptions({ color: css(token) }));
+    references.forEach((line) => line.applyOptions({ color: colors.axis }));
+    titles.forEach((title, index) => title.applyOptions({ lines: titleLines(PANES[index], colors) }));
+  };
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+  new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  // fitContent() keeps the right edge near the last observation, so a window whose newest
+  // sessions are missing is fitted explicitly to show every slot.
+  const fitAll = () => {
+    if (byDate.has(timeline[timeline.length - 1])) chart.timeScale().fitContent();
+    else chart.timeScale().setVisibleLogicalRange({ from: Math.min(0, lastObserved - 1), to: timeline.length - 1 });
+  };
+  document.getElementById("fit").addEventListener("click", fitAll);
+  fitAll();
+  show(undefined);
+})();
+</script>
+</body>
+</html>
