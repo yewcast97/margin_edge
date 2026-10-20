@@ -1,4 +1,4 @@
-"""Command line contract of ``python -m market_state_research.market_regime.script``."""
+"""Command line contract of ``python -m market_state_research.stock_iv_regime.script``."""
 
 import json
 import os
@@ -14,17 +14,17 @@ import pytest
 from market_state_research import common as common_package
 from market_state_research.common.layout import DataLayout
 from market_state_research.common.watchlist import WATCHLIST_PATH
-from market_state_research.market_regime import script as script_package
-from market_state_research.market_regime.script import client as client_module
-from market_state_research.market_regime.script import tiingo as tiingo_module
-from market_state_research.market_regime.script.__main__ import DOMAIN_DIRECTORY, build_parser, main
-from market_state_research.market_regime.script.store import DATA_DIRECTORY
+from market_state_research.stock_iv_regime import script as script_package
+from market_state_research.stock_iv_regime.script import client as client_module
+from market_state_research.stock_iv_regime.script import tiingo as tiingo_module
+from market_state_research.stock_iv_regime.script.__main__ import DOMAIN_DIRECTORY, build_parser, main
+from market_state_research.stock_iv_regime.script.store import DATA_DIRECTORY
 
 from .fake_eodhd import FakeEodhd
 from .fake_tiingo import FakeTiingo
 from .support import AS_OF, CANARY, NOW, TICKER, TIINGO_CANARY, save, standard
 
-MODULE = "market_state_research.market_regime.script"
+MODULE = "market_state_research.stock_iv_regime.script"
 SCRIPT_DIRECTORY = Path(script_package.__file__).resolve().parent
 COMMON_DIRECTORY = Path(common_package.__file__).resolve().parent
 
@@ -53,7 +53,8 @@ def test_parse_errors_are_one_labelled_line(capsys):
     out, err = capsys.readouterr()
     assert (exit_info.value.code, out) == (2, "")
     assert re.fullmatch(
-        r"REGIME: .*: argument --lookback: expected a positive whole number of sessions, got '0'\n", err
+        r"STOCK_IV_REGIME: .*: argument --lookback: expected a positive whole number of sessions, got '0'\n",
+        err,
     )
 
 
@@ -93,7 +94,7 @@ def test_fetch_never_prints_the_keys(capsys, layout, watchlist, monkeypatch):
     )
     assert settings.asked == ["EODHD_API", "TIINGO_API"]
     assert (code, out) == (2, "")
-    assert err.startswith("REGIME: GET https://eodhd.com/api/mp/unicornbay/options/contracts?")
+    assert err.startswith("STOCK_IV_REGIME: GET https://eodhd.com/api/mp/unicornbay/options/contracts?")
     assert "check EODHD_API" in err and CANARY not in err and TIINGO_CANARY not in err
     assert (fake.tokens, tiingo.tokens) == ([CANARY], [TIINGO_CANARY])
     assert all(TIINGO_CANARY not in call for call in tiingo.calls)
@@ -124,7 +125,7 @@ def test_fetch_without_both_keys_sends_nothing(capsys, layout, values, message):
         settings=Settings(**values),
     )
     assert (code, out) == (2, "")
-    assert err.startswith(f"REGIME: {message}") and "bad key!" not in err
+    assert err.startswith(f"STOCK_IV_REGIME: {message}") and "bad key!" not in err
     assert not layout.root.exists()
 
 
@@ -157,7 +158,7 @@ def test_a_file_as_data_directory_is_refused(capsys, tmp_path):
     target = tmp_path / "file"
     target.write_text("x")
     code, out, err = run(capsys, "plan", TICKER, "--data-dir", str(target))
-    assert (code, err) == (2, f"REGIME: {target} is not a directory\n")
+    assert (code, err) == (2, f"STOCK_IV_REGIME: {target} is not a directory\n")
 
 
 def snapshot(root: Path) -> dict[str, bytes]:
@@ -168,7 +169,7 @@ def snapshot(root: Path) -> dict[str, bytes]:
 
 def test_module_entry_point_uses_its_own_data_directory_and_watchlist(tmp_path):
     root = (tmp_path / "checkout").resolve()
-    domain = root / "market_state_research" / "market_regime"
+    domain = root / "market_state_research" / "stock_iv_regime"
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
     shutil.copytree(SCRIPT_DIRECTORY, domain / "script", ignore=ignore)
     shutil.copytree(COMMON_DIRECTORY, root / "market_state_research" / "common", ignore=ignore)

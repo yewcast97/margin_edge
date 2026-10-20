@@ -6,7 +6,7 @@ from fractions import Fraction
 
 import pytest
 
-from market_state_research.market_regime.script.surface import (
+from market_state_research.stock_iv_regime.script.surface import (
     difference,
     interpolate,
     iv_at,

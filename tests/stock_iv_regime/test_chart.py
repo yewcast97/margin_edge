@@ -8,8 +8,8 @@ from datetime import timedelta
 import pytest
 
 from market_state_research.common.sessions import session_window
-from market_state_research.market_regime.script import chart
-from market_state_research.market_regime.script.chart import (
+from market_state_research.stock_iv_regime.script import chart
+from market_state_research.stock_iv_regime.script.chart import (
     LIBRARY_PATH,
     LIBRARY_SHA256,
     ChartSpec,
@@ -18,7 +18,7 @@ from market_state_research.market_regime.script.chart import (
     render_html,
     render_markdown,
 )
-from market_state_research.market_regime.script.workflow import resolve
+from market_state_research.stock_iv_regime.script.workflow import resolve
 
 from .support import AS_OF, NOW, TICKER, attributes, chain, prices, quotes, save, save_prices, standard
 

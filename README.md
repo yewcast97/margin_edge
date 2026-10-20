@@ -16,7 +16,7 @@ or could be better. Nothing the bot produces is tracked.
 
 | Domain | What it discloses | Sources |
 | --- | --- | --- |
-| [`market_regime`](market_state_research/market_regime/AGENTS.md) ([procedure](market_state_research/market_regime/PROCEDURE.md)) | Per ticker and session, option-implied volatility percentiles (the 14-DTE 25-delta skew and ATM IV) and return–IV correlations, in one interactive report of two charts. | EODHD's options API, Tiingo's daily prices |
+| [`stock_iv_regime`](market_state_research/stock_iv_regime/AGENTS.md) ([procedure](market_state_research/stock_iv_regime/PROCEDURE.md)) | Per ticker and session, option-implied volatility percentiles (the 14-DTE 25-delta skew and ATM IV) and return–IV correlations, in one interactive report of two charts. | EODHD's options API, Tiingo's daily prices |
 | [`fundamentals`](market_state_research/fundamentals/AGENTS.md) ([procedure](market_state_research/fundamentals/PROCEDURE.md)) | Per issuer and fiscal period, what its filings, earnings releases and earnings calls say, in eleven fields of verbatim quotes compiled into a time series. | SEC EDGAR, EarningsCalls.dev |
 | [`posts`](market_state_research/posts/AGENTS.md) ([procedure](market_state_research/posts/PROCEDURE.md)) | What the social-media posters you nominate say, archived verbatim, fact-checked as `true`, `unverified` or `fake` with cited evidence, and reported on request, all by the bot's hand. | Each account, by the route the bot's host offers |
 
@@ -40,8 +40,8 @@ The keys go in the repository-root `.env`, which Git ignores; each domain's `PRO
 says what its keys need:
 
 ```sh
-EODHD_API="..."                            # market_regime: EODHD's "US Stock Options Data" (UnicornBay)
-TIINGO_API="..."                           # market_regime: Tiingo's daily prices
+EODHD_API="..."                            # stock_iv_regime: EODHD's "US Stock Options Data" (UnicornBay)
+TIINGO_API="..."                           # stock_iv_regime: Tiingo's daily prices
 SEC_USER_AGENT="Name contact@example.com"  # fundamentals: who runs the EDGAR client
 EARNINGSCALLS_API="..."                    # fundamentals: EarningsCalls.dev's transcripts
 ```
@@ -59,7 +59,7 @@ The bot runs each domain by its `PROCEDURE.md`. A scripted domain is a command l
 `plan` says what comes next:
 
 ```sh
-uv run --locked python -m market_state_research.market_regime.script plan
+uv run --locked python -m market_state_research.stock_iv_regime.script plan
 uv run --locked python -m market_state_research.fundamentals.script plan
 ```
 

@@ -1,4 +1,4 @@
-"""Clock readings and builders for the offline market_regime tests.
+"""Clock readings and builders for the offline stock_iv_regime tests.
 
 Expected instants are written with fixed ``EDT``/``EST`` offsets, independently of
 ``zoneinfo`` and of the code under test. Option records are built from strike, delta and
@@ -11,11 +11,11 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from market_state_research.common.layout import DataLayout
-from market_state_research.market_regime.script.api import FIELDS, Record
-from market_state_research.market_regime.script.chain import Chain, Expiry
-from market_state_research.market_regime.script.fetch import write_chain, write_prices
-from market_state_research.market_regime.script.prices import BAR_FIELDS, Bar, Prices, check_bar
-from market_state_research.market_regime.script.tiingo import prices_url
+from market_state_research.stock_iv_regime.script.api import FIELDS, Record
+from market_state_research.stock_iv_regime.script.chain import Chain, Expiry
+from market_state_research.stock_iv_regime.script.fetch import write_chain, write_prices
+from market_state_research.stock_iv_regime.script.prices import BAR_FIELDS, Bar, Prices, check_bar
+from market_state_research.stock_iv_regime.script.tiingo import prices_url
 
 EDT = timezone(timedelta(hours=-4), "EDT")
 EST = timezone(timedelta(hours=-5), "EST")

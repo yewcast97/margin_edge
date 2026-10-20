@@ -6,7 +6,7 @@ from decimal import Decimal
 import pytest
 
 from market_state_research.common.sessions import session_window
-from market_state_research.market_regime.script.percentile import WINDOW, percentile
+from market_state_research.stock_iv_regime.script.percentile import WINDOW, percentile
 
 END = date(2026, 10, 16)
 SESSIONS = session_window(END, WINDOW)

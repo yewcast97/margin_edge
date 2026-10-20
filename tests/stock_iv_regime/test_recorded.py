@@ -10,10 +10,10 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from market_state_research.market_regime.script.chain import check_chain, dump, load
-from market_state_research.market_regime.script.client import EodhdClient, Response
-from market_state_research.market_regime.script.fetch import latest
-from market_state_research.market_regime.script.surface import surface
+from market_state_research.stock_iv_regime.script.chain import check_chain, dump, load
+from market_state_research.stock_iv_regime.script.client import EodhdClient, Response
+from market_state_research.stock_iv_regime.script.fetch import latest
+from market_state_research.stock_iv_regime.script.surface import surface
 
 from .fake_eodhd import Sleeps
 from .support import CANARY, NOW

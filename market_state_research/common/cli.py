@@ -1,8 +1,8 @@
 """Command-line conventions shared by every domain.
 
 Every failure, including a malformed command line, is one ``LABEL: ...`` line on standard
-error with exit status 2, where the label names the domain (for example ``REGIME``), so the
-bot can read it the same way whatever went wrong.
+error with exit status 2, where the label names the domain (for example
+``STOCK_IV_REGIME``), so the bot can read it the same way whatever went wrong.
 """
 
 import argparse

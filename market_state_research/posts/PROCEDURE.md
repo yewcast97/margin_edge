@@ -42,7 +42,7 @@ never open an account.
 - Cite everything: every piece of evidence and every line of a profile's Background names its
   source, its URL and its date. Nothing comes from memory.
 - Primary sources first (AGENTS.md, Claims, evidence and verdicts). The repository's own domain
-  data counts as primary: read the `formatted/` and `reports/` files of `market_regime` and
+  data counts as primary: read the `formatted/` and `reports/` files of `stock_iv_regime` and
   `fundamentals`, and never write there.
 - Keep every file: never delete one, never edit a raw file and never rewrite a report; change a
   fact-check or a profile only where AGENTS.md says it is rewritten in place, and otherwise

@@ -585,7 +585,7 @@ and the HTTP reading it shares), `research` (`Turn`) and `text`; `research` uses
 `documents`, `report` and `workflow` use `layout`; `client`, `earningscalls`, `filings`,
 `report`, `research` and `workflow` keep messages on one line with `text.printable`; and
 the modules read the clock and convert times through `times`. This domain imports
-nothing from `market_regime`; EDGAR and EarningsCalls.dev are its only network peers.
+nothing from `stock_iv_regime`; EDGAR and EarningsCalls.dev are its only network peers.
 
 ## Runtime files
 

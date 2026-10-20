@@ -6,13 +6,18 @@ from datetime import date, timedelta
 import pytest
 
 from market_state_research.common.sessions import session_window
-from market_state_research.market_regime.script import api
-from market_state_research.market_regime.script import fetch as fetch_module
-from market_state_research.market_regime.script.chain import read_chain
-from market_state_research.market_regime.script.client import BudgetSpent, EodhdError, QuotaExceeded, Response
-from market_state_research.market_regime.script.fetch import Outcome, fetch_prices, history, latest, months
-from market_state_research.market_regime.script.prices import read_prices
-from market_state_research.market_regime.script.tiingo import Stopped, TiingoClient, TiingoError
+from market_state_research.stock_iv_regime.script import api
+from market_state_research.stock_iv_regime.script import fetch as fetch_module
+from market_state_research.stock_iv_regime.script.chain import read_chain
+from market_state_research.stock_iv_regime.script.client import (
+    BudgetSpent,
+    EodhdError,
+    QuotaExceeded,
+    Response,
+)
+from market_state_research.stock_iv_regime.script.fetch import Outcome, fetch_prices, history, latest, months
+from market_state_research.stock_iv_regime.script.prices import read_prices
+from market_state_research.stock_iv_regime.script.tiingo import Stopped, TiingoClient, TiingoError
 
 from .fake_eodhd import FakeEodhd
 from .fake_tiingo import FakeTiingo

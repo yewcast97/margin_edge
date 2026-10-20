@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_state_research.market_regime.script.chain import (
+from market_state_research.stock_iv_regime.script.chain import (
     FORMER_HORIZON,
     MAX_UNCOMPRESSED,
     check_chain,

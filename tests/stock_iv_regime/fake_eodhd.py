@@ -19,8 +19,8 @@ from datetime import date
 from decimal import Decimal
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from market_state_research.market_regime.script.api import NUMBER_FIELDS, parse_occ
-from market_state_research.market_regime.script.client import EodhdClient, Response
+from market_state_research.stock_iv_regime.script.api import NUMBER_FIELDS, parse_occ
+from market_state_research.stock_iv_regime.script.client import EodhdClient, Response
 
 from .support import CANARY, NOW
 

@@ -4,8 +4,8 @@ from datetime import date
 
 import pytest
 
-from market_state_research.market_regime.script.client import Response, TransportError
-from market_state_research.market_regime.script.tiingo import (
+from market_state_research.stock_iv_regime.script.client import Response, TransportError
+from market_state_research.stock_iv_regime.script.tiingo import (
     BODY_LIMIT,
     NotCovered,
     Stopped,

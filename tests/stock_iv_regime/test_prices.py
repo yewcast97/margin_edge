@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from market_state_research.market_regime.script.prices import (
+from market_state_research.stock_iv_regime.script.prices import (
     BAR_FIELDS,
     check_bar,
     check_prices,
@@ -17,7 +17,7 @@ from market_state_research.market_regime.script.prices import (
     raw_name,
     read_prices,
 )
-from market_state_research.market_regime.script.surface import Value
+from market_state_research.stock_iv_regime.script.surface import Value
 
 from .support import FETCHED, NOW, TICKER, bar_values, edt, prices
 

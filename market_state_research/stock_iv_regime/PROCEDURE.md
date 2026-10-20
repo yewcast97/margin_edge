@@ -1,4 +1,4 @@
-# Market regime: 14-DTE skew and ATM IV percentiles, return–IV correlations
+# Stock IV regime: 14-DTE skew and ATM IV percentiles, return–IV correlations
 
 This procedure keeps each ticker's 14-DTE indicators, their 252-session percentiles and the
 15-session correlations of its daily return with the changes of its 14-DTE 25Δ call and put
@@ -10,13 +10,13 @@ what the raw files hold are in [AGENTS.md](AGENTS.md).
 Run every command from the repository root:
 
 ```sh
-uv run --locked python -m market_state_research.market_regime.script COMMAND ...
+uv run --locked python -m market_state_research.stock_iv_regime.script COMMAND ...
 ```
 
 A command that succeeds exits 0 and prints JSON (`show`: Markdown), also when sessions are
 missing, when `fetch` stopped at its budget or EODHD's quota, and when Tiingo refused or
-failed to give a ticker's prices. A command that fails exits 2 with one `REGIME: ...` line
-on standard error and prints nothing else.
+failed to give a ticker's prices. A command that fails exits 2 with one
+`STOCK_IV_REGIME: ...` line on standard error and prints nothing else.
 
 ## 1. Settings and parameters
 
@@ -33,12 +33,12 @@ reports them only as `"eodhd_key": "set"` and `"tiingo_key": "set"`.
 | `--refresh` | off | `fetch` and `plan`: treat every window session as missing, whatever is stored, and request the prices again. Use it only when the user asks, on one `fetch`, and plan afterwards without it. |
 | `--budget R` | 9000 | `fetch`: the most requests the run sends to EODHD. |
 | `--partial` | off | `record`: write the report although sessions are not fetched or the prices are not current (section 4). |
-| `--data-dir PATH` | `market_state_research/market_regime/data` | Every command; another directory for isolated checks. |
+| `--data-dir PATH` | `market_state_research/stock_iv_regime/data` | Every command; another directory for isolated checks. |
 
 ## 2. Plan
 
 ```sh
-uv run --locked python -m market_state_research.market_regime.script plan --lookback 50
+uv run --locked python -m market_state_research.stock_iv_regime.script plan --lookback 50
 ```
 
 Per ticker:
@@ -65,7 +65,7 @@ Per ticker:
 ## 3. Fetch
 
 ```sh
-uv run --locked python -m market_state_research.market_regime.script fetch --lookback 50
+uv run --locked python -m market_state_research.stock_iv_regime.script fetch --lookback 50
 ```
 
 The run first asks Tiingo for the prices of every ticker whose prices are not current, one
@@ -139,7 +139,7 @@ the span again as for a new ticker (backfill, above).
 ## 4. Record
 
 ```sh
-uv run --locked python -m market_state_research.market_regime.script record TICKER --lookback 50
+uv run --locked python -m market_state_research.stock_iv_regime.script record TICKER --lookback 50
 ```
 
 | Field | Meaning |

@@ -59,7 +59,7 @@ def test_both_readers_default_to_the_repository_root_watchlist():
 
 
 def test_a_domains_own_watchlist_overrides_the_repository_roots(tmp_path):
-    domain = tmp_path / "market_regime"
+    domain = tmp_path / "stock_iv_regime"
     domain.mkdir()
     assert default_watchlist(domain) == WATCHLIST_PATH
     (domain / "watchlist.json").mkdir()  # a directory of that name is no watchlist

@@ -14,8 +14,8 @@ from time import tzset
 import pytest
 
 from market_state_research.common.layout import DataLayout
-from market_state_research.market_regime.script import client as client_module
-from market_state_research.market_regime.script import tiingo as tiingo_module
+from market_state_research.stock_iv_regime.script import client as client_module
+from market_state_research.stock_iv_regime.script import tiingo as tiingo_module
 
 from .support import NOW
 

@@ -48,7 +48,7 @@ python_version = "3.13"
 strict = true
 files = [
     "market_state_research/common",
-    "market_state_research/market_regime/script",
+    "market_state_research/stock_iv_regime/script",
     "market_state_research/fundamentals/script",
 ]
 explicit_package_bases = true

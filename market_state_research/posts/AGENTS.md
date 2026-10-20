@@ -195,7 +195,7 @@ quotes in turn. An interval without posts holds the header, with `count: 0`, and
     issuer's filings and official releases, a statement on the official site or account of the
     person or body concerned, the records and data of a government, a regulator, a central bank,
     an exchange or a court, and this repository's own domain data (the `formatted/` and
-    `reports/` files of `market_regime` and `fundamentals`), read and never changed;
+    `reports/` files of `stock_iv_regime` and `fundamentals`), read and never changed;
   - secondary: reputable press, an outlet with editorial standards and published corrections,
     preferably one that names its own source.
 

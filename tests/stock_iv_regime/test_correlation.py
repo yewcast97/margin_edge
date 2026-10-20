@@ -8,14 +8,14 @@ from fractions import Fraction
 import pytest
 
 from market_state_research.common.sessions import session_window
-from market_state_research.market_regime.script.correlation import (
+from market_state_research.stock_iv_regime.script.correlation import (
     WINDOW,
     _rounded_root,
     correlation,
     iv_change,
     pearson,
 )
-from market_state_research.market_regime.script.surface import Value
+from market_state_research.stock_iv_regime.script.surface import Value
 
 END = date(2026, 10, 16)
 SESSIONS = session_window(END, WINDOW + 1)  # 2026-09-25 to 2026-10-16

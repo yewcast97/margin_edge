@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from market_state_research.common.sessions import session_window
-from market_state_research.market_regime.script.store import (
+from market_state_research.stock_iv_regime.script.store import (
     CSV_COLUMNS,
     csv_text,
     derive,
@@ -16,7 +16,7 @@ from market_state_research.market_regime.script.store import (
     select,
     select_prices,
 )
-from market_state_research.market_regime.script.surface import Value, surface
+from market_state_research.stock_iv_regime.script.surface import Value, surface
 
 from .support import (
     AS_OF,

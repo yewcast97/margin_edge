@@ -1,4 +1,4 @@
-"""Command line for the market regime pipeline; see the domain's PROCEDURE.md.
+"""Command line for the stock IV regime pipeline; see the domain's PROCEDURE.md.
 
 Per ticker and XNYS session, from EODHD's end-of-day option chains and Tiingo's daily
 prices: the 14-DTE 25-delta skew (put IV minus call IV) and the 14-DTE ATM IV, with each
@@ -32,20 +32,20 @@ from .tiingo import API_KEY_SETTING as TIINGO_KEY_SETTING
 from .tiingo import TiingoClient, TiingoError
 from .workflow import DEFAULT_BUDGET, DEFAULT_LOOKBACK, fetch, plan, record, show
 
-PROGRAM = "python -m market_state_research.market_regime.script"
-LABEL = "REGIME"
+PROGRAM = "python -m market_state_research.stock_iv_regime.script"
+LABEL = "STOCK_IV_REGIME"
 DOMAIN_DIRECTORY = DATA_DIRECTORY.parent
 
 
-class RegimeParser(Parser):
-    """This domain's parser: every command-line error is one ``REGIME: ...`` line."""
+class StockIvRegimeParser(Parser):
+    """This domain's parser: every command-line error is one ``STOCK_IV_REGIME: ...`` line."""
 
     label = LABEL
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = RegimeParser(prog=PROGRAM, description=__doc__)
-    data = RegimeParser(add_help=False)
+    parser = StockIvRegimeParser(prog=PROGRAM, description=__doc__)
+    data = StockIvRegimeParser(add_help=False)
     data.add_argument(
         "--data-dir",
         type=directory_path,
@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="runtime data directory (default: this domain's data/)",
     )
-    common = RegimeParser(add_help=False, parents=[data])
+    common = StockIvRegimeParser(add_help=False, parents=[data])
     common.add_argument(
         "--lookback",
         type=positive_integer("sessions"),
@@ -61,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help=f"trading sessions ending at the latest completed session (default: {DEFAULT_LOOKBACK})",
     )
-    selection = RegimeParser(add_help=False)
+    selection = StockIvRegimeParser(add_help=False)
     selection.add_argument(
         "tickers", nargs="*", metavar="TICKER", help="default: the stock section of the watchlist"
     )

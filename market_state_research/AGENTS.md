@@ -11,7 +11,7 @@ source or a domain's data directory lives once in the shared `common/` package.
 The domains are operated by the bot under rules the maintainer makes, as the root
 [AGENTS.md](../AGENTS.md) defines both (Who does what): from its own host the bot runs the
 commands and follows each domain's `PROCEDURE.md`, never edits a rule, and opens a GitHub
-issue when one blocks or misleads it. In the two scripted domains, `market_regime` and
+issue when one blocks or misleads it. In the two scripted domains, `stock_iv_regime` and
 `fundamentals`, every source is read by Python through an API, so the bot needs a shell with
 uv and network access, and no browser; in `posts` the bot reads each nominated account by
 whatever route its host offers and writes every file itself. Nothing the bot produces is
@@ -25,7 +25,7 @@ market_state_research/
 ├── AGENTS.md
 ├── TODO.md             (the maintainer's backlog, ignored by Git)
 ├── common/             shared Python package, bound to no domain
-├── <domain>/           a scripted domain: market_regime, fundamentals
+├── <domain>/           a scripted domain: stock_iv_regime, fundamentals
 │   ├── AGENTS.md
 │   ├── PROCEDURE.md
 │   ├── watchlist.json      (optional; the user's own, ignored by Git)
@@ -117,7 +117,7 @@ bot writes all three by hand, under that domain's `AGENTS.md`:
 | Section | Contents | Written by |
 | --- | --- | --- |
 | `raw/` | What was fetched, verbatim, as the domain's `AGENTS.md` describes each file; in `posts`, every post of one account over one interval a human asked about. | `fetch`, the one network command of each scripted domain, and the bot only renames a file `.rejected`; in `posts`, the bot, once per file. |
-| `formatted/` | What Python derives from `raw/`: the tables or texts the domain's `AGENTS.md` names; in `posts`, the fact-check of each raw file. | `record` in `market_regime`, `text` in `fundamentals`; the bot in `posts`. |
+| `formatted/` | What Python derives from `raw/`: the tables or texts the domain's `AGENTS.md` names; in `posts`, the fact-check of each raw file. | `record` in `stock_iv_regime`, `text` in `fundamentals`; the bot in `posts`. |
 | `reports/` | What people read. | `record`, or `render` in `fundamentals`, where the bot also writes one report per document; the bot in `posts`, one report per request. |
 
 - **A run keeps what is stored.** The raw files are the evidence every value rests on, and
@@ -194,7 +194,7 @@ bot writes all three by hand, under that domain's `AGENTS.md`:
   redirect followed: a public read-only API that publishes an access policy the client
   follows to the letter (SEC EDGAR, in `fundamentals`), or a provider's API under the
   user's own key, kept in the ignored `.env`, sent only to its host and never written,
-  printed or stored (EODHD and Tiingo in `market_regime`, EarningsCalls.dev in
+  printed or stored (EODHD and Tiingo in `stock_iv_regime`, EarningsCalls.dev in
   `fundamentals`). No source of a scripted domain is read in a browser, and no command
   reads a setting it does not need. This rule binds Python. `posts` has none: the bot reads
   each nominated account by the route its host offers (its own integration with the
@@ -218,11 +218,11 @@ bot writes all three by hand, under that domain's `AGENTS.md`:
 
 | Domain | Aim | Sources |
 | --- | --- | --- |
-| [`market_regime`](market_regime/AGENTS.md) ([procedure](market_regime/PROCEDURE.md)) | Per session, the 14-DTE 25Δ skew and ATM IV and their 252-session percentiles, and the 15-session correlations of the stock's daily return with the changes of the 14-DTE 25Δ call and put IVs, over a look-back window, in two charts read together. | EODHD options API (`EODHD_API`) and Tiingo daily prices (`TIINGO_API`). |
+| [`stock_iv_regime`](stock_iv_regime/AGENTS.md) ([procedure](stock_iv_regime/PROCEDURE.md)) | Per session, the 14-DTE 25Δ skew and ATM IV and their 252-session percentiles, and the 15-session correlations of the stock's daily return with the changes of the 14-DTE 25Δ call and put IVs, over a look-back window, in two charts read together. | EODHD options API (`EODHD_API`) and Tiingo daily prices (`TIINGO_API`). |
 | [`fundamentals`](fundamentals/AGENTS.md) ([procedure](fundamentals/PROCEDURE.md)) | What each stock issuer's own documents of each fiscal period say, in eleven fields of verbatim quotes, compiled into a time series. | SEC EDGAR (`SEC_USER_AGENT`) and the EarningsCalls.dev transcript API (`EARNINGSCALLS_API`). |
 | [`posts`](posts/AGENTS.md) ([procedure](posts/PROCEDURE.md)) | Per nominated poster, every post of the intervals a human asked about, archived verbatim and fact-checked claim by claim against cited evidence (`true`, `unverified` or `fake`); a profile with the poster's background and the count of verdicts so far; a report per request. | The poster's accounts, by the route the bot's host offers (a key only when that route is a platform's API: `{PLATFORM}_API`); evidence from primary sources first. |
 
-### market_regime
+### stock_iv_regime
 
 For each ticker, `fetch` first writes its daily prices from Tiingo as
 `raw/{TICKER}/prices_{END}_{TOKEN}.json.gz` whenever the newest are not current, then each

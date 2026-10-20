@@ -2,7 +2,7 @@
 
 import pytest
 
-from market_state_research.market_regime.script.client import (
+from market_state_research.stock_iv_regime.script.client import (
     API_KEY_MALFORMED,
     API_KEY_UNSET,
     PACING,

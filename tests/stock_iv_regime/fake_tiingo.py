@@ -15,9 +15,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from urllib.parse import parse_qsl, urlsplit
 
-from market_state_research.market_regime.script.client import Response
-from market_state_research.market_regime.script.prices import BAR_FIELDS
-from market_state_research.market_regime.script.tiingo import TiingoClient
+from market_state_research.stock_iv_regime.script.client import Response
+from market_state_research.stock_iv_regime.script.prices import BAR_FIELDS
+from market_state_research.stock_iv_regime.script.tiingo import TiingoClient
 
 from .support import NOW, TIINGO_CANARY, bar_values
 

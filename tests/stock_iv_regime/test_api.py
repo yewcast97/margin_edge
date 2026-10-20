@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from market_state_research.market_regime.script.api import (
+from market_state_research.stock_iv_regime.script.api import (
     FIELDS,
     Page,
     Query,
@@ -17,7 +17,7 @@ from market_state_research.market_regime.script.api import (
     parse_occ,
     parse_page,
 )
-from market_state_research.market_regime.script.client import EodhdError
+from market_state_research.stock_iv_regime.script.client import EodhdError
 
 from .fake_eodhd import FakeEodhd
 from .support import TICKER, attributes

@@ -1,4 +1,4 @@
-# Market regime
+# Stock IV regime
 
 This domain records, per ticker and per XNYS session, option-implied volatility indicators
 from EODHD's end-of-day option chains, the percentiles of two of them over the 252 sessions
@@ -195,7 +195,7 @@ The twin holds the same statements and tables as Markdown text.
 ## Commands
 
 Run from the repository root as
-`uv run --locked python -m market_state_research.market_regime.script COMMAND`, each taking
+`uv run --locked python -m market_state_research.stock_iv_regime.script COMMAND`, each taking
 `--lookback N` (default 50) and `--data-dir PATH`:
 
 | Command | Does |
@@ -208,16 +208,16 @@ Run from the repository root as
 Without tickers, `fetch` and `plan` take the `stock` section of this domain's
 `watchlist.json` when it exists, else of the repository-root one, and print the file they
 read. A command that succeeds exits 0 and prints JSON (`show`: Markdown); a refusal exits 2
-with one `REGIME: ...` line on standard error. `plan`, `record` and `show` read no setting.
-[PROCEDURE.md](PROCEDURE.md) gives each field and the step that follows.
+with one `STOCK_IV_REGIME: ...` line on standard error. `plan`, `record` and `show` read no
+setting. [PROCEDURE.md](PROCEDURE.md) gives each field and the step that follows.
 
 ## Architecture
 
-The package `market_state_research.market_regime.script`:
+The package `market_state_research.stock_iv_regime.script`:
 
 | Module | Responsibility |
 | --- | --- |
-| `__main__` | The command line (`REGIME` label); builds the EODHD client from `EODHD_API` and the Tiingo client from `TIINGO_API` for `fetch` only, before the watchlist is read. |
+| `__main__` | The command line (`STOCK_IV_REGIME` label); builds the EODHD client from `EODHD_API` and the Tiingo client from `TIINGO_API` for `fetch` only, before the watchlist is read. |
 | `client` | HTTPS to `eodhd.com` only, the key appended at send time and redacted from every message, pacing, the budget, statuses (402 `QuotaExceeded`, 429 retried once after `Retry-After`), bounded and whole bodies. Its HTTP reading helpers are copies of the fundamentals domain's (domains never import one another); `tiingo` shares them. |
 | `tiingo` | HTTPS to `api.tiingo.com` only, the key only in the `Authorization` header, never in a URL; statuses (404 `NotCovered`, 401, 403 and 429 `Stopped`); bounded and whole bodies. |
 | `api` | The EODHD queries and their URLs, one page per query (never a second page), page parsing with numbers kept as literal text, the record checks (OCC symbol against expiry, type and strike; number, date and word forms). |
@@ -432,7 +432,7 @@ chains are fetched whatever Tiingo answered.
 
 ## Tests
 
-`tests/market_regime/` runs offline: `fake_eodhd.py` answers both EODHD endpoints from
+`tests/stock_iv_regime/` runs offline: `fake_eodhd.py` answers both EODHD endpoints from
 records in memory as EODHD does (filters, sort, fields, pages, the offset cap and, on
 request, ties shuffled between requests; scripted statuses) and records every URL and
 token; `fake_tiingo.py` answers Tiingo's prices endpoint from bars in memory as Tiingo does

@@ -37,7 +37,7 @@ A hypothesis's data are its own, independent of market state research's.
   changes a domain's data, outputs or freshness.
 - Nothing here fetches. A source no domain supplies is asked of the maintainer, in an issue,
   as a domain under `market_state_research`; the stocks' daily prices, for one, are
-  `market_regime`'s, from Tiingo.
+  `stock_iv_regime`'s, from Tiingo.
 - No watchlist applies: a hypothesis names its tickers.
 
 ## Layout
@@ -61,7 +61,7 @@ explore_hypothesis/
 | `<name>.json` | The thesis in seikan's DSL. It names its series (targets, external feeds, the benchmark) and never locates them; `seikan hash` validates it and lists the data keys a run must bind. No script writes or edits it. |
 | `procedure.md` | The steps in order, so that another run repeats them: the thesis in one sentence; the domain data it reads (domains, sections, tickers, dates) and the domain procedure that supplies them; the files copied into `data/source/`; the script's command and what it writes; `seikan check-data` on each feed; `seikan hash`; the `seikan run` command with every binding and output path; what to report back. It changes whenever the steps change. |
 | `script/` | A package run from the repository root as `uv run --locked python -m explore_hypothesis.<name>.script …` (Conventions of a script). |
-| `data/source/` | Files copied from a domain's `data/`, byte for byte, under the domain's own path (`market_regime/formatted/INTC/volatility.csv`). A copy is never edited; a newer one replaces it only by being copied again. |
+| `data/source/` | Files copied from a domain's `data/`, byte for byte, under the domain's own path (`stock_iv_regime/formatted/INTC/volatility.csv`). A copy is never edited; a newer one replaces it only by being copied again. |
 | `data/formatted/{TICKER}/{SOURCE}.csv` | One feed per ticker and source in seikan's strict contract, rewritten by the script. |
 | `data/reports/` | seikan's outputs (`--report-out`, `--trades-out`, `--root-series-out`, `--entry-flags-out`), each name carrying a New York time token (`common.times.timestamp_token`) so that no report is overwritten. |
 

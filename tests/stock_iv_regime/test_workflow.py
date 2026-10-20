@@ -5,8 +5,8 @@ from datetime import timedelta
 import pytest
 
 from market_state_research.common.sessions import session_window
-from market_state_research.market_regime.script import workflow
-from market_state_research.market_regime.script.workflow import fetch, plan, record, show
+from market_state_research.stock_iv_regime.script import workflow
+from market_state_research.stock_iv_regime.script.workflow import fetch, plan, record, show
 
 from .fake_eodhd import FakeEodhd
 from .fake_tiingo import FakeTiingo
