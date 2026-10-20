@@ -14,9 +14,11 @@ daily task is missing from your host, set up first (section 3); the daily task r
 ## 1. The watchlist, routes and a request's parameters
 
 **The watchlist.** Read `market_state_research/posts/watchlist.json` at the start of every
-routine (AGENTS.md, Posters, accounts and routes). When it is missing or malformed, or a request
-names a poster it does not list, collect nothing for that poster and tell the user: only the
-user edits the watchlist. Go on with the posters it lists.
+routine (AGENTS.md, Posters, accounts and routes). You maintain it: add or remove a poster or an
+account when the user asks or your judgment calls for it, write the file when it is missing and
+correct it when it is malformed, and report every change. When a request names a poster it does
+not list, add them with the accounts the user gives, or ask for them, and set them up (section
+3) before the request.
 
 **Routes and keys.** Read each account by a route your host offers: your own integration with
 the platform, the platform's API under the user's key, or a browser on your host (AGENTS.md,

@@ -23,8 +23,8 @@ transcript provider published since.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| Ticker | `fetch`, `plan`: the watchlist's `stock` section | The exact symbol: any number for `fetch` and `plan` (by default the `stock` section of the watchlist, in file order), one for the other commands. |
-| `--watchlist PATH` | this domain's `watchlist.json`, else the repository-root one | `fetch` and `plan` only: the watchlist read when no ticker is given, which both print as `watchlist` (null when tickers are given). One that is missing, malformed or without `stock` tickers stops either command with one line naming the file: report it (only the user edits a watchlist) and meanwhile pass the tickers the user names. |
+| Ticker | `fetch`, `plan`: the tickers of the watchlist | The exact symbol: any number for `fetch` and `plan` (by default the tickers of the watchlist, in file order), one for the other commands. |
+| `--watchlist PATH` | this domain's `watchlist.json`, which you maintain ([market_state_research/AGENTS.md](../AGENTS.md), Watchlists) | `fetch` and `plan` only: the watchlist read when no ticker is given, which both print as `watchlist` (null when tickers are given). One that is missing, malformed or without a ticker stops either command with one line naming the file: write or correct the file with the tickers the user follows, report the change and run the command again. |
 | `--from YYYY-MM-DD` | the same day two years before `--to` (29 February: 28 February) | `fetch` and `plan` only: the earliest period end in the window, a New York date in ASCII digits; refused when it is after `--to`. |
 | `--to YYYY-MM-DD` | today's New York date | `fetch` and `plan` only: the latest period end in the window; refused when it is after today. |
 | `--refresh` | off | `fetch` and `plan` only: request the window's EDGAR documents, transcripts and calls list again, whatever `raw/` holds (section 2); `plan` then says `fetch`. Use it only when the user asks, on one `fetch`, and plan afterwards without it: one EDGAR request per window document and one EarningsCalls.dev request per transcript, plus the calls list. |

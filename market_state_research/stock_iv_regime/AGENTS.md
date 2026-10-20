@@ -205,11 +205,11 @@ Run from the repository root as
 | `record TICKER [--partial]` | Rewrites the table from `raw/`; writes the report and its twin when every span session is fetched and the prices are current, or with `--partial` when a window session is fetched. Refuses while a raw file of the ticker is invalid. |
 | `show TICKER` | Read-only: one status line, then the twin recomputed from `raw/`. |
 
-Without tickers, `fetch` and `plan` take the `stock` section of this domain's
-`watchlist.json` when it exists, else of the repository-root one, and print the file they
-read. A command that succeeds exits 0 and prints JSON (`show`: Markdown); a refusal exits 2
-with one `STOCK_IV_REGIME: ...` line on standard error. `plan`, `record` and `show` read no
-setting. [PROCEDURE.md](PROCEDURE.md) gives each field and the step that follows.
+Without tickers, `fetch` and `plan` take the stock tickers of this domain's
+`watchlist.json` and print the file they read. A command that succeeds exits 0 and prints
+JSON (`show`: Markdown); a refusal exits 2 with one `STOCK_IV_REGIME: ...` line on standard
+error. `plan`, `record` and `show` read no setting. [PROCEDURE.md](PROCEDURE.md) gives each
+field and the step that follows.
 
 ## Architecture
 

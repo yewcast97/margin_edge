@@ -10,8 +10,7 @@ EODHD's options API under EODHD_API (from the environment or the ignored reposit
 and writes each ticker's prices and each session's chain to data/raw/. plan, record and
 show work offline: they plan the next step, record the raw files into the formatted CSV and
 a report and show the window. Without tickers, fetch and plan read this domain's
-watchlist.json, else the repository-root one. The clock is read in New York time, and every
-time printed is New York time.
+watchlist.json. The clock is read in New York time, and every time printed is New York time.
 """
 
 import argparse
@@ -24,17 +23,15 @@ from market_state_research.common.cli import Parser, directory_path, fail, file_
 from market_state_research.common.env import setting
 from market_state_research.common.layout import DataLayout
 from market_state_research.common.times import NEW_YORK, to_eastern
-from market_state_research.common.watchlist import default_watchlist
 
 from .client import API_KEY_SETTING, EodhdClient, EodhdError
 from .store import DATA_DIRECTORY
 from .tiingo import API_KEY_SETTING as TIINGO_KEY_SETTING
 from .tiingo import TiingoClient, TiingoError
-from .workflow import DEFAULT_BUDGET, DEFAULT_LOOKBACK, fetch, plan, record, show
+from .workflow import DEFAULT_BUDGET, DEFAULT_LOOKBACK, WATCHLIST, fetch, plan, record, show
 
 PROGRAM = "python -m market_state_research.stock_iv_regime.script"
 LABEL = "STOCK_IV_REGIME"
-DOMAIN_DIRECTORY = DATA_DIRECTORY.parent
 
 
 class StockIvRegimeParser(Parser):
@@ -73,12 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
     selection.add_argument(
         "--watchlist",
         type=file_path,
-        default=default_watchlist(DOMAIN_DIRECTORY),
+        default=WATCHLIST,
         metavar="PATH",
-        help=(
-            "watchlist read when no ticker is given (default: this domain's watchlist.json, else the "
-            "repository-root one)"
-        ),
+        help="watchlist read when no ticker is given (default: this domain's watchlist.json)",
     )
     commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 

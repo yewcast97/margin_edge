@@ -3,15 +3,14 @@
 This domain keeps, per stock issuer and per fiscal period in a window, the issuer's own
 documents of the period verbatim, derives their text, records what each document says in
 eleven fields of verbatim quotes, and compiles the complete periods into a time series.
-It covers the watchlist's `stock` section only: an index has no issuer, so the `index`
-section plays no part here. This file says first what the work aims at, the model of
-periods, releases and calls, the eleven fields, the rules a quote keeps, the report
-grammar, what the series holds and the commands; then the sources and why Python may read
-them, the module boundaries, the runtime files, the formats verified live and the
-fixtures. The operations the bot carries out (settings, `fetch`, `plan`, reading, writing
-and checking reports, `render`, `show`, failures) are in the sibling
-[PROCEDURE.md](PROCEDURE.md); the conventions every domain shares (the domain layout, the
-three sections of `data/`, New York time, the API rule) are in
+Its default tickers are those of this domain's own watchlist. This file says first what
+the work aims at, the model of periods, releases and calls, the eleven fields, the rules a
+quote keeps, the report grammar, what the series holds and the commands; then the sources
+and why Python may read them, the module boundaries, the runtime files, the formats
+verified live and the fixtures. The operations the bot carries out (settings, `fetch`,
+`plan`, reading, writing and checking reports, `render`, `show`, failures) are in the
+sibling [PROCEDURE.md](PROCEDURE.md); the conventions every domain shares (the domain
+layout, the three sections of `data/`, New York time, the API rule) are in
 [market_state_research/AGENTS.md](../AGENTS.md). This domain reads no market data, so it
 has no session logic, and its documents are dated by their own dates.
 
@@ -561,7 +560,7 @@ again (Commands).
 | --- | --- |
 | `AGENTS.md` | This file: the domain's aim, model, rules and outputs, then its sources, architecture and formats. |
 | `PROCEDURE.md` | The bot's workflow: settings and parameters, `fetch`, `plan`, reading the derived text, writing and checking reports, `render`, `show`, failures. |
-| `script/__main__.py` | Command line: `fetch`, `plan`, `text`, `check`, `render`, `show`; `LABEL = "FUNDAMENTALS"`, `FundamentalsParser` and `DATA_DIRECTORY`; `fetch` and `plan` default to the `stock` section of this domain's `watchlist.json`, else the repository-root one (`--watchlist PATH`), print the file they read (`watchlist`) and take `--refresh` and the window (`--from`, `--to`), which `main` resolves from the New York date and checks before the data directory, the settings or any request; builds the EDGAR client from `SEC_USER_AGENT` and the EarningsCalls.dev client from `EARNINGSCALLS_API` (`CALLS_SETTING`) for `fetch` only, before the watchlist is read; ASCII-only JSON output, `show`'s Markdown; exit codes. |
+| `script/__main__.py` | Command line: `fetch`, `plan`, `text`, `check`, `render`, `show`; `LABEL = "FUNDAMENTALS"`, `FundamentalsParser` and `DATA_DIRECTORY`; `fetch` and `plan` default to the tickers of this domain's `watchlist.json` (`workflow.WATCHLIST`; `--watchlist PATH`), print the file they read (`watchlist`) and take `--refresh` and the window (`--from`, `--to`), which `main` resolves from the New York date and checks before the data directory, the settings or any request; builds the EDGAR client from `SEC_USER_AGENT` and the EarningsCalls.dev client from `EARNINGSCALLS_API` (`CALLS_SETTING`) for `fetch` only, before the watchlist is read; ASCII-only JSON output, `show`'s Markdown; exit codes. |
 | `script/workflow.py` | The commands over `raw/`, `formatted/` and `reports/`: `fetch` (CIK lookup, the submissions JSON, then for each window period, oldest first, its 10-K or 10-Q, each release's filing index page and its EX-99 exhibits in Seq order, each only while it is not in `raw/`, or, with `--refresh`, requested again and compared with its file (`verified`, `changed`), never rewritten; `truncated` and the pending releases; then the calls list when due, or always with `--refresh`, and the transcripts, one whose bytes changed written beside the stored copy with `--refresh` (`refreshed`); `unsupported` and `stopped` calls), `plan` (the window periods' documents, calls, texts and reports, the series' freshness and the next action), `text`, `check` (`check_report`, with a call's turns), `render` and `show`. |
 | `script/client.py` | EDGAR over HTTPS: URL builders (`submissions_url`, `archive_url`, `index_url`), `User-Agent` check, pacing, status, encoding and size rules (`JSON_LIMIT`, `DOCUMENT_LIMIT`, `INDEX_LIMIT`), the refusal of a body cut short of its `Content-Length`, no redirect followed, `EdgarError`; an injectable `Fetch`, `sleep` and clock; `decode_document` (strict UTF-8, else Latin-1); the HTTP reading `earningscalls` shares (`Response`, `read_body`, `lower_headers`, `declared_length`, `count_order`, `failure_reason`). |
 | `script/earningscalls.py` | EarningsCalls.dev over HTTPS: the key check (`check_api_key`, `API_KEY_SETTING`), `HOST` only (`allowed_url`), pacing, status, encoding and size rules (`BODY_LIMIT`), no redirect followed, `EarningsCallsError` and `LimitReached` (HTTP 429); `EarningsCallsClient` (`events_page`, `transcript`) with an injectable `Fetch` (`urllib_fetch`), `sleep` and clock; the strict reading of a calls page (`parse_events_page`), of a capture (`check_capture`, `check_issuer`, `Ambiguous`) and of a transcript against its listed call (`parse_transcript`); a call's derived text and turns (`call_text`, `CallText`). |
@@ -580,8 +579,8 @@ clients and their errors) and `filings` (`Window` and `default_window`); `workfl
 and the HTTP reading it shares), `research` (`Turn`) and `text`; `research` uses `text`.
 `client`, `filings` and `text` depend on nothing else in the package. From
 `market_state_research.common`, `__main__` takes its parser, argument types and `fail`
-(`cli`), the settings (`env`), the default watchlist (`watchlist`) and `DataLayout`
-(`layout`); `workflow` reads the watchlist (`watchlist`) and normalises tickers (`text`);
+(`cli`), the settings (`env`) and `DataLayout` (`layout`); `workflow` names the domain's
+watchlist and reads it (`watchlist`) and normalises tickers (`text`);
 `documents`, `report` and `workflow` use `layout`; `client`, `earningscalls`, `filings`,
 `report`, `research` and `workflow` keep messages on one line with `text.printable`; and
 the modules read the clock and convert times through `times`. This domain imports

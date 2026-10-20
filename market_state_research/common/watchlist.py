@@ -1,14 +1,12 @@
-"""The ticker watchlists of market state research, the user's own and ignored by Git: the
-default tickers of every scripted domain's ``plan`` and ``fetch``.
+"""The ticker watchlists of market state research, maintained by the bot and ignored by Git:
+the default tickers of a ticker domain's ``plan`` and ``fetch``.
 
-``watchlist.json`` holds exactly two sections, ``stock`` and ``index``, each a list of
-ticker symbols kept in file order. A stock domain's ``plan`` and ``fetch`` default to the
-``stock`` section; ``index`` is reserved for index workflows. The repository-root file is
-every scripted domain's default; a domain's own ``watchlist.json``, beside its
-``AGENTS.md``, overrides it whole for that domain (nothing is merged); ``--watchlist PATH``
-overrides both; tickers given on a command line override every file, which is then not
-read. Hypothesis exploration reads no watchlist, and the list of posters in ``posts`` is
-the bot's to read, never this module's.
+Each domain that takes tickers reads its own ``watchlist.json``, beside its ``AGENTS.md``;
+there is no shared watchlist to fall back on. The file holds exactly one section,
+``stock``, a list of stock ticker symbols kept in file order. ``--watchlist PATH`` reads
+another file; tickers given on a command line override every file, which is then not read.
+Hypothesis exploration reads no watchlist, and the list of posters in ``posts`` is the
+bot's to read, never this module's.
 """
 
 import json
@@ -16,27 +14,23 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
-from . import REPOSITORY_ROOT
 from .text import printable, ticker_symbol
 
 WATCHLIST_NAME = "watchlist.json"
-WATCHLIST_PATH = REPOSITORY_ROOT / WATCHLIST_NAME
-SECTIONS = ("stock", "index")
+SECTIONS = ("stock",)
 
 
-def default_watchlist(domain: Path) -> Path:
-    """The watchlist a domain reads by default: its own ``watchlist.json`` (in ``domain``, the
-    domain's directory) when that is a file, else the repository-root one."""
-    own = domain / WATCHLIST_NAME
-    return own if own.is_file() else WATCHLIST_PATH
+def domain_watchlist(domain: Path) -> Path:
+    """The watchlist a domain reads by default: its own ``watchlist.json`` in ``domain``, the
+    domain's directory, whether or not it exists yet (a missing one is reported when read)."""
+    return domain / WATCHLIST_NAME
 
 
 @dataclass(frozen=True)
 class Watchlist:
-    """Normalised ticker symbols of each section, in file order; either section may be empty."""
+    """Normalised stock ticker symbols, in file order; the list may be empty."""
 
     stock: tuple[str, ...]
-    index: tuple[str, ...]
 
 
 def _quoted(text: str) -> str:
@@ -90,26 +84,21 @@ def _parse(path: Path) -> Watchlist:
     except RecursionError:
         raise ValueError("invalid JSON: nested too deeply") from None
     if not isinstance(value, dict):
-        raise ValueError('expected a JSON object with "stock" and "index" lists')
+        raise ValueError('expected a JSON object with a "stock" list')
     if set(value) != set(SECTIONS):
         listed = ", ".join(_quoted(key) for key in value) or "none"
-        raise ValueError(f'keys must be exactly "stock" and "index", got {listed}')
-    stock, index = (_section(name, value[name]) for name in SECTIONS)
-    for symbol in stock:
-        if symbol in index:
-            raise ValueError(f'{symbol} is listed in both "stock" and "index"')
-    return Watchlist(stock=stock, index=index)
+        raise ValueError(f'the one key must be "stock", got {listed}')
+    return Watchlist(stock=_section("stock", value["stock"]))
 
 
-def load_watchlist(path: Path = WATCHLIST_PATH) -> Watchlist:
+def load_watchlist(path: Path) -> Watchlist:
     """Read and validate the watchlist at ``path``.
 
     Symbols are normalised with ``ticker_symbol`` and kept in file order. Every problem
     (a missing file, bytes that are not UTF-8, invalid JSON, a repeated key, keys other
-    than exactly ``stock`` and ``index``, a section that is not a list, an item that is
-    not a valid symbol, a symbol repeated within a section or listed in both) raises one
-    ``ValueError`` line prefixed by the printable path. Other filesystem errors (for
-    example permissions) propagate unchanged.
+    than exactly ``stock``, a section that is not a list, an item that is not a valid
+    symbol, a symbol repeated) raises one ``ValueError`` line prefixed by the printable
+    path. Other filesystem errors (for example permissions) propagate unchanged.
     """
     try:
         return _parse(path)
@@ -117,8 +106,8 @@ def load_watchlist(path: Path = WATCHLIST_PATH) -> Watchlist:
         raise ValueError(printable(f"{path}: {error}")) from None
 
 
-def stock_tickers(path: Path = WATCHLIST_PATH) -> tuple[str, ...]:
-    """The ``stock`` section of the watchlist at ``path``: a stock domain's default tickers.
+def stock_tickers(path: Path) -> tuple[str, ...]:
+    """The ``stock`` section of the watchlist at ``path``: a ticker domain's default tickers.
 
     An empty section raises ``ValueError``, since a ``plan`` without tickers has nothing to do.
     """

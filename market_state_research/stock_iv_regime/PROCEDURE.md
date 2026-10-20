@@ -28,8 +28,8 @@ reports them only as `"eodhd_key": "set"` and `"tiingo_key": "set"`.
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `--lookback N` | 50 | The window's length in sessions. Use the same N for every command of one run. |
-| `TICKER ...` | the `stock` section of the watchlist | `fetch` and `plan` take any number; `record` and `show` take one. |
-| `--watchlist PATH` | this domain's `watchlist.json`, else the repository-root one | `fetch` and `plan`: the file read when no ticker is given, which both print as `watchlist` (null when tickers are given). |
+| `TICKER ...` | the tickers of the watchlist | `fetch` and `plan` take any number; `record` and `show` take one. |
+| `--watchlist PATH` | this domain's `watchlist.json`, which you maintain ([market_state_research/AGENTS.md](../AGENTS.md), Watchlists) | `fetch` and `plan`: the file read when no ticker is given, which both print as `watchlist` (null when tickers are given). |
 | `--refresh` | off | `fetch` and `plan`: treat every window session as missing, whatever is stored, and request the prices again. Use it only when the user asks, on one `fetch`, and plan afterwards without it. |
 | `--budget R` | 9000 | `fetch`: the most requests the run sends to EODHD. |
 | `--partial` | off | `record`: write the report although sessions are not fetched or the prices are not current (section 4). |
@@ -181,4 +181,4 @@ root [AGENTS.md](../../AGENTS.md), Who does what), never into the rule.
 | `fetched_at ... is later than the current time` | The host clock is behind the file's time: report both times before renaming anything. |
 | A ticker EODHD does not cover | Every session gets an empty chain: report it as uncovered. |
 | `PATH.md already exists; refusing to overwrite it` | Another `record` wrote that report in the same second: run `plan` and follow it. |
-| A watchlist message (`file not found`, `lists no stock tickers`, ...) | Report it; only the user edits a watchlist. Meanwhile pass the tickers the user names. |
+| A watchlist message (`file not found`, `lists no stock tickers`, ...) | Write or correct this domain's `watchlist.json` with the tickers the user follows, report the change and run the command again. |

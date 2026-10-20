@@ -20,10 +20,9 @@ or the ignored repository-root .env), which no other command reads and fetch nev
 prints: SEC_USER_AGENT (a name and an email address) for SEC EDGAR, and EARNINGSCALLS_API,
 the user's own EarningsCalls.dev key, for the earnings calls' transcripts. Both are
 checked before the watchlist is read or any request is sent. Without tickers, fetch and
-plan read this domain's watchlist.json, else the repository-root one. The other commands
-work offline: they plan the next step, write derived text, check the agent's reports,
-render the time series and show it. The clock is read in New York time, and every time
-printed is New York time.
+plan read this domain's watchlist.json. The other commands work offline: they plan the
+next step, write derived text, check the agent's reports, render the time series and show
+it. The clock is read in New York time, and every time printed is New York time.
 """
 
 import argparse
@@ -37,12 +36,11 @@ from market_state_research.common.cli import Parser, calendar_date, directory_pa
 from market_state_research.common.env import setting
 from market_state_research.common.layout import DataLayout
 from market_state_research.common.times import NEW_YORK, to_eastern
-from market_state_research.common.watchlist import default_watchlist
 
 from .client import EdgarClient, EdgarError
 from .earningscalls import API_KEY_SETTING, EarningsCallsClient, EarningsCallsError
 from .filings import Window, default_window
-from .workflow import check, fetch, plan, render, show, text
+from .workflow import WATCHLIST, check, fetch, plan, render, show, text
 
 PROGRAM = "python -m market_state_research.fundamentals.script"
 LABEL = "FUNDAMENTALS"
@@ -85,12 +83,9 @@ def build_parser() -> argparse.ArgumentParser:
     selection.add_argument(
         "--watchlist",
         type=file_path,
-        default=default_watchlist(DOMAIN_DIRECTORY),
+        default=WATCHLIST,
         metavar="PATH",
-        help=(
-            "watchlist read when no ticker is given (default: this domain's watchlist.json, else the "
-            "repository-root one)"
-        ),
+        help="watchlist read when no ticker is given (default: this domain's watchlist.json)",
     )
     window = FundamentalsParser(add_help=False)
     window.add_argument(

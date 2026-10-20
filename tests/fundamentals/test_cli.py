@@ -13,11 +13,11 @@ network.
 Output is checked the way an agent consumes it: exit 0 with ASCII-only JSON (Markdown for
 ``show``) on standard output, or exit 2 with exactly one ``FUNDAMENTALS: ...`` line on
 standard error and nothing on standard output. ``fetch`` and ``plan`` without tickers read
-a watchlist written below ``tmp_path``; the repository-root ``watchlist.json`` is never
-read. The module entry point runs ``plan`` and ``check`` in a subprocess from a copy of
-``script/`` beside a copy of ``market_state_research/common``, with a ``watchlist.json`` at
-the copy's root and the domain's own beside its ``script/``, so its default ``data/``
-directory and watchlists are temporary as well.
+a watchlist written below ``tmp_path``; the domain's own ``watchlist.json`` is never read.
+The module entry point runs ``plan`` and ``check`` in a subprocess from a copy of
+``script/`` beside a copy of ``market_state_research/common``, with the domain's own
+``watchlist.json`` beside its ``script/`` and another at the copy's root, which is never
+read, so its default ``data/`` directory and watchlist are temporary as well.
 """
 
 import inspect
@@ -38,7 +38,6 @@ import pytest
 from market_state_research import common as common_package
 from market_state_research.common.env import setting
 from market_state_research.common.layout import DataLayout
-from market_state_research.common.watchlist import default_watchlist
 from market_state_research.fundamentals import script as script_package
 from market_state_research.fundamentals.script import __main__ as cli_module
 from market_state_research.fundamentals.script import workflow
@@ -255,7 +254,7 @@ def test_parser_defaults_follow_the_procedure():
     for command in ("fetch", "plan"):
         parsed = parser.parse_args([command])
         assert (parsed.command, parsed.tickers) == (command, [])
-        assert parsed.watchlist == default_watchlist(SCRIPT_DIRECTORY.parent)
+        assert parsed.watchlist == workflow.WATCHLIST == SCRIPT_DIRECTORY.parent / "watchlist.json"
         assert parsed.data_dir == DATA_DIRECTORY == SCRIPT_DIRECTORY.parent / "data"
         assert (parsed.window_from, parsed.window_to) == (None, None)  # main resolves them from the clock
         assert parsed.refresh is False
@@ -653,7 +652,7 @@ def test_refresh_reaches_fetch_and_plan(cli, layout):
 
 
 def test_fetch_and_plan_without_tickers_take_the_stock_section_of_the_watchlist(cli, layout, tmp_path):
-    watchlist = str(write_watchlist(tmp_path, ("intc",), ("SPX",)))
+    watchlist = str(write_watchlist(tmp_path, ("intc",)))
 
     fetched = cli("fetch", "--watchlist", watchlist, *WINDOW_ARGS, client=client(edgar())).json()
     planned = cli("plan", "--watchlist", watchlist, *WINDOW_ARGS).json()
@@ -825,9 +824,9 @@ def test_module_entry_point_uses_its_own_data_directory_and_watchlist(tmp_path):
         calls_times=tuple(start + timedelta(seconds=30 + second) for second in range(len(CALLS_TIMES))),
         now=start,
     )
-    (root / "watchlist.json").write_text('{"stock": ["amd"], "index": ["SPX"]}', encoding="utf-8")
-    # The domain's own watchlist overrides the repository-root one.
-    (domain / "watchlist.json").write_text('{"stock": ["intc"], "index": ["SPX"]}', encoding="utf-8")
+    # A watchlist at the repository root is never read: the domain reads its own alone.
+    (root / "watchlist.json").write_text('{"stock": ["amd"]}', encoding="utf-8")
+    (domain / "watchlist.json").write_text('{"stock": ["intc"]}', encoding="utf-8")
     working = tmp_path / "elsewhere"
     working.mkdir()
     before = snapshot(root)

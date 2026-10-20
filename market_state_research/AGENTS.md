@@ -28,7 +28,7 @@ market_state_research/
 ├── <domain>/           a scripted domain: stock_iv_regime, fundamentals
 │   ├── AGENTS.md
 │   ├── PROCEDURE.md
-│   ├── watchlist.json      (optional; the user's own, ignored by Git)
+│   ├── watchlist.json      (the bot's: the stock tickers, ignored by Git)
 │   ├── script/
 │   │   ├── templates/      (optional)
 │   │   └── vendor/         (optional)
@@ -40,7 +40,7 @@ market_state_research/
 └── posts/              the domain without a script
     ├── AGENTS.md
     ├── PROCEDURE.md
-    ├── watchlist.json      (the user's posters, ignored by Git)
+    ├── watchlist.json      (the bot's: the posters, ignored by Git)
     └── <poster>/           (the bot's, ignored by Git)
         ├── profile.md
         └── data/
@@ -53,10 +53,10 @@ market_state_research/
 | --- | --- |
 | `AGENTS.md` | Shared principles of the research, the domain folder conventions and the data layout. |
 | `TODO.md` | The maintainer's research scope and backlog, ignored by Git. |
-| `common/` | Python shared by every domain: New York time and file-name tokens (`times`), XNYS sessions and market status for the domains that work by session (`sessions`), the three sections of a domain's `data/` with their one write rule (`layout`), ticker and one-line message text (`text`), the one-line `LABEL: ...` command-line conventions, with each domain's own label (`cli`), the watchlists, the repository-root one and a domain's own (`watchlist`), and the personal settings of the ignored repository-root `.env` (`env`). It knows no source, no raw format and no domain's data directory, and sends no network request. |
+| `common/` | Python shared by every domain: New York time and file-name tokens (`times`), XNYS sessions and market status for the domains that work by session (`sessions`), the three sections of a domain's `data/` with their one write rule (`layout`), ticker and one-line message text (`text`), the one-line `LABEL: ...` command-line conventions, with each domain's own label (`cli`), the reader of a ticker domain's watchlist (`watchlist`), and the personal settings of the ignored repository-root `.env` (`env`). It knows no source, no raw format and no domain's data directory, and sends no network request. |
 | `<domain>/AGENTS.md` | The domain's guidance: first the aim, the outputs and what they mean, the commands; then the method, the module boundaries, the raw files, each source's formats and facts verified live, the fixtures and vendored libraries. |
 | `<domain>/PROCEDURE.md` | The domain's operations: settings, parameters, commands and their output fields (in `posts`, the steps the bot takes by hand), the routines, failure handling and the report back. |
-| `<domain>/watchlist.json` | Optional: the domain's own watchlist, the user's and ignored by Git; it replaces the repository-root one for this domain (Watchlists). In `posts` it is required and lists posters, not tickers. |
+| `<domain>/watchlist.json` | The domain's watchlist, maintained by the bot and ignored by Git (Watchlists): the stock tickers in `stock_iv_regime` and in `fundamentals`, the posters and their accounts in `posts`. |
 | `<domain>/script/` | A scripted domain's Python package and supporting code; `posts` has none. |
 | `<domain>/script/templates/` | Optional output templates read by the code, such as an HTML page. |
 | `<domain>/script/vendor/` | Optional third-party files copied unmodified from a pinned release, with their licence, notice and provenance. |
@@ -82,30 +82,30 @@ precedence, and never prints a value.
 
 ## Watchlists
 
-The repository-root `watchlist.json` lists the user's default tickers for market state
-research. Like `.env`, it is the user's own and ignored by Git, so a checkout has none until
-the user writes it, and only the user edits it:
+A domain that works through a list keeps its own `watchlist.json` beside its `AGENTS.md`:
+the stock tickers of `stock_iv_regime` and of `fundamentals`, and the posters of `posts`
+(that domain's `AGENTS.md` gives its format). There is no shared watchlist. The bot
+maintains every one (root [AGENTS.md](../AGENTS.md), Who does what): it writes the file,
+adds and removes entries on the owner's instruction or by its own judgment, corrects a file
+a command refuses, and reports each change. Like `.env`, each is ignored by Git, so a
+checkout has none until the bot writes it. A ticker watchlist holds exactly one list of
+stocks, which may be empty:
 
 ```json
 {
-  "stock": ["INTC", "MU", "AEHR", "AMAT", "TER", "AAOI"],
-  "index": ["SPX"]
+  "stock": ["INTC", "MU", "AEHR", "AMAT", "TER", "AAOI"]
 }
 ```
 
-It holds exactly these two lists, each of distinct US ticker symbols in upper or lower case,
-and no symbol is in both; either list may be empty. In the scripted domains, the
-ticker-taking commands (`plan` and `fetch`) default to the `stock` section, in file order,
-of the domain's own `watchlist.json` (beside its `AGENTS.md`, in the same format, also the
-user's and ignored by Git) when it exists, else of the repository-root one; both are read
-through `common.watchlist`, and a domain's file replaces the root one whole (nothing is
-merged). Tickers given on the command line override both without reading either,
-`--watchlist PATH` reads another file, and `plan` and `fetch` print the file they read
+Its items are distinct US stock ticker symbols in upper or lower case; an index has no
+place in it. The two ticker watchlists are independent: a stock may be on one and not on
+the other. Without tickers, `plan` and `fetch` take the list in file order, read through
+`common.watchlist`; tickers given on the command line override it without reading it,
+`--watchlist PATH` reads another file, and both commands print the file they read
 (`watchlist`, null when tickers are given). Without tickers, a file that is missing,
-malformed or without a `stock` ticker stops either command with one line naming it. The
-`index` section is reserved for index workflows. The watchlists belong to market state
-research alone: hypothesis exploration reads none, and the list of posters in `posts` (its
-`AGENTS.md`) is read by the bot, never by Python.
+malformed or without a ticker stops either command with one line naming it. The
+watchlists belong to market state research alone: hypothesis exploration reads none, and
+the posters of `posts` are read by the bot, never by Python.
 
 ## Data layout
 
@@ -259,11 +259,11 @@ the next step; `text` writes each document's text to `formatted/{TICKER}/{DOC_ID
 bot writes `reports/{TICKER}/{DOC_ID}.md`, which `check` validates (a call is quoted only
 from its executives); `render` writes the time series `{TICKER}_{AS_OF}_{TOKEN}.md` beside
 them, and `show` prints it. Nothing is paraphrased; no valuation, forecast or advice is
-added. The watchlist's `index` section plays no part in it.
+added.
 
 ### posts
 
-For each poster of `posts/watchlist.json` (the user's: each poster with their accounts, by
+For each poster of `posts/watchlist.json` (the bot's: each poster with their accounts, by
 platform), the bot keeps `posts/<poster>/`, a `profile.md` and the three sections of
 `data/`, all by hand and with no script. When a human asks about a poster and an interval
 (New York instants; "yesterday" is the previous New York calendar day), the bot reads each

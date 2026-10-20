@@ -76,7 +76,7 @@ from typing import Any, Literal
 from market_state_research.common.layout import DataLayout, listed, newest, stamped, write_file
 from market_state_research.common.text import printable, ticker_symbol
 from market_state_research.common.times import et_isoformat, to_eastern
-from market_state_research.common.watchlist import WATCHLIST_PATH, stock_tickers
+from market_state_research.common.watchlist import domain_watchlist, stock_tickers
 
 from .client import (
     DOCUMENT_LIMIT,
@@ -133,6 +133,7 @@ from .filings import (
 from .report import SeriesPeriod, newest_series, render_series, same_series, series_files, series_name
 from .research import Problem, Report, Turn, parse_report, quote_problems
 
+WATCHLIST = domain_watchlist(Path(__file__).resolve().parent.parent)  # plan's and fetch's default
 MAX_REPORT_BYTES = 4 * 1024 * 1024
 TEXT_LIMIT = 64 * 1024 * 1024  # a derived text file: at most what a 50 MiB document derives
 NOT_LISTED = "not in SEC company_tickers.json"
@@ -538,7 +539,7 @@ def fetch(
     now: datetime,
     *,
     refresh: bool = False,
-    watchlist: Path = WATCHLIST_PATH,
+    watchlist: Path = WATCHLIST,
 ) -> dict[str, Any]:
     """Write every ticker's submissions and the EDGAR documents of each period in ``window`` that
     are not in ``raw/`` yet, then its calls list when due and its calls' transcripts; with
@@ -962,7 +963,7 @@ def plan(
     window: Window,
     *,
     refresh: bool = False,
-    watchlist: Path = WATCHLIST_PATH,
+    watchlist: Path = WATCHLIST,
 ) -> dict[str, Any]:
     """Read-only state of the periods in ``window`` and the next action of every requested ticker;
     never fails for a ticker without raw files. ``refresh`` plans ``fetch`` with ``refresh``.

@@ -8,9 +8,10 @@ regime or sentiment labels, rankings or trading advice.
 Two parties work here ([AGENTS.md](AGENTS.md), Who does what). The maintainer (the owner,
 working with Claude Code) makes the rules: every `AGENTS.md` and `PROCEDURE.md`, the scripts
 and their tests, and the tools the repository nominates. An AI bot with a shell, such as Grok
-Bot or a ChatGPT agent, follows them from its own host, never edits a rule, and opens an issue
-on [yewcast97/margin_edge](https://github.com/yewcast97/margin_edge/issues) when one blocks it
-or could be better. Nothing the bot produces is tracked.
+Bot or a ChatGPT agent, follows them from its own host, keeps the watchlists, never edits a
+rule, and opens an issue on
+[yewcast97/margin_edge](https://github.com/yewcast97/margin_edge/issues) when one blocks it or
+could be better. Nothing the bot produces is tracked.
 
 ## Domains
 
@@ -47,11 +48,11 @@ EARNINGSCALLS_API="..."                    # fundamentals: EarningsCalls.dev's t
 ```
 
 `posts` needs a key only where the bot reads a platform through its API (`X_API="..."`).
-Your default tickers go in `watchlist.json` at the repository root
-([format](market_state_research/AGENTS.md#watchlists)) and your posters in
+The bot keeps the watchlists, which Git ignores: each ticker domain's own `watchlist.json`
+([format](market_state_research/AGENTS.md#watchlists)) and the posters in
 `market_state_research/posts/watchlist.json`
-([format](market_state_research/posts/AGENTS.md#posters-accounts-and-routes)); Git ignores
-both.
+([format](market_state_research/posts/AGENTS.md#posters-accounts-and-routes)). Tell it which
+stocks and posters to follow, or let it judge.
 
 ## Use
 

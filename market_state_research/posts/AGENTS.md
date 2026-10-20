@@ -1,6 +1,6 @@
 # Posts
 
-This domain keeps, per poster the user nominates, every post of the intervals a human asks
+This domain keeps, per nominated poster, every post of the intervals a human asks
 about, archived verbatim per account whether or not it answers the question; fact-checks each
 post claim by claim against cited evidence, as `true`, `unverified` or `fake`; answers each
 request with a report of the posts that relate to it; and keeps a profile of each poster: who
@@ -32,11 +32,14 @@ grade, ranking, sentiment, prediction or advice is added.
 
 ## Posters, accounts and routes
 
-- **The watchlist.** `watchlist.json`, beside this file, is the user's own and ignored by Git:
-  only the user edits it, the bot reads it, and no Python does (the ticker watchlists, the
-  repository-root one included, play no part here). It names each poster once, under a name the
-  user chooses, with their accounts, each under a label naming its platform and given by the
-  URL of its profile:
+- **The watchlist.** `watchlist.json`, beside this file, is the bot's and ignored by Git: the bot
+  maintains it (root [AGENTS.md](../../AGENTS.md), Who does what), adding and removing posters
+  and accounts on the user's instruction or by its own judgment and reporting each change, and
+  no Python reads it (the ticker watchlists play no part here). An account is added only when
+  it is the poster's own beyond doubt: the user gave it, or the poster's official site or one
+  of their listed accounts links to it. It names each poster once, under a name the user or the
+  bot chooses, with their accounts, each under a label naming its platform and given by the URL
+  of its profile:
 
   ```json
   {
@@ -56,8 +59,8 @@ grade, ranking, sentiment, prediction or advice is added.
   copy the first's evidence), and the profile counts the verdicts across all of them.
 - **A poster's folder.** `<poster>/` holds `profile.md` and `data/`, in the three sections
   `raw/`, `formatted/` and `reports/`. It is the bot's, written on its host and ignored by Git
-  whole. A poster is set up (PROCEDURE.md, section 3) before their first request; one the user
-  removes from the watchlist keeps their folder as it is.
+  whole. A poster is set up (PROCEDURE.md, section 3) before their first request; one removed
+  from the watchlist keeps their folder as it is.
 - **Routes.** The bot reads each account by one of three routes, whichever its host offers, and
   names it, in one of these forms, in the profile and in every raw file:
   - `integration, NAME`: the host's own integration with the platform, named as the host names
@@ -434,7 +437,7 @@ folder, and no `data/.gitignore` is needed.
 
 | Path | Writer | Content |
 | --- | --- | --- |
-| `watchlist.json` | the user | The posters and their accounts (Posters, accounts and routes). |
+| `watchlist.json` | the bot | The posters and their accounts (Posters, accounts and routes). |
 | `<poster>/profile.md` | the bot | The profile (The profile). |
 | `<poster>/data/raw/{LABEL}_{START}_{END}_{TOKEN}.md` | the bot | Every post of one account over one interval, verbatim (The raw file); written once, never edited. |
 | `<poster>/data/formatted/{LABEL}_{START}_{END}_{TOKEN}.md` | the bot | The fact-check of its raw twin (The fact-check file), kept current in place with its dated history. |

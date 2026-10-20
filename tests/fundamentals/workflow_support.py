@@ -487,8 +487,8 @@ def snapshot(root: Path) -> dict[str, tuple[int, int, bytes | None]]:
     return state
 
 
-def write_watchlist(directory: Path, stock: Sequence[str] = (TICKER,), index: Sequence[str] = ()) -> Path:
-    """A watchlist in ``directory`` (a temporary one); the repository's own is never read."""
+def write_watchlist(directory: Path, stock: Sequence[str] = (TICKER,)) -> Path:
+    """A watchlist in ``directory`` (a temporary one); the domain's own is never read."""
     path = directory / "watchlist.json"
-    path.write_text(json.dumps({"stock": list(stock), "index": list(index)}), encoding="utf-8")
+    path.write_text(json.dumps({"stock": list(stock)}), encoding="utf-8")
     return path

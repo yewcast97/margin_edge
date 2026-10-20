@@ -812,7 +812,7 @@ def test_an_invalid_ticker_is_refused_before_any_request(layout):
 
 
 def test_the_watchlists_stock_section_is_the_default(layout, tmp_path):
-    watchlist = write_watchlist(tmp_path, ("intc",), ("SPX",))
+    watchlist = write_watchlist(tmp_path, ("intc",))
 
     result = workflow.fetch(
         layout, [], client(edgar()), calls_client(provider()), WINDOW, NOW, watchlist=watchlist

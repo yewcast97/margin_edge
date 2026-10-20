@@ -13,12 +13,12 @@ import pytest
 
 from market_state_research import common as common_package
 from market_state_research.common.layout import DataLayout
-from market_state_research.common.watchlist import WATCHLIST_PATH
 from market_state_research.stock_iv_regime import script as script_package
 from market_state_research.stock_iv_regime.script import client as client_module
 from market_state_research.stock_iv_regime.script import tiingo as tiingo_module
-from market_state_research.stock_iv_regime.script.__main__ import DOMAIN_DIRECTORY, build_parser, main
+from market_state_research.stock_iv_regime.script.__main__ import build_parser, main
 from market_state_research.stock_iv_regime.script.store import DATA_DIRECTORY
+from market_state_research.stock_iv_regime.script.workflow import WATCHLIST
 
 from .fake_eodhd import FakeEodhd
 from .fake_tiingo import FakeTiingo
@@ -60,10 +60,9 @@ def test_parse_errors_are_one_labelled_line(capsys):
 
 def test_the_default_data_directory_and_watchlist_are_the_domains():
     assert SCRIPT_DIRECTORY.parent / "data" == DATA_DIRECTORY
-    assert SCRIPT_DIRECTORY.parent == DOMAIN_DIRECTORY
-    own = DOMAIN_DIRECTORY / "watchlist.json"
-    expected = own if own.is_file() else WATCHLIST_PATH
-    assert build_parser().parse_args(["plan"]).watchlist == expected
+    # The domain's own watchlist, whether or not it exists: there is no other to fall back on.
+    assert SCRIPT_DIRECTORY.parent / "watchlist.json" == WATCHLIST
+    assert build_parser().parse_args(["plan"]).watchlist == WATCHLIST
 
 
 @pytest.mark.parametrize("command", [["plan", TICKER], ["record", TICKER, "--partial"], ["show", TICKER]])
@@ -174,9 +173,9 @@ def test_module_entry_point_uses_its_own_data_directory_and_watchlist(tmp_path):
     shutil.copytree(SCRIPT_DIRECTORY, domain / "script", ignore=ignore)
     shutil.copytree(COMMON_DIRECTORY, root / "market_state_research" / "common", ignore=ignore)
     (root / "market_state_research" / "__init__.py").write_text("")
-    (root / "watchlist.json").write_text('{"stock": ["root"], "index": []}', encoding="utf-8")
-    # The domain's own watchlist overrides the repository-root one.
-    (domain / "watchlist.json").write_text('{"stock": ["test"], "index": []}', encoding="utf-8")
+    # A watchlist at the repository root is never read: the domain reads its own alone.
+    (root / "watchlist.json").write_text('{"stock": ["root"]}', encoding="utf-8")
+    (domain / "watchlist.json").write_text('{"stock": ["test"]}', encoding="utf-8")
     # The subprocess runs on the real clock: the chain is saved as fetched a minute ago.
     now = datetime.now(UTC)
     from market_state_research.common.sessions import completed_session

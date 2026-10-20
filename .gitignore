@@ -5,7 +5,6 @@ __pycache__/
 .ruff_cache/
 .env
 .env.*
-/watchlist.json
 /market_state_research/*/watchlist.json
 /market_state_research/TODO.md
 /explore_hypothesis/*

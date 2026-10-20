@@ -45,9 +45,9 @@ def layout(tmp_path) -> DataLayout:
 def watchlist(tmp_path) -> Callable[..., Path]:
     """Write a watchlist to ``tmp_path / "watchlist.json"``; the repository's own is never read."""
 
-    def write(stock: Sequence[str] = ("TEST",), index: Sequence[str] = ()) -> Path:
+    def write(stock: Sequence[str] = ("TEST",)) -> Path:
         path = tmp_path / "watchlist.json"
-        path.write_text(json.dumps({"stock": list(stock), "index": list(index)}), encoding="utf-8")
+        path.write_text(json.dumps({"stock": list(stock)}), encoding="utf-8")
         return path
 
     return write

@@ -33,13 +33,14 @@ from market_state_research.common.layout import DataLayout, name_instant, newest
 from market_state_research.common.sessions import completed_session, previous_session, session_window
 from market_state_research.common.text import ticker_symbol
 from market_state_research.common.times import et_isoformat, to_eastern
-from market_state_research.common.watchlist import WATCHLIST_PATH, stock_tickers
+from market_state_research.common.watchlist import domain_watchlist, stock_tickers
 
 from .chart import ChartSpec, load_library, render_html, render_markdown
 from .client import BudgetSpent, EodhdClient, QuotaExceeded
 from .fetch import Outcome, fetch_prices, history, latest, write_chain
 from .percentile import WINDOW
 from .store import (
+    DATA_DIRECTORY,
     REASONS,
     SERIES,
     VALUES,
@@ -59,6 +60,7 @@ from .tiingo import Stopped, TiingoClient, TiingoError
 
 DEFAULT_LOOKBACK = 50
 DEFAULT_BUDGET = 9000  # requests; the product allows 10,000 a day (100,000 calls at 10 each)
+WATCHLIST = domain_watchlist(DATA_DIRECTORY.parent)  # the default of plan and fetch without tickers
 
 
 @dataclass(frozen=True)
@@ -274,7 +276,7 @@ def plan(
     now: datetime,
     refresh: bool = False,
     *,
-    watchlist: Path = WATCHLIST_PATH,
+    watchlist: Path = WATCHLIST,
 ) -> dict[str, Any]:
     """Read-only: per ticker, what to fetch, which raw files are invalid and the action.
 
@@ -374,7 +376,7 @@ def fetch(
     tiingo: TiingoClient,
     refresh: bool = False,
     *,
-    watchlist: Path = WATCHLIST_PATH,
+    watchlist: Path = WATCHLIST,
 ) -> dict[str, Any]:
     """Write each ticker's prices when they are not current, then the missing chains of its
     span (see the module docstring).
