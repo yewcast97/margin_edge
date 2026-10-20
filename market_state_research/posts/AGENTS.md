@@ -14,10 +14,10 @@ conventions every domain shares (the domain layout, the three sections of `data/
 time) are in [market_state_research/AGENTS.md](../AGENTS.md).
 
 Three things set this domain apart from the scripted ones. It has no `script/`: the bot writes
-every file by hand under this file's grammars, and no Python reads, writes or checks one. It
-nominates no source: the bot reads each account by whatever route its host offers. And it reads
-no market data, so it has no session logic: a post is dated by its platform's timestamp,
-converted to New York time.
+every file of its data (the watchlist, the profiles and the three sections) by hand under this
+file's grammars, and no Python reads, writes or checks one. It nominates no source: the bot
+reads each account by whatever route its host offers. And it reads no market data, so it has
+no session logic: a post is dated by its platform's timestamp, converted to New York time.
 
 ## Aim
 

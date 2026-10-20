@@ -6,12 +6,12 @@ on. Hypotheses, investment calls and publication stay with the analyst: nothing 
 regime or sentiment labels, rankings or trading advice.
 
 Two parties work here ([AGENTS.md](AGENTS.md), Who does what). The maintainer (the owner,
-working with Claude Code) makes the rules: every `AGENTS.md` and `PROCEDURE.md`, the scripts
-and their tests, and the tools the repository nominates. An AI bot with a shell, such as Grok
-Bot or a ChatGPT agent, follows them from its own host, keeps the watchlists, never edits a
-rule, and opens an issue on
-[yewcast97/margin_edge](https://github.com/yewcast97/margin_edge/issues) when one blocks it or
-could be better. Nothing the bot produces is tracked.
+working with Claude Code) makes the rules and the code, which Git tracks: every `AGENTS.md`
+and `PROCEDURE.md`, the scripts and their tests, and the tools the repository nominates. An
+AI bot with a shell, such as Grok Bot or Muse Bot, obeys them from its own host and yields
+the data you read: it runs the domains, keeps the watchlists, never edits a rule or a script,
+and opens an issue on [yewcast97/margin_edge](https://github.com/yewcast97/margin_edge/issues)
+when one blocks it or could be better. Nothing the bot produces is tracked.
 
 ## Domains
 

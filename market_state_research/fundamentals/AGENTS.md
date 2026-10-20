@@ -207,12 +207,13 @@ fields, in the order the reports keep them:
     quoted whole (the customer with its shares, from its line or, where the derived
     text splits the row, its consecutive lines).
 
-The definitions are the bot's alone: no code applies them, so a report written under an
-earlier definition keeps passing `check`. To apply a changed definition, read the affected
-documents again and rewrite their reports, removing the quotes the change excludes and
-adding those it admits; then `check` and `render`. The fields' names, number and order are
-code: a change of them fails every report written before it, and `plan` says `research`
-until each has been rewritten from its document under the new fields.
+The maintainer states the definitions, here alone, and the bot alone applies them: no code
+does, so a report written under an earlier definition keeps passing `check`. To apply a
+changed definition, read the affected documents again and rewrite their reports, removing
+the quotes the change excludes and adding those it admits; then `check` and `render`. The
+fields' names, number and order are code: a change of them fails every report written
+before it, and `plan` says `research` until each has been rewritten from its document under
+the new fields.
 
 ## Quotes: the research rules
 

@@ -14,15 +14,20 @@ of this module.
 
 Market state research discloses the state of the market, one aspect per domain, under each
 domain's procedure: three domains by fixed scripts that the maintainer makes and tests, which
-the bot only runs, and `posts` by the bot's own hand. Hypothesis exploration tests the bot's theses
-against that picture, and welcomes creativity: for each hypothesis the user states, the bot
-does the whole work on its own host, the thesis, its own script that prepares seikan's feeds,
-the procedure it follows, the feeds, the seikan runs and the report back. The maintainer writes
-none of it and only this file, whose conventions keep the bot's work maintainable: whoever
-opens a hypothesis's folder later, the bot included, can read what was tested, from which data,
-and run it again. Nothing under `explore_hypothesis/<name>/` is tracked: the root `.gitignore`
-ignores everything here but this file. When a convention or seikan blocks the bot, it opens an
-issue (root [AGENTS.md](../AGENTS.md), Who does what).
+the bot only runs, and `posts` by the bot's own hand under that domain's rules. Hypothesis
+exploration tests the user's hypotheses against that picture (the root
+[AGENTS.md](../AGENTS.md), Who does what, says who the user is), and welcomes creativity: for
+each one, the bot does the whole work on its own host, the thesis, its own script that
+prepares seikan's feeds, the procedure it follows, the feeds, the seikan runs and the report
+back. That work is the bot's product, like the data it yields in the domains: it binds only
+the reruns of its own hypothesis, nothing tracked reads it, no domain or other hypothesis
+depends on it, and it is never a rule of the repository, so a convention the bot needs
+changed is asked for in an issue, never set aside in its `procedure.md`. The maintainer writes
+none of it and only this file, whose conventions are the rules of that work and keep it
+maintainable: whoever opens a hypothesis's folder later, the bot included, can read what was
+tested, from which data, and run it again. Nothing under `explore_hypothesis/<name>/` is
+tracked: the root `.gitignore` ignores everything here but this file. When a convention or
+seikan blocks the bot, it opens an issue (root [AGENTS.md](../AGENTS.md), Who does what).
 
 ## Independence
 

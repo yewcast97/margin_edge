@@ -2,27 +2,45 @@
 
 ## Who does what
 
-Two parties work here, and only the first changes the repository.
+Two parties work here, on either side of one line: the maintainer writes the rules and the
+code, which Git tracks; the bot obeys them and yields the data, which Git never tracks.
 
-- **The maintainer** (the owner, working with Claude Code) makes the rules: every
-  `AGENTS.md` and `PROCEDURE.md`, the scripts of market state research and their tests, the
-  dependencies and their lock, and the tools the repository nominates (seikan, for
-  hypothesis tests). The maintainer alone commits and pushes.
-- **The bot** (Grok Bot, a ChatGPT agent or another AI agent with a shell) follows the rules
-  from its own host: it runs the commands and follows each domain's `PROCEDURE.md`. In the
-  scripted domains Python reads every source over HTTPS, through an API or a public file at a
-  fixed address, so no step needs a browser; in `posts` the bot reads each nominated account
-  by whatever route its host offers. It
-  maintains the watchlists, `market_state_research/<domain>/watchlist.json`: the stock
-  tickers of `stock_iv_regime` and of `fundamentals`, and the posters of `posts`. It adds and
-  removes entries on the owner's instruction or by its own judgment, and reports each change
-  it makes. Besides the watchlists, it writes only what a procedure lets it write under a
-  `data/` directory, in `posts` each poster's folder `market_state_research/posts/<poster>/`
-  (the profile and its `data/`) and, in hypothesis exploration, its own work under
-  `explore_hypothesis/<name>/` (the thesis, its script, its `procedure.md` and its data,
-  under the conventions of [explore_hypothesis/AGENTS.md](explore_hypothesis/AGENTS.md)). It
-  never edits a rule, a tracked script, a test, a tracked file or a stored value; it commits
-  and pushes nothing and never runs `uv lock`.
+- **The maintainer** (the owner, working with Claude Code) makes the rules and the code:
+  every `AGENTS.md` and `PROCEDURE.md`, the scripts of market state research with their
+  templates and tests, the dependencies and their lock, and the tools the repository
+  nominates (seikan, for hypothesis tests). Git tracks all of it, and the maintainer alone
+  commits and pushes. The maintainer yields no data: it writes no watchlist, no runtime file
+  in a `data/` directory (whose `.gitignore` alone it tracks) and nothing in a poster's or a
+  hypothesis's folder, and it checks a change against the live sources with `--data-dir` in
+  a scratch directory outside the repository.
+- **The bot** (Grok Bot, Muse Bot or another AI agent with a shell) obeys the rules from its
+  own host and yields data for people to read: it runs the commands, follows each domain's
+  `PROCEDURE.md`, reports back what they yield, and adds no value, label or judgment the
+  rules do not ask of it. In the scripted domains Python reads every source over HTTPS,
+  through an API or a public file at a fixed address, so no step needs a browser; in `posts`
+  the bot reads each nominated account by whatever route its host offers. It writes only
+  what a rule lets it write, and Git ignores all of it:
+  - in a `data/` directory, what a procedure names;
+  - the watchlists, `market_state_research/<domain>/watchlist.json` (the stock tickers of
+    `stock_iv_regime` and of `fundamentals`, the posters of `posts`), adding and removing
+    entries on the owner's instruction or by its own judgment and reporting each change;
+  - in `posts`, each poster's folder `market_state_research/posts/<poster>/` (the profile
+    and its `data/`);
+  - in hypothesis exploration, its own work under `explore_hypothesis/<name>/` (the thesis,
+    its script, its `procedure.md` and its data, under the conventions of
+    [explore_hypothesis/AGENTS.md](explore_hypothesis/AGENTS.md)). That work is the bot's
+    product, like its data: it binds only the reruns of its own hypothesis, nothing tracked
+    reads it, and it is never a rule of the repository.
+
+  It never writes or edits a tracked file (a rule, a script, a template, a test, the lock),
+  never edits by hand a value a command stored, never commits or pushes, and never runs
+  `uv lock`.
+
+The bot serves people: the owner, and whoever the owner lets ask it (the user, in the
+procedures), who ask for data and read it. A request settles what a procedure leaves open (a
+window, tickers, a poster, an interval, a refresh). A request to change a rule or a script
+is the maintainer's to meet: the bot says so and, when asked, opens an issue with it, and
+never meets it with a workaround of its own.
 
 When a rule, a message, a validator or a tool blocks or misleads the bot, it does not work
 around it: it opens a GitHub issue, at https://github.com/yewcast97/margin_edge/issues for

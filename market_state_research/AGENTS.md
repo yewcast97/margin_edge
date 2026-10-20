@@ -8,15 +8,16 @@ each value is obtained, the architecture, the raw files and the facts verified l
 source it reads; and one `PROCEDURE.md`, its operations. Code that does not depend on a
 source or a domain's data directory lives once in the shared `common/` package.
 
-The domains are operated by the bot under rules the maintainer makes, as the root
-[AGENTS.md](../AGENTS.md) defines both (Who does what): from its own host the bot runs the
-commands and follows each domain's `PROCEDURE.md`, never edits a rule, and opens a GitHub
-issue when one blocks or misleads it. In the three scripted domains, `stock_iv_regime`,
+The maintainer writes every rule and script here, and Git tracks them; the bot runs the
+domains from its own host and yields their data, as the root [AGENTS.md](../AGENTS.md)
+defines both (Who does what): it runs the commands and follows each domain's `PROCEDURE.md`,
+writes only what they let it write, never edits a rule or a script, and opens a GitHub issue
+when one blocks or misleads it. In the three scripted domains, `stock_iv_regime`,
 `market_position_regime` and `fundamentals`, every source is read by Python over HTTPS (the
-API rule, below), so the bot needs a shell with uv and network access, and no browser; in `posts` the bot reads each nominated account by
-whatever route its host offers and writes every file itself. Nothing the bot produces is
-tracked: every `data/` directory, every poster's folder and every watchlist is ignored by
-Git.
+API rule, below), so the bot needs a shell with uv and network access, and no browser; in
+`posts` the bot reads each nominated account by whatever route its host offers and writes
+each of its data files by hand. Nothing the bot produces is tracked: every `data/`
+directory, every poster's folder and every watchlist is ignored by Git.
 
 ## Folder structure
 
@@ -179,8 +180,9 @@ three by hand, under that domain's `AGENTS.md`:
   checks or silently carry values forward.
 - The domains supply reproducible facts and calculations; analytical hypotheses and
   trading judgments stay outside these workflows. Hypothesis exploration
-  ([explore_hypothesis/AGENTS.md](../explore_hypothesis/AGENTS.md)) is the bot's own work:
-  it may read and copy a domain's data, never changes it, and no domain reads a hypothesis.
+  ([explore_hypothesis/AGENTS.md](../explore_hypothesis/AGENTS.md)) is the bot's own work,
+  its product like the data it yields, binding no domain: it may read and copy a domain's
+  data, never changes it, and no domain reads a hypothesis.
 - Work as of the last completed XNYS session and never on intraday live data. The bot may
   run at any time; a domain that reads market data fetches a session's end-of-day values
   only after its close, and a raw file fetched before the close of its session is invalid:
