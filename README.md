@@ -10,8 +10,10 @@ The bot runs market state research from its own host: each domain discloses one 
 state of the market as reproducible facts and calculations, kept beside the source documents
 and records they rest on, for the people the bot serves to read; investment calls and
 publication stay with them. In [`explore_hypothesis/`](explore_hypothesis/AGENTS.md) it
-tests the user's hypotheses against the domains' data with
-[seikan](https://github.com/yewcast97/seikan), as its own work.
+tests the user's hypotheses with [seikan](https://github.com/yewcast97/seikan), as its own
+work within that module's conventions: everything there but its `AGENTS.md`, the scripts
+included, is the bot's, and a hypothesis's data come from the domains or from any other
+source.
 
 ## Domains
 

@@ -172,7 +172,8 @@ three by hand, under that domain's `AGENTS.md`:
   trading judgments stay outside these workflows. Hypothesis exploration
   ([explore_hypothesis/AGENTS.md](../explore_hypothesis/AGENTS.md)) is the bot's own work,
   its product like the data it yields, binding no domain: it may read and copy a domain's
-  data, never changes it, and no domain reads a hypothesis.
+  data, never changing it, or bring data from any other source, and no domain reads a
+  hypothesis.
 - Work as of the last completed XNYS session and never on intraday live data. The bot may
   run at any time; a domain that reads market data fetches a session's end-of-day values
   only after its close, and a raw file fetched before the close of its session is invalid:
