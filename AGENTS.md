@@ -48,8 +48,10 @@ this repository or https://github.com/yewcast97/seikan/issues for seikan, giving
 command, `git rev-parse HEAD`, the output verbatim with every key redacted, what it expected
 and what it suggests; an issue on seikan also gives the seikan commit `uv.lock` pins, as the
 lines `grep -A2 '^name = "seikan"' uv.lock` prints. The bot is encouraged to open one
-whenever it sees how either could be better. The issue ends its part in the problem: it
-reports the issue's link back and goes on with what the rules allow.
+whenever it sees how either could be better, giving likewise the commands it ran,
+`git rev-parse HEAD` and the output its case rests on. Before opening an issue, it searches
+the open ones and comments on one that already covers its case instead. The issue ends its
+part in the problem: it reports the issue's link back and goes on with what the rules allow.
 
 ## Working rules
 
