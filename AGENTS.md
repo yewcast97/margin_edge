@@ -46,9 +46,10 @@ When a rule, a message, a validator or a tool blocks or misleads the bot, it doe
 around it: it opens a GitHub issue, at https://github.com/yewcast97/margin_edge/issues for
 this repository or https://github.com/yewcast97/seikan/issues for seikan, giving the
 command, `git rev-parse HEAD`, the output verbatim with every key redacted, what it expected
-and what it suggests. The bot is encouraged to open one whenever it sees how either could
-be better. The issue ends its part in the problem: it reports the issue's link back and goes
-on with what the rules allow.
+and what it suggests; an issue on seikan also gives the seikan commit `uv.lock` pins, as the
+lines `grep -A2 '^name = "seikan"' uv.lock` prints. The bot is encouraged to open one
+whenever it sees how either could be better. The issue ends its part in the problem: it
+reports the issue's link back and goes on with what the rules allow.
 
 ## Working rules
 
