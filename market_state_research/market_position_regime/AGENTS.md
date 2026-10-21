@@ -201,7 +201,7 @@ The package `market_state_research.market_position_regime.script`:
 | Module | Responsibility |
 | --- | --- |
 | `__main__` | The command line (`MARKET_POSITION_REGIME` label); resolves and checks the window first. |
-| `client` | HTTPS to the three fixed endpoints only (`www.finra.org`, `publicreporting.cftc.gov`, `cdn-api.cboe.com`), no key, statuses, bounded and whole bodies, no redirect. Its HTTP reading helpers are copies of the stock IV regime domain's (domains never import one another). |
+| `client` | HTTPS to the three fixed endpoints only (`www.finra.org`, `publicreporting.cftc.gov`, `cdn-api.cboe.com`), no key, statuses, bounded and whole bodies, no redirect. |
 | `periods` | Months, weeks named by their Tuesday, the XNYS sessions of a span; when each source's document is due. |
 | `finra` | The workbook's address, its parsing with the standard library (`zipfile`, `xml.etree`) and every rule (`parse_workbook`, `check_workbook`), its raw name. |
 | `cftc` | The query (`query_url`), the rows and every rule (`check_row`, `check_answer`), the units and the E-mini conversion, the answer raw unit (`dump`, `read_answer`). |
@@ -319,8 +319,7 @@ yet. An answer is checked by the same rules as a raw file before it is written.
   short 410,518). The E-mini (`13874A`) and the futures-and-options dataset (`yw9f-hn96`) are
   reported too and not read.
 - A `fetch` on 2026-10-20 asked for 2022-10-31 to 2026-10-18 and stored 207 rows (108,836
-  bytes); `tests/market_position_regime/fixtures/` holds the answer for 2023-04-03 to
-  2025-11-16 (137 rows, across the change of unit and two Monday reports).
+  bytes).
 
 ## Cboe facts verified live (2026-10-20)
 
@@ -346,19 +345,8 @@ yet. An answer is checked by the same rules as a raw file before it is written.
   8:25 a.m. CT and between 8:30 a.m. CT and 3:15 p.m. CT", 16:15 New York time.
 - 2026-10-19: open 18.37, high 18.93, low 17.39, close 18.44; 172 of the 251 sessions before
   it closed below 18.44, a percentile of 68.5.
-- EODHD's `VIX.INDX` (its end-of-day API, under `EODHD_API`) was not adopted: on the key's
+- EODHD's `VIX.INDX` (its end-of-day API, under `EODHD_API`) is not read: on the key's
   free plan it serves one year only (the answer's last bar carries `"warning": "Data is
   limited by one year as you have free subscription"`), it holds flat bars on 2025-12-25,
   2026-01-01 and 2026-04-03, of which Cboe's file has no row, and its bar of 2026-02-06
   (low 19.99, close 20.37) differs from Cboe's (17.27, 17.76).
-
-## Tests
-
-`tests/market_position_regime/` runs offline: `fake_sources.py` answers the three sources
-from data in memory as they do (FINRA's workbook bytes; the CFTC's rows of the `$where`
-dates, the query checked to be exactly `query_url`'s; Cboe's file bytes; scripted statuses)
-and records every URL; `support.py` builds FINRA's workbook byte by byte in its verified
-layout, TFF rows and Cboe's file from small numbers, and raw files as `fetch` names them;
-`fixtures/` holds the CFTC answer recorded live on 2026-10-20, pinned by SHA-256 and never
-edited (the CFTC's data are a US government work; no FINRA or Cboe answer is kept). An
-autouse fixture refuses any real request.

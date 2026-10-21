@@ -6,7 +6,6 @@ __pycache__/
 .env
 .env.*
 /market_state_research/*/watchlist.json
-/market_state_research/TODO.md
 /explore_hypothesis/*
 !/explore_hypothesis/AGENTS.md
 /market_state_research/posts/*

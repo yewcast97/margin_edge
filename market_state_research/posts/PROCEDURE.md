@@ -58,7 +58,7 @@ never open an account.
 - One routine per poster at a time: the daily re-check and a request never work on one
   poster's files together.
 - What blocks you, or looks wrong in a rule, goes into a GitHub issue (the root
-  [AGENTS.md](../../AGENTS.md), Who does what), never into the rule.
+  [AGENTS.md](../../AGENTS.md), Feedback), never into the rule.
 
 ## 3. Set up
 

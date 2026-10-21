@@ -33,7 +33,7 @@ grade, ranking, sentiment, prediction or advice is added.
 ## Posters, accounts and routes
 
 - **The watchlist.** `watchlist.json`, beside this file, is the bot's and ignored by Git: the bot
-  maintains it (root [AGENTS.md](../../AGENTS.md), Who does what), adding and removing posters
+  maintains it (root [AGENTS.md](../../AGENTS.md), The bot), adding and removing posters
   and accounts on the user's instruction or by its own judgment and reporting each change, and
   no Python reads it (the ticker watchlists play no part here). An account is added only when
   it is the poster's own beyond doubt: the user gave it, or the poster's official site or one
@@ -446,5 +446,4 @@ folder, and no `data/.gitignore` is needed.
 `{START}`, `{END}` and `{TOKEN}` are New York times to the second with their zone, as
 `common.times.timestamp_token` writes them (`20261020T091500EDT`): the zone is the one in force
 at that instant, and names are ordered by the instants their tokens name, never as text
-(market_state_research/AGENTS.md, Data layout). No test covers this domain beyond the
-repository-wide guard, which fails the test run if a test changes a poster's folder.
+(market_state_research/AGENTS.md, Data layout).

@@ -1,33 +1,30 @@
 # Hypothesis exploration: conventions
 
-This is where hypotheses are tested with [seikan](https://github.com/yewcast97/seikan), a
+This is where the bot tests hypotheses with [seikan](https://github.com/yewcast97/seikan), a
 stateless forward-return event-study engine: it reads a thesis (JSON) and strict CSV feeds,
 measures every parameter × horizon cell the thesis declares, writes the files the caller names
-and selects no winner. seikan is a dependency from its GitHub `main` branch, pinned by `uv.lock`
-to one commit; `uv lock --upgrade-package seikan` moves the pin to the branch's newest commit, and
-the maintainer checks for a newer one every week (Keeping seikan current, below). The repository's
-principles, and who makes the rules (the maintainer) and who follows them (the bot), are in the
-root [AGENTS.md](../AGENTS.md). This file is bound to no domain, and it is the only tracked file
-of this module.
+and selects no winner. seikan is a dependency pinned by `uv.lock` to one commit of its GitHub
+`main` branch, the commit every `uv run --locked seikan` runs. The repository's principles and
+the bot's part are in the root [AGENTS.md](../AGENTS.md). This file is bound to no domain, and
+it is the only tracked file of this module.
 
-## Who does what here
+## The bot's work here
 
 Market state research discloses the state of the market, one aspect per domain, under each
-domain's procedure: three domains by fixed scripts that the maintainer makes and tests, which
-the bot only runs, and `posts` by the bot's own hand under that domain's rules. Hypothesis
-exploration tests the user's hypotheses against that picture (the root
-[AGENTS.md](../AGENTS.md), Who does what, says who the user is), and welcomes creativity: for
-each one, the bot does the whole work on its own host, the thesis, its own script that
-prepares seikan's feeds, the procedure it follows, the feeds, the seikan runs and the report
-back. That work is the bot's product, like the data it yields in the domains: it binds only
-the reruns of its own hypothesis, nothing tracked reads it, no domain or other hypothesis
-depends on it, and it is never a rule of the repository, so a convention the bot needs
-changed is asked for in an issue, never set aside in its `procedure.md`. The maintainer writes
-none of it and only this file, whose conventions are the rules of that work and keep it
-maintainable: whoever opens a hypothesis's folder later, the bot included, can read what was
-tested, from which data, and run it again. Nothing under `explore_hypothesis/<name>/` is
-tracked: the root `.gitignore` ignores everything here but this file. When a convention or
-seikan blocks the bot, it opens an issue (root [AGENTS.md](../AGENTS.md), Who does what).
+domain's procedure: three domains by fixed scripts, which the bot only runs, and `posts` by
+the bot's own hand under that domain's rules. Hypothesis exploration tests the user's
+hypotheses against that picture (the root [AGENTS.md](../AGENTS.md), The bot, says who the
+user is), and welcomes creativity: for each one, the bot does the whole work on its own
+host, the thesis, its own script that prepares seikan's feeds, the procedure it follows, the
+feeds, the seikan runs and the report back. That work is the bot's product, like the data it
+yields in the domains: it binds only the reruns of its own hypothesis, nothing tracked reads
+it, no domain or other hypothesis depends on it, and it is never a rule of the repository,
+so a convention the bot needs changed is asked for in an issue, never set aside in its
+`procedure.md`. This file's conventions are the rules of that work and keep it readable:
+whoever opens a hypothesis's folder later, the bot included, can read what was tested, from
+which data, and run it again. Nothing under `explore_hypothesis/<name>/` is tracked: the root
+`.gitignore` ignores everything here but this file. When a convention or seikan blocks the
+bot, it opens an issue (root [AGENTS.md](../AGENTS.md), Feedback).
 
 ## Independence
 
@@ -40,9 +37,9 @@ A hypothesis's data are its own, independent of market state research's.
   `data/source/` and adapt them there, through its script.
 - It writes only under its own folder, and no domain reads it: nothing a hypothesis does
   changes a domain's data, outputs or freshness.
-- Nothing here fetches. A source no domain supplies is asked of the maintainer, in an issue,
-  as a domain under `market_state_research`; the stocks' daily prices, for one, are
-  `stock_iv_regime`'s, from Tiingo.
+- Nothing here fetches. A source no domain supplies is asked for in an issue, as a domain of
+  market state research; the stocks' daily prices, for one, are `stock_iv_regime`'s, from
+  Tiingo.
 - No watchlist applies: a hypothesis names its tickers.
 
 ## Layout
@@ -70,13 +67,10 @@ explore_hypothesis/
 | `data/formatted/{TICKER}/{SOURCE}.csv` | One feed per ticker and source in seikan's strict contract, rewritten by the script. |
 | `data/reports/` | seikan's outputs (`--report-out`, `--trades-out`, `--root-series-out`, `--entry-flags-out`), each name carrying a New York time token (`common.times.timestamp_token`) so that no report is overwritten. |
 
-The repository-root `tests/conftest.py` fails the test run if a test changes any
-`explore_hypothesis/*/data` directory.
-
 ## Conventions of a script
 
-The script is the bot's and is not checked by mypy or pytest: `seikan check-data` on every
-feed it writes is the gate. These conventions make it readable and repeatable.
+The script is the bot's, and nothing tracked checks it: `seikan check-data` on every feed it
+writes is the gate. These conventions make it readable and repeatable.
 
 - Its `__main__.py` opens with a docstring stating the thesis in one sentence, the data it
   reads (domain, section, file names) and every column it writes, with the formula of any
@@ -135,24 +129,8 @@ the evidence looked good; 2 means a feed failed the strict data contract (`check
 which rule), 3 an invalid request (the thesis, a threshold or an output path), 4 an internal
 error. A failing `check-data` is fixed in the script or at its source, never by editing a feed
 by hand. Run `seikan check-data` on every feed and `seikan hash` on the thesis before every
-`seikan run`.
-
-### Keeping seikan current
-
-Once a week, the maintainer compares seikan's newest commit with the one `uv.lock` pins:
-
-```sh
-git ls-remote https://github.com/yewcast97/seikan main      # the branch's newest commit
-grep -A2 '^name = "seikan"' uv.lock                          # the pinned commit, after the '#'
-```
-
-When they differ, the maintainer runs `uv lock --upgrade-package seikan`, then the four
-verification commands of the root [AGENTS.md](../AGENTS.md). When all pass, they commit
-`uv.lock` alone (`seikan: <old commit> → <new commit>`); when any fails, they restore `uv.lock`
-(`git checkout -- uv.lock`), commit nothing, and open an issue on seikan when the failure is
-seikan's. A failing suite is fixed, never worked around. The bot plays no part: it runs the
-pinned seikan and reports what seikan does wrong as an issue on
-https://github.com/yewcast97/seikan/issues.
+`seikan run`. What seikan does wrong goes into an issue on
+https://github.com/yewcast97/seikan/issues (root [AGENTS.md](../AGENTS.md), Feedback).
 
 ## Starting a hypothesis
 

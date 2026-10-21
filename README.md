@@ -5,13 +5,11 @@ reproducible facts and calculations, kept beside the source documents and record
 on. Hypotheses, investment calls and publication stay with the analyst: nothing here adds
 regime or sentiment labels, rankings or trading advice.
 
-Two parties work here ([AGENTS.md](AGENTS.md), Who does what). The maintainer (the owner,
-working with Claude Code) makes the rules and the code, which Git tracks: every `AGENTS.md`
-and `PROCEDURE.md`, the scripts and their tests, and the tools the repository nominates. An
-AI bot with a shell, such as Grok Bot or Muse Bot, obeys them from its own host and yields
-the data you read: it runs the domains, keeps the watchlists, never edits a rule or a script,
-and opens an issue on [yewcast97/margin_edge](https://github.com/yewcast97/margin_edge/issues)
-when one blocks it or could be better. Nothing the bot produces is tracked.
+The repository is the manual of an AI bot with a shell, such as Grok Bot or Muse Bot
+([AGENTS.md](AGENTS.md), The bot): its rules and scripts say how the bot yields the data you
+read. The bot runs the domains from its own host, keeps the watchlists, never edits a rule or
+a script, and opens an issue on [yewcast97/margin_edge](https://github.com/yewcast97/margin_edge/issues)
+when one blocks it or could be better (Feedback). Nothing the bot produces is tracked.
 
 ## Domains
 
@@ -68,17 +66,6 @@ uv run --locked python -m market_state_research.fundamentals.script plan
 
 `posts` has no command: ask the bot in your own words, such as "Did some_analyst say anything
 about the semiconductor supply chain yesterday?"
-
-## Verification
-
-```sh
-uv run --locked pytest
-uv run --locked ruff check .
-uv run --locked ruff format --check .
-uv run --locked mypy
-```
-
-The tests run offline; [AGENTS.md](AGENTS.md) (Verification) says what each check covers.
 
 ## License
 

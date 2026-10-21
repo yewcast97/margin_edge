@@ -218,7 +218,7 @@ The package `market_state_research.stock_iv_regime.script`:
 | Module | Responsibility |
 | --- | --- |
 | `__main__` | The command line (`STOCK_IV_REGIME` label); builds the EODHD client from `EODHD_API` and the Tiingo client from `TIINGO_API` for `fetch` only, before the watchlist is read. |
-| `client` | HTTPS to `eodhd.com` only, the key appended at send time and redacted from every message, pacing, the budget, statuses (402 `QuotaExceeded`, 429 retried once after `Retry-After`), bounded and whole bodies. Its HTTP reading helpers are copies of the fundamentals domain's (domains never import one another); `tiingo` shares them. |
+| `client` | HTTPS to `eodhd.com` only, the key appended at send time and redacted from every message, pacing, the budget, statuses (402 `QuotaExceeded`, 429 retried once after `Retry-After`), bounded and whole bodies. |
 | `tiingo` | HTTPS to `api.tiingo.com` only, the key only in the `Authorization` header, never in a URL; statuses (404 `NotCovered`, 401, 403 and 429 `Stopped`); bounded and whole bodies. |
 | `api` | The EODHD queries and their URLs, one page per query (never a second page), page parsing with numbers kept as literal text, the record checks (OCC symbol against expiry, type and strike; number, date and word forms). |
 | `chain` | The chain raw unit: its bytes (`dump`, `load`), its name, its window (`WINDOW_DAYS`), every rule (`check_chain`) and the proof that a contracts listing is a session's (`proof_problem`). |
@@ -427,17 +427,4 @@ chains are fetched whatever Tiingo answered.
 - Documented, not observed: "Most US Equity prices are available at 5:30 PM EST, however
   exchanges may send corrections until 8 PM EST"; the Starter plan allows 50 requests an
   hour, 1,000 a day and 500 unique symbols a month; data of the Basic and Power plans is for
-  internal and personal use and may not be redistributed, so no Tiingo answer is kept in
-  `tests/`.
-
-## Tests
-
-`tests/stock_iv_regime/` runs offline: `fake_eodhd.py` answers both EODHD endpoints from
-records in memory as EODHD does (filters, sort, fields, pages, the offset cap and, on
-request, ties shuffled between requests; scripted statuses) and records every URL and
-token; `fake_tiingo.py` answers Tiingo's prices endpoint from bars in memory as Tiingo does
-(the date range, literal numbers, 404 for an unknown ticker; scripted statuses) and records
-every URL and header token; `support.py` builds records from strike, delta and IV text (the
-hand-worked quotes of `CALLS` and `PUTS`), chains, and bars and prices files from closes;
-`fixtures/` holds the two pages recorded live for AEP on 2026-10-16, pinned by SHA-256 and
-never edited. An autouse fixture refuses any real request.
+  internal and personal use and may not be redistributed.

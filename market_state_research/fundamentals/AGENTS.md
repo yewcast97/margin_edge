@@ -6,11 +6,11 @@ eleven fields of verbatim quotes, and compiles the complete periods into a time 
 Its default tickers are those of this domain's own watchlist. This file says first what
 the work aims at, the model of periods, releases and calls, the eleven fields, the rules a
 quote keeps, the report grammar, what the series holds and the commands; then the sources
-and why Python may read them, the module boundaries, the runtime files, the formats
-verified live and the fixtures. The operations the bot carries out (settings, `fetch`,
-`plan`, reading, writing and checking reports, `render`, `show`, failures) are in the
-sibling [PROCEDURE.md](PROCEDURE.md); the conventions every domain shares (the domain
-layout, the three sections of `data/`, New York time, the API rule) are in
+and why Python may read them, the module boundaries, the runtime files and the formats
+verified live. The operations the bot carries out (settings, `fetch`, `plan`, reading,
+writing and checking reports, `render`, `show`, failures) are in the sibling
+[PROCEDURE.md](PROCEDURE.md); the conventions every domain shares (the domain layout, the
+three sections of `data/`, New York time, the API rule) are in
 [market_state_research/AGENTS.md](../AGENTS.md). This domain reads no market data, so it
 has no session logic, and its documents are dated by their own dates.
 
@@ -207,10 +207,10 @@ fields, in the order the reports keep them:
     quoted whole (the customer with its shares, from its line or, where the derived
     text splits the row, its consecutive lines).
 
-The maintainer states the definitions, here alone, and the bot alone applies them: no code
-does, so a report written under an earlier definition keeps passing `check`. To apply a
-changed definition, read the affected documents again and rewrite their reports, removing
-the quotes the change excludes and adding those it admits; then `check` and `render`. The
+The definitions are stated here alone, and the bot alone applies them: no code does, so a
+report written under an earlier definition keeps passing `check`. To apply a changed
+definition, read the affected documents again and rewrite their reports, removing the
+quotes the change excludes and adding those it admits; then `check` and `render`. The
 fields' names, number and order are code: a change of them fails every report written
 before it, and `plan` says `research` until each has been rewritten from its document under
 the new fields.
@@ -353,14 +353,13 @@ research rule over located quotes, not part of the derivation: it changes no der
 
 The derived-text rules are module code and constants in `text.py` and
 `earningscalls.py`: the HTML and plain-text derivations, the character clean-up and the
-layout of a call. Change them together with their tests. A change, or a Python upgrade
-that changes the standard library's `html.parser` or Unicode database, makes every
-affected text file differ from its derivation: `plan` says `text`, and `check` fails each
-report until `text` has rewritten its text file, then names each quote the new text no
-longer holds. The research rules (`text.sentence_bounded`, the speaker, call and wording
-rules and the quote length and spelling in `research.py`) are applied by every `check`:
-tightening one fails every report that breaks it, and `plan` says `research` until the
-reports are fixed.
+layout of a call. A change of them, or a Python release whose standard library changes
+`html.parser` or the Unicode database, makes every affected text file differ from its
+derivation: `plan` says `text`, and `check` fails each report until `text` has rewritten
+its text file, then names each quote the new text no longer holds. The research rules
+(`text.sentence_bounded`, the speaker, call and wording rules and the quote length and
+spelling in `research.py`) are applied by every `check`: tightening one fails every report
+that breaks it, and `plan` says `research` until the reports are fixed.
 
 ## The per-document report
 
@@ -615,10 +614,9 @@ York time of the command that wrote the file, to the second, with its zone
 ## Formats verified live
 
 - EDGAR's bodies are read as a strict subset of their documented or verified layout
-  (`filings.py`: `RECENT_COLUMNS` and `parse_filing_index`, pinned by
-  `tests/fundamentals/test_filings.py`): `company_tickers.json`, the submissions JSON's
-  `filings.recent` (`RECENT_COLUMNS`, `items` included) and the filing index page. The
-  index page's layout is a provider format, verified on Intel's 8-K
+  (`filings.py`: `RECENT_COLUMNS` and `parse_filing_index`): `company_tickers.json`, the
+  submissions JSON's `filings.recent` (`RECENT_COLUMNS`, `items` included) and the filing
+  index page. The index page's layout is a provider format, verified on Intel's 8-K
   0000050863-26-000155: exactly one `<table class="tableFile" summary="Document Format
   Files">`, closed by its own `</table>` and holding no other table, whose first row's
   cells are Seq, Description, Document, Type and Size and whose other rows have five
@@ -627,10 +625,10 @@ York time of the command that wrote the file, to the second, with its zone
   `EX-99.` and 1 to 16 letters, digits or dots. When EDGAR changes a field or this
   layout, `fetch` fails loudly with one line naming the field and row (for an index page,
   `filing index {accession}: ...` with the row position and the rule, never a cell's
-  text) instead of guessing, and writes nothing of that document; update `filings.py`
-  and its tests only from newly verified bodies. An index page in `raw/` is parsed again
-  on every read, so a reader change that refuses it makes it an invalid file, and one
-  that reads other exhibits from it changes its period's documents, never silently.
+  text) instead of guessing, and writes nothing of that document. An index page in `raw/`
+  is parsed again on every read, so a reader change that refuses it makes it an invalid
+  file, and one that reads other exhibits from it changes its period's documents, never
+  silently.
 - EarningsCalls.dev, verified live on 2026-10-19 (OpenAPI at
   `https://earningscalls.dev/openapi.json`): `GET /api/v1/me` reports the key's tier and
   usage, and the headers `x-ratelimit-limit` and `x-ratelimit-remaining` count the month;
@@ -671,17 +669,3 @@ York time of the command that wrote the file, to the second, with its zone
   keys, `NaN` and `Infinity` are refused. A body that breaks the subset is refused with
   the field and the rule, never its text, and nothing is written; a page or transcript in
   `raw/` is validated again on every read, so a tightened rule makes it an invalid file.
-  Update `earningscalls.py` and its tests only from newly verified bodies.
-
-## Fixtures
-
-`tests/fundamentals/` builds every input in temporary directories: EDGAR JSON, synthetic
-inline-XBRL filings, filing index pages in EDGAR's verified layout and exhibits
-(`edgar_support.py`), a recording fake of the EDGAR HTTP layer (`fake_edgar.py`),
-EarningsCalls.dev calls pages and transcripts in the provider's verified layout with
-synthetic turns of known speakers (`calls_support.py`; no real call's words), a recording
-fake of its HTTP layer (`fake_earningscalls.py`), urllib driven offline over a fake HTTPS
-handler (`transport_support.py`), and a fake EDGAR and provider, raw-tree planters and
-sample reports for the workflow tests (`workflow_support.py`). No test reaches the
-network or reads the real `.env`. To try a change against the real data without writing
-to it, copy `data/` to a temporary directory and pass it as `--data-dir`.

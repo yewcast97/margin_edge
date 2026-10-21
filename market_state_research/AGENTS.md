@@ -1,30 +1,28 @@
 # Market state research principles and architecture
 
-Organize the research by **domain**: a domain discloses one aspect of the state of the market
-and holds, in one folder, its guidance, its procedure, its code when it has any, and its
-data. Every domain has one `AGENTS.md`, which
-states the aim of the work and what its formatted data and reports hold and mean, then how
-each value is obtained, the architecture, the raw files and the facts verified live of each
-source it reads; and one `PROCEDURE.md`, its operations. Code that does not depend on a
-source or a domain's data directory lives once in the shared `common/` package.
+The research is organized by **domain**: a domain discloses one aspect of the state of the
+market and holds, in one folder, its guidance, its procedure, its code when it has any, and
+its data. Every domain has one `AGENTS.md`, which states the aim of the work and what its
+formatted data and reports hold and mean, then how each value is obtained, the architecture,
+the raw files and the facts verified live of each source it reads; and one `PROCEDURE.md`,
+its operations. Code that does not depend on a source or a domain's data directory lives
+once in the shared `common/` package.
 
-The maintainer writes every rule and script here, and Git tracks them; the bot runs the
-domains from its own host and yields their data, as the root [AGENTS.md](../AGENTS.md)
-defines both (Who does what): it runs the commands and follows each domain's `PROCEDURE.md`,
-writes only what they let it write, never edits a rule or a script, and opens a GitHub issue
-when one blocks or misleads it. In the three scripted domains, `stock_iv_regime`,
-`market_position_regime` and `fundamentals`, every source is read by Python over HTTPS (the
-API rule, below), so the bot needs a shell with uv and network access, and no browser; in
-`posts` the bot reads each nominated account by whatever route its host offers and writes
-each of its data files by hand. Nothing the bot produces is tracked: every `data/`
-directory, every poster's folder and every watchlist is ignored by Git.
+The bot runs the domains from its own host and yields their data, as the root
+[AGENTS.md](../AGENTS.md) defines (The bot): it runs the commands and follows each domain's
+`PROCEDURE.md`, writes only what they let it write, never edits a rule or a script, and opens
+a GitHub issue when one blocks or misleads it (Feedback). In the three scripted domains,
+`stock_iv_regime`, `market_position_regime` and `fundamentals`, every source is read by
+Python over HTTPS (the API rule, below), so the bot needs a shell with uv and network access,
+and no browser; in `posts` the bot reads each nominated account by whatever route its host
+offers and writes each of its data files by hand. Nothing the bot produces is tracked: every
+`data/` directory, every poster's folder and every watchlist is ignored by Git.
 
 ## Folder structure
 
 ```text
 market_state_research/
 ├── AGENTS.md
-├── TODO.md             (the maintainer's backlog, ignored by Git)
 ├── common/             shared Python package, bound to no domain
 │   └── vendor/             (the chart library every report page inlines)
 ├── <domain>/           a scripted domain: stock_iv_regime, market_position_regime, fundamentals
@@ -53,10 +51,9 @@ market_state_research/
 | Path | Responsibility |
 | --- | --- |
 | `AGENTS.md` | Shared principles of the research, the domain folder conventions and the data layout. |
-| `TODO.md` | The maintainer's research scope and backlog, ignored by Git. |
 | `common/` | Python shared by every domain: New York time and file-name tokens (`times`), XNYS sessions and market status for the domains that work by session (`sessions`), the three sections of a domain's `data/` with their one write rule (`layout`), ticker and one-line message text (`text`), the one-line `LABEL: ...` command-line conventions, with each domain's own label (`cli`), the reader of a ticker domain's watchlist (`watchlist`), the personal settings of the ignored repository-root `.env` (`env`), and the chart library with the page text every report page shares (`chart`, over `vendor/`). It knows no source, no raw format and no domain's data directory, and sends no network request. |
 | `common/vendor/` | Third-party files copied unmodified from a pinned release, with their licence, notice and provenance: TradingView Lightweight Charts, which `common.chart` verifies and every domain's chart inlines. |
-| `<domain>/AGENTS.md` | The domain's guidance: first the aim, the outputs and what they mean, the commands; then the method, the module boundaries, the raw files, each source's formats and facts verified live, the fixtures and vendored libraries. |
+| `<domain>/AGENTS.md` | The domain's guidance: first the aim, the outputs and what they mean, the commands; then the method, the module boundaries and vendored libraries, the raw files, each source's formats and facts verified live. |
 | `<domain>/PROCEDURE.md` | The domain's operations: settings, parameters, commands and their output fields (in `posts`, the steps the bot takes by hand), the routines, failure handling and the report back. |
 | `<domain>/watchlist.json` | The domain's watchlist, maintained by the bot and ignored by Git (Watchlists): the stock tickers in `stock_iv_regime` and in `fundamentals`, the posters and their accounts in `posts`; `market_position_regime`, whose subject is the market, has none. |
 | `<domain>/script/` | A scripted domain's Python package and supporting code; `posts` has none. |
@@ -64,29 +61,22 @@ market_state_research/
 | `<domain>/data/` | Runtime files in three sections, `raw/`, `formatted/` and `reports/` (Data layout). |
 | `posts/<poster>/` | One nominated poster, the bot's and ignored by Git whole: `profile.md` (who the poster is, their accounts and the count of verdicts so far) and `data/` in the three sections. |
 
-Domains import shared code from `market_state_research.common` instead of copying it, never
-import one another, and `common` never imports from a domain. Keep generated data out of
-`script/`, `common/` and documentation directories. `templates/` and `common/vendor/` hold
-static assets owned by the code: change them together with the code and tests that use
-them. Keep vendored files byte-identical to their upstream release, record their source and
-hashes beside them, and have the code verify a pinned checksum before using a vendored
-library. Ignore runtime data in Git; retain a `data/.gitignore` so a scripted domain's empty data
-directory is present in fresh checkouts (a poster's folder in `posts` is the bot's, ignored
-whole, and needs none). Scripts resolve their default data directory and their assets
-relative to their own domain, independently of the current working directory. Tests live
-in `tests/common/` and `tests/<domain>/` (`posts` has no code and none); synthetic test
-data, watchlists included, belongs in isolated temporary directories, and the
-repository-root `tests/conftest.py` fails the run if any test changes a domain's `data/`
-directory or a poster's folder. Personal settings remain in the ignored repository-root
-`.env`; Python reads it only through `common.env`, where the process environment takes
-precedence, and never prints a value.
+`templates/` and `common/vendor/` hold static assets the code reads. A vendored file is
+byte-identical to its upstream release, with its source and hashes beside it, and the code
+verifies its pinned checksum before using it. Runtime data is ignored by Git; a scripted
+domain's tracked `data/.gitignore` keeps its empty data directory in a fresh checkout (a
+poster's folder in `posts` is the bot's, ignored whole, and needs none). Scripts resolve
+their default data directory and their assets relative to their own domain, whatever the
+working directory. Personal settings remain in the ignored repository-root `.env`; Python
+reads it only through `common.env`, where the process environment takes precedence, and
+never prints a value.
 
 ## Watchlists
 
 A domain that works through a list keeps its own `watchlist.json` beside its `AGENTS.md`:
 the stock tickers of `stock_iv_regime` and of `fundamentals`, and the posters of `posts`
 (that domain's `AGENTS.md` gives its format). There is no shared watchlist. The bot
-maintains every one (root [AGENTS.md](../AGENTS.md), Who does what): it writes the file,
+maintains every one (root [AGENTS.md](../AGENTS.md), The bot): it writes the file,
 adds and removes entries on the owner's instruction or by its own judgment, corrects a file
 a command refuses, and reports each change. Like `.env`, each is ignored by Git, so a
 checkout has none until the bot writes it. A ticker watchlist holds exactly one list of
@@ -191,8 +181,8 @@ three by hand, under that domain's `AGENTS.md`:
   whose VIX was not due yet, a quarter of an hour after XNYS closes). Sessions, holidays and
   closes come from the pinned `exchange-calendars` release, which knows only closures
   announced before it was published: a raw file of a day that is not a session is invalid (a
-  history of many days keeps its source's rows of other days and never uses them), and the
-  maintainer raises the pin (with `uv lock`) when NYSE announces an unscheduled closure. A
+  history of many days keeps its source's rows of other days and never uses them), and an
+  unscheduled closure NYSE announces after that release is reported in an issue. A
   document that is no session's is dated by its own date, with no session logic:
   `market_position_regime`'s statistics of a month or a week, each published after it,
   the filings, earnings releases and earnings-call transcripts of `fundamentals`, and the
@@ -212,8 +202,8 @@ three by hand, under that domain's `AGENTS.md`:
   or a browser on the host), names the route in every raw file, and never asks for a
   credential in the conversation.
 - Use New York exchange time (America/New_York, EDT or EST) and no other time zone: stored
-  timestamps, file-name timestamps, JSON, Markdown and HTML output, messages, documentation
-  and tests. Write instants as ISO 8601 with their offset (`2026-10-06T05:09:17-04:00`),
+  timestamps, file-name timestamps, JSON, Markdown and HTML output, messages and
+  documentation. Write instants as ISO 8601 with their offset (`2026-10-06T05:09:17-04:00`),
   except in text meant only for people (a chart's "Generated" header, the times a report
   page or its notes show), which shows New York time to the second with its zone
   (`2026-10-06 05:09:17 EDT`, from `common.times.et_display`); time values in data a

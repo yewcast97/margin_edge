@@ -245,7 +245,7 @@ table; the window, whether it is `truncated`, any `pending_releases` and
 messages, and statements left out for their length (AGENTS.md, Quotes: the research
 rules). Never restate, summarise or interpret the quotes: point to the series. What blocks
 you or looks wrong in a rule, a message or a tool goes into a GitHub issue (the root
-[AGENTS.md](../../AGENTS.md), Who does what), never into the rule.
+[AGENTS.md](../../AGENTS.md), Feedback), never into the rule.
 
 ## Failure handling
 
@@ -270,8 +270,8 @@ need more:
 | `stopped` in `fetch`'s output (`…: HTTP 429; EarningsCalls.dev's request limit is reached …; run fetch again once it resets`) | Report it with the reset date the line names; run `fetch` again only after it. EDGAR's files of every ticker were still fetched. |
 | `…; EarningsCalls.dev is unavailable: wait and run fetch again`, `…; EDGAR is unavailable: …`, `…; EDGAR's rate limit: …` or `…: the body ended after N of M bytes; run fetch again` | Wait some minutes (ten for EDGAR's rate limit), then run `fetch` once more. When it fails the same way again, report it and stop for that ticker. |
 | `calls.status: unsupported` (`EarningsCalls.dev lists N issuers for T (ambiguous): their calls cannot be told apart`) | Report it; the ticker's periods cannot be completed. |
-| `GET URL: calls list …`, `GET URL: transcript: …` | The provider's format changed and nothing of that body was written. Report the line: `earningscalls.py` changes only from newly verified bodies. |
-| `filing index ACC: …` (`fetch`) | EDGAR changed the index page layout and nothing of the release was written, or, when a `PATH` comes first, an index page in `raw/` no longer parses (do what the line says). Report it: `filings.py` changes only from newly verified pages. |
+| `GET URL: calls list …`, `GET URL: transcript: …` | The provider's format changed and nothing of that body was written. Report the line and open an issue with it. |
+| `filing index ACC: …` (`fetch`) | EDGAR changed the index page layout and nothing of the release was written, or, when a `PATH` comes first, an index page in `raw/` no longer parses (do what the line says). Report the line and open an issue with it. |
 | `INTC: no period is complete: every document of a period needs a report that passes check` (`render`) | Not an error to report: research at least one period completely, its call settled and every document's report passing. |
 | `the report names no document of a listed period in raw/ …` (`check`) | The file name is not a `DOC_ID` of `plan`'s `documents[]`: rename the report to the right one, or, when its document was withdrawn or its `DOC_ID` changed, with `.rejected`. |
 | `a quote must be whole sentences, …` | The quote cuts a statement: quote it from its start to its end (AGENTS.md, Quotes: the research rules). |

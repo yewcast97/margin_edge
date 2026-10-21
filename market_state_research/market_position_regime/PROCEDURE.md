@@ -120,7 +120,7 @@ ones), the latest values (the debit balances of the newest month, the two percen
 nets of the newest week, the VIX close and its percentile of the newest session), the gaps,
 what is lacking or pending, and the report path. Never state a value that is not in a
 command's output. What blocks you or looks wrong in a rule, a message or a tool goes into a
-GitHub issue (the root [AGENTS.md](../../AGENTS.md), Who does what), never into the rule.
+GitHub issue (the root [AGENTS.md](../../AGENTS.md), Feedback), never into the rule.
 
 | Situation or message | Action |
 | --- | --- |

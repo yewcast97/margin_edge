@@ -163,7 +163,7 @@ latest values with their percentiles and correlations, the prices' status, the g
 report path; report `pending`, `fallbacks`, `empty`, `stopped` and every prices status but
 `new` and `reused` as they appear. Never state a value that is not in a command's output.
 What blocks you or looks wrong in a rule, a message or a tool goes into a GitHub issue (the
-root [AGENTS.md](../../AGENTS.md), Who does what), never into the rule.
+root [AGENTS.md](../../AGENTS.md), Feedback), never into the rule.
 
 | Situation or message | Action |
 | --- | --- |
