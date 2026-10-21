@@ -99,10 +99,17 @@ says what is still missing. EODHD's answers give nothing of the daily quota (the
 `X-RateLimit-*` headers count requests per minute): the day's use is the sum of `requests`
 over the runs of the past 24 hours.
 
+However a run ends, the next `fetch` requests only the sessions still missing: run it again
+as before, without `--refresh` (which fetches every window session again, beside its stored
+chain). Never run two `fetch` commands on one data directory at once: both would fetch, and
+write, every session they both lack. When your host stopped waiting for a `fetch`, check that
+its process has ended, or end it with SIGTERM, before you run `fetch` again.
+
 Each EODHD request takes 1.5 to 4 s (a full page of 1,000 records the longest), so a run of
 9,000 requests takes four hours or more, and one of 1,000 requests 25 minutes to over an
 hour. When your host ends a command after a time limit, pass a `--budget` the run finishes
-within it.
+within it, or run `fetch` in the background with its output sent to a file outside the
+repository and read the file once the run has ended.
 Every command validates every raw file of a ticker: once a span is filled, a name with
 Monday, Wednesday and Friday expiries (MU) takes about 20 seconds per command, one with
 Friday expiries (INTC) a few seconds.
@@ -134,9 +141,22 @@ hundred requests for a name with monthly expiries only (AEP's 271 sessions took 
 thousand for one with weekly or Monday, Wednesday and Friday expiries; a watchlist like the
 example's six tickers ([market_state_research/AGENTS.md](../AGENTS.md), Watchlists) likely
 takes one to two weeks of daily runs. Run `fetch` once a day without tickers until `plan`
-says `record` for every ticker, keeping the default budget; `remaining` shrinks each day. Do
-not split one ticker's history across budgets smaller than about 1,000 requests: the sweeps
-in progress when a run stops are fetched again.
+says `record` for every ticker, with the default budget (run as above when your host limits a
+command's time); `remaining` shrinks each day.
+
+Keep every budget at 1,000 requests or more while a history fills. A run writes a ticker's
+newest missing session only once it has swept every expiry within 65 days after that
+session, from the latest down (about 300 requests for MU); each older session is then
+written as the sweeps pass it, and a stop loses the sweeps made since the last session
+written, which the next run sends again. A run whose budget runs out first writes nothing of
+the ticker, and the next run with that budget spends it the same way: when two runs in a row
+stop at their budget on one ticker without writing a session of it before `as_of`, raise the
+budget.
+
+Until the span is filled, a report written with `--partial` (only when the user asks for one
+now) has a gap wherever a value lacks what it needs (section 4): the window's 14-DTE values
+and correlations fill first, the percentiles last, once the 252 sessions ending with a
+session are fetched.
 
 ### Chains of the former 30-day rule (2026-10-19)
 
@@ -163,6 +183,20 @@ Without `--partial`, the report waits until every span session is fetched and th
 are current. Pass `--partial` only when the user asks for a report now or a session or the
 prices cannot be fetched (section 5); its banners and gaps then name every absence.
 
+What each value of a session needs, with `--partial` or without:
+
+| Value | Needs |
+| --- | --- |
+| `skew_14d_pp`, `atm_iv_14d_pct`, `call25_iv_14d_pct`, `put25_iv_14d_pct` | The session's own chain, listing an expiry 1 to 14 days out and one 14 or more days out that give all four readings ([AGENTS.md](AGENTS.md), Method). |
+| `daily_return_pct` | The newest prices file, holding the bars of the session and of the session before it. |
+| `call25_corr_15s`, `put25_corr_15s` | The 16 sessions ending with the session fetched, with a return and an IV change on each of the last 15, neither series constant. |
+| `skew_14d_percentile`, `atm_iv_14d_percentile` | The 252 sessions ending with the session fetched, with a value on the session and on at least one other. |
+
+The 252 and 15 sessions define the indicators ([AGENTS.md](AGENTS.md), The indicators), and
+no parameter changes them: `--lookback N` sets only how many sessions the report shows, and
+the span it needs is N + 251. A value whose need is unmet is a gap whose reason says what is
+missing, never a value over fewer sessions.
+
 `show TICKER` prints one status line and the twin recomputed from `raw/`, for reading the
 window without writing anything.
 
@@ -188,6 +222,7 @@ root [AGENTS.md](../../AGENTS.md), Feedback), never into the rule.
 | `prices.status` `pending` on two consecutive days | Tiingo lists the ticker but serves no bar of the latest session: report it; record with `--partial` only when the user asks. |
 | `prices.status` `empty` | Tiingo has no prices for the ticker (a class share written with a dot, such as `BRK.B`, among them): report it; its returns and correlations stay gaps. |
 | `invalid_files` with a reason | Rename the file with the suffix `.rejected` (never delete it) and run `fetch` again; report the reason. If a newly fetched file fails the same way, stop and report. |
+| A session with two or more chain files | No fault: `--refresh`, or two `fetch` runs at once, wrote them. The newest valid one is the session's; leave the others as they are. |
 | `fetched_at ... is later than the current time` | The host clock is behind the file's time: report both times before renaming anything. |
 | A ticker EODHD does not cover | Every session gets an empty chain: report it as uncovered. |
 | `PATH.md already exists; refusing to overwrite it` | Another `record` wrote that report in the same second: run `plan` and follow it. |
