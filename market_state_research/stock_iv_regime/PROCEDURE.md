@@ -14,8 +14,8 @@ uv run --locked python -m market_state_research.stock_iv_regime.script COMMAND .
 ```
 
 A command that succeeds exits 0 and prints JSON (`show`: Markdown), also when sessions are
-missing, when `fetch` stopped at its budget or EODHD's quota, and when Tiingo refused or
-failed to give a ticker's prices. A command that fails exits 2 with one
+missing, when `fetch` stopped at its budget, at EODHD's quota or on an interruption, and when
+Tiingo refused or failed to give a ticker's prices. A command that fails exits 2 with one
 `STOCK_IV_REGIME: ...` line on standard error and prints nothing else.
 
 ## 1. Settings and parameters
@@ -91,9 +91,18 @@ ticker:
 - `the run's budget of R requests is spent`: run `fetch` again (the next day when the daily
   quota is near: a run of 9,000 requests leaves about 1,000 of the day's 10,000).
 - `EODHD's daily quota ... is spent`: run `fetch` again after 24 hours.
+- `the run was interrupted; ...`: the process got Ctrl-C or SIGTERM (a host ending a command
+  that ran too long, for one) while it fetched chains: run `fetch` again.
+
+A process killed outright (SIGKILL) prints nothing; the chains it wrote are kept, and `plan`
+says what is still missing. EODHD's answers give nothing of the daily quota (their
+`X-RateLimit-*` headers count requests per minute): the day's use is the sum of `requests`
+over the runs of the past 24 hours.
 
 Each EODHD request takes 1.5 to 4 s (a full page of 1,000 records the longest), so a run of
-9,000 requests takes four hours or more.
+9,000 requests takes four hours or more, and one of 1,000 requests 25 minutes to over an
+hour. When your host ends a command after a time limit, pass a `--budget` the run finishes
+within it.
 Every command validates every raw file of a ticker: once a span is filled, a name with
 Monday, Wednesday and Friday expiries (MU) takes about 20 seconds per command, one with
 Friday expiries (INTC) a few seconds.
@@ -182,4 +191,5 @@ root [AGENTS.md](../../AGENTS.md), Feedback), never into the rule.
 | `fetched_at ... is later than the current time` | The host clock is behind the file's time: report both times before renaming anything. |
 | A ticker EODHD does not cover | Every session gets an empty chain: report it as uncovered. |
 | `PATH.md already exists; refusing to overwrite it` | Another `record` wrote that report in the same second: run `plan` and follow it. |
+| `the command was interrupted; run plan to see what is stored` | Ctrl-C or SIGTERM ended the command outside the fetching of chains; every file written is kept. Run `plan` and follow it. |
 | A watchlist message (`file not found`, `lists no stock tickers`, ...) | Write or correct this domain's `watchlist.json` with the tickers the user follows, report the change and run the command again. |

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -14,11 +15,12 @@ import pytest
 from market_state_research import common as common_package
 from market_state_research.common.layout import DataLayout
 from market_state_research.stock_iv_regime import script as script_package
+from market_state_research.stock_iv_regime.script import __main__ as main_module
 from market_state_research.stock_iv_regime.script import client as client_module
 from market_state_research.stock_iv_regime.script import tiingo as tiingo_module
 from market_state_research.stock_iv_regime.script.__main__ import build_parser, main
 from market_state_research.stock_iv_regime.script.store import DATA_DIRECTORY
-from market_state_research.stock_iv_regime.script.workflow import WATCHLIST
+from market_state_research.stock_iv_regime.script.workflow import INTERRUPTED, WATCHLIST
 
 from .fake_eodhd import FakeEodhd
 from .fake_tiingo import FakeTiingo
@@ -144,6 +146,48 @@ def test_fetch_output_says_the_keys_are_set(capsys, layout):
     assert (output["eodhd_key"], output["tiingo_key"], output["watchlist"]) == ("set", "set", None)
     assert "quota" in output["stopped"]["reason"]
     assert output["tickers"][0]["prices"]["status"] == "empty"
+
+
+def test_fetch_ended_by_sigterm_prints_what_it_did(capsys, layout):
+    received: list[int] = []
+
+    def previous(signum, frame):
+        received.append(signum)
+
+    # A host ending the command sends SIGTERM while the first request to EODHD is awaited.
+    fake = FakeEodhd(interruptions={1: lambda: signal.raise_signal(signal.SIGTERM)})
+    original = signal.signal(signal.SIGTERM, previous)
+    try:
+        code, out, err = run(
+            capsys,
+            "fetch",
+            TICKER,
+            "--data-dir",
+            str(layout.root),
+            client=fake.client(),
+            tiingo=FakeTiingo().client(),
+        )
+        restored = signal.getsignal(signal.SIGTERM)
+    finally:
+        signal.signal(signal.SIGTERM, original)
+    # The command's own handler took the signal, and the previous one is back.
+    assert (code, err, received, restored) == (0, "", [], previous)
+    output = json.loads(out)
+    assert output["stopped"] == {"ticker": TICKER, "reason": INTERRUPTED}
+    assert output["requests"] == output["tickers"][0]["requests"] == 1
+
+
+def test_an_interrupted_command_fails_with_one_line(capsys, layout, monkeypatch):
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(main_module, "plan", interrupted)
+    code, out, err = run(capsys, "plan", TICKER, "--data-dir", str(layout.root))
+    assert (code, out, err) == (
+        2,
+        "",
+        "STOCK_IV_REGIME: the command was interrupted; run plan to see what is stored\n",
+    )
 
 
 def test_plan_names_the_watchlist_it_read(capsys, layout, watchlist):

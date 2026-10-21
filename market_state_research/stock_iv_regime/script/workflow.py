@@ -12,10 +12,11 @@ files and whether the CSV and the newest report of the window are current; its a
 ``fetch``, ``record`` or ``reuse``. ``fetch`` first requests from Tiingo the prices of every
 ticker whose prices are not current, one request each, then writes the missing chains of the
 span (``fetch`` module): the latest session of every ticker, then the older sessions ticker
-by ticker, until the run's budget or EODHD's daily quota stops it cleanly. No answer of
-Tiingo stops the chains. ``record`` rewrites the formatted CSV from ``raw/`` and writes a new
-report (the chart and its Markdown twin) each time it runs, when the span is complete and
-the prices current, or when ``--partial`` is given. ``show`` prints the window as Markdown.
+by ticker, until the run's budget, EODHD's daily quota or an interruption stops it cleanly.
+No answer of Tiingo stops the chains. ``record`` rewrites the formatted CSV from ``raw/`` and
+writes a new report (the chart and its Markdown twin) each time it runs, when the span is
+complete and the prices current, or when ``--partial`` is given. ``show`` prints the window
+as Markdown.
 
 A report is fresh while its twin and its chart are exactly what ``record`` would write now,
 at the time in the report's name. Reports are never overwritten; every time printed is New
@@ -61,6 +62,7 @@ from .tiingo import Stopped, TiingoClient, TiingoError
 DEFAULT_LOOKBACK = 50
 DEFAULT_BUDGET = 9000  # requests; the product allows 10,000 a day (100,000 calls at 10 each)
 WATCHLIST = domain_watchlist(DATA_DIRECTORY.parent)  # the default of plan and fetch without tickers
+INTERRUPTED = "the run was interrupted; every chain written is kept; run fetch again"
 
 
 @dataclass(frozen=True)
@@ -386,9 +388,11 @@ def fetch(
     the latest session), ``failed`` (that request failed) or ``stopped`` (Tiingo refused the
     key or its request limit is reached: no later ticker's prices are requested). Then the
     latest session of every ticker is fetched from the contracts listing, and each ticker's
-    older sessions by sweeps, in ticker order. EODHD's daily quota (HTTP 402) or the
-    client's budget stops the run cleanly: every file written is kept and ``stopped`` names
-    the ticker and the reason. Any other EODHD failure raises.
+    older sessions by sweeps, in ticker order. EODHD's daily quota (HTTP 402), the client's
+    budget or an interruption (``KeyboardInterrupt``: Ctrl-C, or SIGTERM as the command line
+    turns it) stops the run cleanly: every file written is kept, ``stopped`` names the ticker
+    and the reason, and each ticker's ``requests`` counts every request sent for it, so that
+    they add up to the run's. Any other EODHD failure raises.
     """
     now = to_eastern(now, "now")
     runs = []
@@ -419,7 +423,10 @@ def fetch(
             if session not in run.to_fetch:
                 continue
             before = client.requests
-            found = latest(client, run.ticker, session)
+            try:
+                found = latest(client, run.ticker, session)
+            finally:
+                run.requests += client.requests - before
             if found.chain is not None:
                 run.outcome.files.append(write_chain(layout, found.chain))
                 run.outcome.written.append(session)
@@ -427,7 +434,6 @@ def fetch(
                 run.outcome.pending.append(session)
             else:
                 run.outcome.fallbacks.append((session, found.reason or ""))
-            run.requests += client.requests - before
         for run in runs:
             current = run
             older = [
@@ -442,6 +448,8 @@ def fetch(
                 run.requests += client.requests - before
     except (QuotaExceeded, BudgetSpent) as error:
         stopped = {"ticker": "" if current is None else current.ticker, "reason": str(error)}
+    except KeyboardInterrupt:
+        stopped = {"ticker": "" if current is None else current.ticker, "reason": INTERRUPTED}
     return {
         "generated_at": et_isoformat(now),
         "as_of": completed_session(now).isoformat(),

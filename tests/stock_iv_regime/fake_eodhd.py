@@ -7,13 +7,14 @@ and numbers written as the literal text the records hold. With ``shuffle_ties``,
 tie on the sort key come back in a new order on every request, as EODHD's do, so a second
 page may repeat some records and miss as many. ``underlying`` maps a contract to its
 underlying when its OCC root differs (an adjusted series). ``statuses`` scripts the status of
-a request by its number (1-based), whose body is then empty; every request's token-free URL
-and token are recorded.
+a request by its number (1-based), whose body is then empty; ``interruptions`` calls a
+function when the request of that number arrives, before it is answered (Ctrl-C or SIGTERM
+while EODHD is awaited); every request's token-free URL and token are recorded.
 """
 
 import json
 import random
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -44,6 +45,7 @@ class FakeEodhd:
     underlying: dict[str, str] = field(default_factory=dict)
     statuses: dict[int, int] = field(default_factory=dict)
     headers: dict[int, dict[str, str]] = field(default_factory=dict)
+    interruptions: dict[int, Callable[[], None]] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
     tokens: list[str] = field(default_factory=list)
     shuffle_ties: bool = False
@@ -62,6 +64,8 @@ class FakeEodhd:
         self.calls.append(f"{parts.scheme}://{parts.netloc}{parts.path}?{urlencode(public)}")
         self.tokens.append(token[0] if token else "")
         number = len(self.calls)
+        if number in self.interruptions:
+            self.interruptions[number]()
         if number in self.statuses:
             return Response(self.statuses[number], "Scripted", self.headers.get(number, {}), b"")
         endpoint = parts.path.rsplit("/", 1)[-1]

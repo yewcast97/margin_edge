@@ -10,14 +10,21 @@ EODHD's options API under EODHD_API (from the environment or the ignored reposit
 and writes each ticker's prices and each session's chain to data/raw/. plan, record and
 show work offline: they plan the next step, record the raw files into the formatted CSV and
 a report and show the window. Without tickers, fetch and plan read this domain's
-watchlist.json. The clock is read in New York time, and every time printed is New York time.
+watchlist.json. While fetch runs, SIGTERM (a host ending a command that ran too long) is
+turned into the KeyboardInterrupt of Ctrl-C, so a run interrupted while it fetches chains
+stops cleanly and prints what it did; any other interrupted command fails with one line. The
+clock is read in New York time, and every time printed is New York time.
 """
 
 import argparse
 import json
+import signal
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import datetime
+from types import FrameType
+from typing import NoReturn
 
 from market_state_research.common.cli import Parser, directory_path, fail, file_path, positive_integer
 from market_state_research.common.env import setting
@@ -32,6 +39,7 @@ from .workflow import DEFAULT_BUDGET, DEFAULT_LOOKBACK, WATCHLIST, fetch, plan, 
 
 PROGRAM = "python -m market_state_research.stock_iv_regime.script"
 LABEL = "STOCK_IV_REGIME"
+COMMAND_INTERRUPTED = "the command was interrupted; run plan to see what is stored"
 
 
 class StockIvRegimeParser(Parser):
@@ -114,6 +122,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _interrupt(signum: int, frame: FrameType | None) -> NoReturn:
+    raise KeyboardInterrupt
+
+
+@contextmanager
+def _terminate_as_interrupt() -> Iterator[None]:
+    """While the block runs, SIGTERM raises ``KeyboardInterrupt`` as Ctrl-C does; the previous
+    handler is restored afterwards."""
+    previous = signal.signal(signal.SIGTERM, _interrupt)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL if previous is None else previous)
+
+
 def main(
     argv: Sequence[str] | None = None,
     now: datetime | None = None,
@@ -135,16 +158,17 @@ def main(
                 client if client is not None else EodhdClient(settings(API_KEY_SETTING), budget=args.budget)
             )
             prices = tiingo if tiingo is not None else TiingoClient(settings(TIINGO_KEY_SETTING))
-            output = fetch(
-                layout,
-                args.tickers,
-                args.lookback,
-                moment,
-                eodhd,
-                prices,
-                refresh=args.refresh,
-                watchlist=args.watchlist,
-            )
+            with _terminate_as_interrupt():
+                output = fetch(
+                    layout,
+                    args.tickers,
+                    args.lookback,
+                    moment,
+                    eodhd,
+                    prices,
+                    refresh=args.refresh,
+                    watchlist=args.watchlist,
+                )
         elif args.command == "plan":
             output = plan(
                 layout, args.tickers, args.lookback, moment, refresh=args.refresh, watchlist=args.watchlist
@@ -156,6 +180,8 @@ def main(
             return 0
     except (EodhdError, TiingoError, ValueError, OSError, OverflowError) as error:
         return fail(LABEL, str(error))
+    except KeyboardInterrupt:
+        return fail(LABEL, COMMAND_INTERRUPTED)
     if args.command in ("fetch", "plan"):
         output["watchlist"] = None if args.tickers else str(args.watchlist)
     # ASCII-only JSON: values that came from file names or EODHD cannot carry control or

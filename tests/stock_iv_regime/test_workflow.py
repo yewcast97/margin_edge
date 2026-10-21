@@ -299,6 +299,46 @@ def test_fetch_with_a_quota_stop(layout, monkeypatch):
     assert entry(output)["fetched"]["sessions"] == 0
 
 
+def interrupt() -> None:
+    raise KeyboardInterrupt
+
+
+def test_an_interrupted_fetch_reports_what_it_wrote_and_the_next_one_resumes(layout, monkeypatch):
+    monkeypatch.setattr(workflow, "WINDOW", 3)
+    sessions = list(session_window(AS_OF, 5))
+    expiries = [AS_OF + timedelta(days=days) for days in (-3, 4, 11, 32, 39)]
+    fake, tiingo = FakeEodhd(), priced()
+    market(fake, sessions, expiries)
+    fake.interruptions = {3: interrupt}  # Ctrl-C at the first sweep, after the latest session's two requests
+    output = fetch(layout, [TICKER], LOOKBACK, NOW, fake.client(), tiingo.client())
+    item = entry(output)
+    assert output["stopped"] == {"ticker": TICKER, "reason": workflow.INTERRUPTED}
+    assert item["fetched"] == {"sessions": 1, "first": "2026-10-16", "last": "2026-10-16"}
+    assert item["remaining"] == {
+        "sessions": 4,
+        "first": sessions[0].isoformat(),
+        "last": sessions[3].isoformat(),
+    }
+    assert output["requests"] == item["requests"] == 3
+    # The next run requests only the sessions still missing, and no session gets a second chain.
+    fake.interruptions = {}
+    again = fetch(layout, [TICKER], LOOKBACK, NOW, fake.client(), tiingo.client())
+    assert again["stopped"] is None and entry(again)["fetched"]["sessions"] == 4
+    chains = sorted(path.name for path in layout.raw(TICKER).glob("chain_*"))
+    assert [name[6:16] for name in chains] == [day.isoformat() for day in sessions]
+    assert entry(plan(layout, [TICKER], LOOKBACK, NOW))["action"] == "record"
+
+
+def test_a_stop_in_the_latest_session_counts_its_requests(layout, monkeypatch):
+    monkeypatch.setattr(workflow, "WINDOW", 3)
+    fake = FakeEodhd()
+    market(fake, list(session_window(AS_OF, 5)), [AS_OF + timedelta(days=days) for days in (4, 11, 32, 39)])
+    # The listing is sent; the budget stops the request for the records traded on the session.
+    output = fetch(layout, [TICKER], LOOKBACK, NOW, fake.client(budget=1), priced().client())
+    assert output["stopped"]["ticker"] == TICKER and "budget of 1 requests" in output["stopped"]["reason"]
+    assert output["requests"] == entry(output)["requests"] == 1
+
+
 def test_fetch_skips_what_is_stored(layout, monkeypatch):
     monkeypatch.setattr(workflow, "WINDOW", 3)
     for day in session_window(AS_OF, 5):
