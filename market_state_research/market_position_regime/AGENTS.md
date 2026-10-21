@@ -18,8 +18,8 @@ window that is read whole: three charts, margin debt by month, futures positioni
 and the VIX by session, served together also when one indicator is asked about, since one
 chart alone biases the reading. Its values are the sources' published figures and what the
 stated method computes from them, with dates, coverage and a reason wherever a value is
-absent. The record names no regime, applies no threshold and gives no advice; the analyst
-reads it.
+absent. The record names no regime, applies no threshold and gives no advice: its reading is
+the user's.
 
 ## The indicators
 
@@ -43,8 +43,8 @@ rounded half-even once at the end; zero is written without a sign (`indicators.p
 - **Margin debt** of month M is FINRA's "Debit Balances in Customers' Securities Margin
   Accounts", in $ millions, as of M's last business day on a settlement-date basis, charted
   as published: no growth, ratio or other value is derived from it. (No denominator is
-  used: the Fed's quarterly market value of corporate equities, the one found, counts
-  closely held corporations, not listed shares alone.)
+  read: the Fed's quarterly market value of corporate equities counts closely held
+  corporations, not listed shares alone.)
 - **Nets of week W**, from W's report: asset managers' net position = long − short, and
   leveraged funds' net short position = short − long, each in **E-mini equivalents**, contracts
   of $50 times the S&P 500: the CFTC's count × its contract's dollars per index point ÷ 50.
@@ -196,7 +196,8 @@ reads a setting. [PROCEDURE.md](PROCEDURE.md) gives each field and the step that
 
 ## Architecture
 
-The package `market_state_research.market_position_regime.script`:
+The package `market_state_research.market_position_regime.script`, through which a hypothesis
+script reads this domain's `raw/` ([explore_hypothesis/AGENTS.md](../../explore_hypothesis/AGENTS.md)):
 
 | Module | Responsibility |
 | --- | --- |

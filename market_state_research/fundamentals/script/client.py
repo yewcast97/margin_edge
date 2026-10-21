@@ -2,7 +2,7 @@
 ``earningscalls`` shares.
 
 EDGAR is a public, read-only API with a published fair-access policy: every request
-names the person running it in ``User-Agent`` (``SEC_USER_AGENT``, a name and an email
+names in ``User-Agent`` whom it is made for (``SEC_USER_AGENT``, a name and an email
 address, from the ignored repository-root ``.env``) and stays well below ten requests a
 second (``sleep(PACING)`` before every request after a client's first). The value is
 checked before any request and never appears in a message, a file or the output.

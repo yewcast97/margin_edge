@@ -122,11 +122,12 @@ Tiingo request per ticker for the whole watchlist.
 
 A ticker new to `raw/` lacks its whole span (301 sessions with the default window): a few
 hundred requests for a name with monthly expiries only (AEP's 271 sessions took 268), several
-thousand for one with weekly or Monday, Wednesday and Friday expiries; the default watchlist
-likely takes one to two weeks of daily runs. Run `fetch` once a day without tickers until `plan` says
-`record` for every ticker, keeping the default budget; `remaining` shrinks each day. Do not
-split one ticker's history across budgets smaller than about 1,000 requests: the sweeps in
-progress when a run stops are fetched again.
+thousand for one with weekly or Monday, Wednesday and Friday expiries; a watchlist like the
+example's six tickers ([market_state_research/AGENTS.md](../AGENTS.md), Watchlists) likely
+takes one to two weeks of daily runs. Run `fetch` once a day without tickers until `plan`
+says `record` for every ticker, keeping the default budget; `remaining` shrinks each day. Do
+not split one ticker's history across budgets smaller than about 1,000 requests: the sweeps
+in progress when a run stops are fetched again.
 
 ### Chains of the former 30-day rule (2026-10-19)
 

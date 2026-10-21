@@ -1,6 +1,6 @@
 # Posts: what nominated posters say, archived, fact-checked and reported
 
-This procedure collects, for the posters of the watchlist, every post of the intervals a human
+This procedure collects, for the posters of the watchlist, every post of the intervals the user
 asks about; fact-checks every post; answers each request with a report; keeps each poster's
 profile; and checks again, once a day, every claim still pending. The posters and routes, the
 intervals and their coverage, every file's grammar, the rules of claims, evidence and verdicts,

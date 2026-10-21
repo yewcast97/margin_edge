@@ -5,8 +5,8 @@ market and holds, in one folder, its guidance, its procedure, its code when it h
 its data. Every domain has one `AGENTS.md`, which states the aim of the work and what its
 formatted data and reports hold and mean, then how each value is obtained, the architecture,
 the raw files and the facts verified live of each source it reads; and one `PROCEDURE.md`,
-its operations. Code that does not depend on a source or a domain's data directory lives
-once in the shared `common/` package.
+its operations. The code the domains share, bound to no source and no domain's data
+directory, is the `common/` package.
 
 The bot runs the domains from its own host and yields their data, as the root
 [AGENTS.md](../AGENTS.md) defines (The bot): it runs the commands and follows each domain's
@@ -77,7 +77,7 @@ A domain that works through a list keeps its own `watchlist.json` beside its `AG
 the stock tickers of `stock_iv_regime` and of `fundamentals`, and the posters of `posts`
 (that domain's `AGENTS.md` gives its format). There is no shared watchlist. The bot
 maintains every one (root [AGENTS.md](../AGENTS.md), The bot): it writes the file,
-adds and removes entries on the owner's instruction or by its own judgment, corrects a file
+adds and removes entries when the user asks or by its own judgment, corrects a file
 a command refuses, and reports each change. Like `.env`, each is ignored by Git, so a
 checkout has none until the bot writes it. A ticker watchlist holds exactly one list of
 stocks, which may be empty:
@@ -108,9 +108,9 @@ three by hand, under that domain's `AGENTS.md`:
 
 | Section | Contents | Written by |
 | --- | --- | --- |
-| `raw/` | What was fetched, verbatim, as the domain's `AGENTS.md` describes each file; in `posts`, every post of one account over one interval a human asked about. | `fetch`, the one network command of each scripted domain, and the bot only renames a file `.rejected`; in `posts`, the bot, once per file. |
+| `raw/` | What was fetched, verbatim, as the domain's `AGENTS.md` describes each file; in `posts`, every post of one account over one interval the user asked about. | `fetch`, the one network command of each scripted domain, and the bot only renames a file `.rejected`; in `posts`, the bot, once per file. |
 | `formatted/` | What Python derives from `raw/`: the tables or texts the domain's `AGENTS.md` names; in `posts`, the fact-check of each raw file. | `record` in `stock_iv_regime` and `market_position_regime`, `text` in `fundamentals`; the bot in `posts`. |
-| `reports/` | What people read. | `record`, or `render` in `fundamentals`, where the bot also writes one report per document; the bot in `posts`, one report per request. |
+| `reports/` | What the user reads. | `record`, or `render` in `fundamentals`, where the bot also writes one report per document; the bot in `posts`, one report per request. |
 
 - **A run keeps what is stored.** The raw files are the evidence every value rests on, and
   requesting them again costs quota and time: `fetch` requests only what the window lacks,
@@ -119,7 +119,7 @@ three by hand, under that domain's `AGENTS.md`:
   window's data again whatever is stored and keeps every stored file (the domain's
   `AGENTS.md` says what it requests again and what becomes of an answer that differs from
   the stored copy). No command deletes or empties `raw/`. In `posts` a request reads only
-  the parts of its interval that no raw file of the account covers, unless a human asks for
+  the parts of its interval that no raw file of the account covers, unless the user asks for
   a covered one to be read again.
 - **`raw/` is the archive.** Python never modifies a raw file, and every command validates
   every raw file it reads, every time it reads it (the formats, the calendar and time
@@ -133,10 +133,10 @@ three by hand, under that domain's `AGENTS.md`:
   fact-check of a raw file rests on the evidence found at each check as well, is updated in
   place with a dated history, cannot be rebuilt, and is kept like `raw/`.
 - **`reports/` is never overwritten.** A report name that exists fails the command, and
-  older reports stay until someone deletes them by hand. The fundamentals domain's
-  per-document reports are the bot's: it may rewrite one until `check` passes it, and again
-  after a field's definition changes (the domain's `AGENTS.md`). A `posts` report answers
-  one request, under a name of its own, and is never rewritten.
+  older reports stay: no command deletes one, and neither does the bot. The fundamentals
+  domain's per-document reports are the bot's: it may rewrite one until `check` passes it,
+  and again after a field's definition changes (the domain's `AGENTS.md`). A `posts` report
+  answers one request, under a name of its own, and is never rewritten.
 - **Selection replaces bookkeeping.** Per key (a session's chain, a week's report, a call's
   transcript) the newest file wins (the domain's `AGENTS.md` says what a key is), so a refresh
   writes a newer file beside the stored one, which wins from then on. Nothing records the selection: there
@@ -221,7 +221,7 @@ three by hand, under that domain's `AGENTS.md`:
 | [`stock_iv_regime`](stock_iv_regime/AGENTS.md) ([procedure](stock_iv_regime/PROCEDURE.md)) | Per session, the 14-DTE 25Δ skew and ATM IV and their 252-session percentiles, and the 15-session correlations of the stock's daily return with the changes of the 14-DTE 25Δ call and put IVs, over a look-back window, in two charts read together. | EODHD options API (`EODHD_API`) and Tiingo daily prices (`TIINGO_API`). |
 | [`market_position_regime`](market_position_regime/AGENTS.md) ([procedure](market_position_regime/PROCEDURE.md)) | For the US equity market over a window of dates, FINRA's margin debt by month, S&P 500 futures positioning by week (asset managers' net long and leveraged funds' net short, each as its percentile over 52 weeks) and the VIX by session (its close as a percentile over 252 sessions), in three charts read together. | FINRA's margin statistics workbook, the CFTC's Traders in Financial Futures (Socrata API) and Cboe's daily VIX history, none with a key. |
 | [`fundamentals`](fundamentals/AGENTS.md) ([procedure](fundamentals/PROCEDURE.md)) | What each stock issuer's own documents of each fiscal period say, in eleven fields of verbatim quotes, compiled into a time series. | SEC EDGAR (`SEC_USER_AGENT`) and the EarningsCalls.dev transcript API (`EARNINGSCALLS_API`). |
-| [`posts`](posts/AGENTS.md) ([procedure](posts/PROCEDURE.md)) | Per nominated poster, every post of the intervals a human asked about, archived verbatim and fact-checked claim by claim against cited evidence (`true`, `unverified` or `fake`); a profile with the poster's background and the count of verdicts so far; a report per request. | The poster's accounts, by the route the bot's host offers (a key only when that route is a platform's API: `{PLATFORM}_API`); evidence from primary sources first. |
+| [`posts`](posts/AGENTS.md) ([procedure](posts/PROCEDURE.md)) | Per nominated poster, every post of the intervals the user asked about, archived verbatim and fact-checked claim by claim against cited evidence (`true`, `unverified` or `fake`); a profile with the poster's background and the count of verdicts so far; a report per request. | The poster's accounts, by the route the bot's host offers (a key only when that route is a platform's API: `{PLATFORM}_API`); evidence from primary sources first. |
 
 ### stock_iv_regime
 
@@ -289,7 +289,7 @@ added.
 
 For each poster of `posts/watchlist.json` (the bot's: each poster with their accounts, by
 platform), the bot keeps `posts/<poster>/`, a `profile.md` and the three sections of
-`data/`, all by hand and with no script. When a human asks about a poster and an interval
+`data/`, all by hand and with no script. When the user asks about a poster and an interval
 (New York instants; "yesterday" is the previous New York calendar day), the bot reads each
 account's posts over the parts of the interval no raw file of the account covers, by the
 route its host offers, and writes them verbatim, whether or not they answer the question,

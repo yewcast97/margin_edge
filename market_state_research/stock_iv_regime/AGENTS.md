@@ -19,7 +19,7 @@ correlations, each over the stock's adjusted close, served together also when on
 is asked about, since either half alone biases the reading. Its values are computed from the
 providers' quotes and prices by the stated method, with dates, coverage and a reason
 wherever a value is absent. The record names no regime, applies no threshold and gives no
-advice; the analyst reads it.
+advice: its reading is the user's.
 
 ## The indicators
 
@@ -213,7 +213,8 @@ field and the step that follows.
 
 ## Architecture
 
-The package `market_state_research.stock_iv_regime.script`:
+The package `market_state_research.stock_iv_regime.script`, through which a hypothesis script
+reads this domain's `raw/` ([explore_hypothesis/AGENTS.md](../../explore_hypothesis/AGENTS.md)):
 
 | Module | Responsibility |
 | --- | --- |
@@ -245,22 +246,22 @@ of one JSON object with exactly these keys, in this order:
 | `ticker` | The ticker. |
 | `fetched_at` | When the chain was completed, New York ISO time with its offset; `TOKEN` names it to the second. |
 | `source` | `contracts` (the latest session, from the contracts listing) or `eod` (from sweeps of `eod` records). |
-| `window_days` | 65: the rule the file was cut by. A file of another window is refused, so changing it means fetching again. |
+| `window_days` | 65: the rule the file was cut by; a file of another window is refused. |
 | `requests` | The token-free queries whose pages supplied the file. |
 | `expiries` | Every expiry the session lists 1 to 65 days out, ascending, each `{exp_date, contracts}`. |
 | `rows` | Every contract of every listed expiry, usable or not, as the provider's items (`id`, `type`, `attributes`), numbers as the provider's literal text in JSON strings (`"0.2751"`). |
 | `traded` | `contracts` only: the `eod` records dated the session of the contracts last traded on it, within the window; else null. |
 
-Every expiry within the window is kept, so the horizon (`surface.HORIZON`, 14) is a rule
-of the derivation, not of the file, and can move without a new fetch. The cost is size and
-time, measured on 2026-10-19: MU's chain of 2026-10-16 (Monday, Wednesday and Friday
-expiries) holds 11 expiries, 4,696 contracts and 2,485 traded records, 0.2 MB gzipped,
-validated in 0.07 s; INTC's (Friday expiries, and one stray Monday) 8 expiries, 1,070
-contracts and 812 traded records, 55 KB, 0.02 s. A filled 301-session span of a name like MU
-is thus about 60 MB, and every command validates it for about 20 seconds (`plan` over 301
-synthetic chains of 5,400 contracts each took 15 s and 240 MB of memory). After validation
-each chain keeps in memory only the rows of the expiries its values read, its brackets and
-any expiry skipped before them (`store.trimmed`). The attributes kept are exactly `contract`, `exp_date`,
+Every expiry within the window is kept: the horizon (`surface.HORIZON`, 14) is a rule of
+the derivation, not of the file. Sizes and times measured on 2026-10-19: MU's chain of
+2026-10-16 (Monday, Wednesday and Friday expiries) holds 11 expiries, 4,696 contracts and
+2,485 traded records, 0.2 MB gzipped, validated in 0.07 s; INTC's (Friday expiries, and
+one stray Monday) 8 expiries, 1,070 contracts and 812 traded records, 55 KB, 0.02 s. A
+filled 301-session span of a name like MU is thus about 60 MB, and every command validates
+it for about 20 seconds (`plan` over 301 chains of 5,400 contracts each took 15 s and
+240 MB of memory). After validation each chain keeps in memory only the rows of the
+expiries its values read, its brackets and any expiry skipped before them
+(`store.trimmed`). The attributes kept are exactly `contract`, `exp_date`,
 `expiration_type`, `type`, `strike`, `bid`, `ask`, `volume`, `open_interest`, `volatility`,
 `delta` and `tradetime` (the `fields[...]` selection of every query).
 

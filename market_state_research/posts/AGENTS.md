@@ -1,6 +1,6 @@
 # Posts
 
-This domain keeps, per nominated poster, every post of the intervals a human asks
+This domain keeps, per nominated poster, every post of the intervals the user asks
 about, archived verbatim per account whether or not it answers the question; fact-checks each
 post claim by claim against cited evidence, as `true`, `unverified` or `fake`; answers each
 request with a report of the posts that relate to it; and keeps a profile of each poster: who
@@ -22,7 +22,7 @@ no session logic: a post is dated by its platform's timestamp, converted to New 
 ## Aim
 
 For each nominated poster, a record of what they said in public, kept whole and verbatim over
-every interval a human asked about, so that the archive answers later questions too; a
+every interval the user asked about, so that the archive answers later questions too; a
 fact-check of every post that settles each checkable claim against cited evidence, primary
 sources first, and keeps every claim not settled yet open, with what would settle it; a profile
 that says who the poster is and counts the verdicts so far; and, per request, a report that
@@ -86,7 +86,7 @@ grade, ranking, sentiment, prediction or advice is added.
   interval without posts is covered by a file that says so. An account's coverage is the union
   of the intervals of its raw files, those renamed `.rejected` left out, and nothing else
   records it. A request reads, per account, only the parts of its interval that are not
-  covered, one raw file per part; a covered part is read again only when a human asks for it
+  covered, one raw file per part; a covered part is read again only when the user asks for it
   (below).
 - A read cut short (a rate limit, a timeline that stops loading) writes the part it read whole,
   named by that part's bounds, and its header gives the interval asked for: the rest stays
@@ -94,7 +94,7 @@ grade, ranking, sentiment, prediction or advice is added.
 - `coverage: complete` says the route showed every post and reply the account published over
   the interval. `coverage: partial: REASON` says it could not, and why (a search that may miss
   posts, replies the platform hides); a partial file covers its interval like a complete one.
-  When a human asks for a covered interval to be read again, the bot writes a supplement: a raw
+  When the user asks for a covered interval to be read again, the bot writes a supplement: a raw
   file over the interval asked for, holding only the posts the stored files over it lack (or
   `No new posts.`), its header naming those files.
 
@@ -343,7 +343,7 @@ Settled posts found true: true ÷ (true + fake) = 0 ÷ 1 = 0.00.
   posts by verdict and the claims by status, each with its total; and the share of settled
   posts found true, `true ÷ (true + fake)`, with its two counts, to two decimals, or
   `none settled yet` while no post is `true` or `fake`. A deleted post still counts: the poster
-  said it. The counts cover only the intervals humans asked about, and they are not a rating.
+  said it. The counts cover only the intervals asked about, and they are not a rating.
 - `## Notes`: dated lines, only ever appended: the set-up and the daily task's hour; an
   account's change of status or route; each verdict that changed, with its permalink, from what
   to what and the source; each run that failed. A correction is a new line.

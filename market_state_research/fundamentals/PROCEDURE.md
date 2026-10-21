@@ -37,8 +37,8 @@ same window as `fetch`. The other commands take no window.
 environment takes precedence); no other command reads a setting. Never print or repeat a
 value, and write it nowhere but where it is used.
 
-- `SEC_USER_AGENT` names the person running `fetch` to EDGAR: a name, a space and an
-  email address, printable ASCII, at most 200 characters, such as
+- `SEC_USER_AGENT` tells EDGAR whom `fetch`'s requests are made for: a name, a space and
+  an email address, printable ASCII, at most 200 characters, such as
   `SEC_USER_AGENT="Name contact@example.com"`. When it is missing or malformed, ask the
   user for the name and contact address to use and, with their agreement, add the line
   to `.env`.

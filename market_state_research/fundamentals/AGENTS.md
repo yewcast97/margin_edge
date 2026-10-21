@@ -21,7 +21,7 @@ document kept: the filings and earnings releases as the regulator's archive serv
 each earnings call's transcript as the transcript provider serves it, one report per
 document in eleven fields of quotes copied verbatim from the document's derived text, and
 a time series compiled from the complete periods. No valuation, forecast, rating, ranking
-or advice is added by the reports, the series or the bot; the analyst reads the issuer's
+or advice is added by the reports, the series or the bot; the user reads the issuer's
 words.
 
 ## Periods, releases and calls
@@ -209,11 +209,11 @@ fields, in the order the reports keep them:
 
 The definitions are stated here alone, and the bot alone applies them: no code does, so a
 report written under an earlier definition keeps passing `check`. To apply a changed
-definition, read the affected documents again and rewrite their reports, removing the
-quotes the change excludes and adding those it admits; then `check` and `render`. The
-fields' names, number and order are code: a change of them fails every report written
-before it, and `plan` says `research` until each has been rewritten from its document under
-the new fields.
+definition (`git log -p` on this file dates each change), read the affected documents
+again and rewrite their reports, removing the quotes the change excludes and adding those
+it admits; then `check` and `render`. The fields' names, number and order are code: a
+change of them fails every report written before it, and `plan` says `research` until each
+has been rewritten from its document under the new fields.
 
 ## Quotes: the research rules
 
@@ -523,9 +523,9 @@ investor-relations presentation, search result or other transcript.
 - **SEC EDGAR** is a public, read-only API that needs no account, sign-in or key and
   publishes a fair-access policy, which the client (`client.py`) follows exactly for
   every request (the ticker map, the submissions JSON, the 10-K and 10-Q documents, the
-  filing index pages and the exhibits alike): every request names the person running it
-  in `User-Agent` (`SEC_USER_AGENT`, a name and an email address), requests are paced
-  0.2 s apart (half EDGAR's ten a second), only `https://www.sec.gov` and
+  filing index pages and the exhibits alike): every request names in `User-Agent` whom it
+  is made for (`SEC_USER_AGENT`, a name and an email address the user gives), requests
+  are paced 0.2 s apart (half EDGAR's ten a second), only `https://www.sec.gov` and
   `https://data.sec.gov` are contacted, no redirect is followed (a document is kept only
   as served from the URL requested), no compressed body is accepted, every body has a
   size limit (20 MiB for JSON and for an index page, 50 MiB for a document) and a body
@@ -556,35 +556,23 @@ again (Commands).
 
 ## Module boundaries
 
+The domain's files and the package `market_state_research.fundamentals.script`, through which
+a hypothesis script reads this domain's `raw/` ([explore_hypothesis/AGENTS.md](../../explore_hypothesis/AGENTS.md)):
+
 | Path | Responsibility |
 | --- | --- |
 | `AGENTS.md` | This file: the domain's aim, model, rules and outputs, then its sources, architecture and formats. |
 | `PROCEDURE.md` | The bot's workflow: settings and parameters, `fetch`, `plan`, reading the derived text, writing and checking reports, `render`, `show`, failures. |
 | `script/__main__.py` | Command line: `fetch`, `plan`, `text`, `check`, `render`, `show`; `LABEL = "FUNDAMENTALS"`, `FundamentalsParser` and `DATA_DIRECTORY`; `fetch` and `plan` default to the tickers of this domain's `watchlist.json` (`workflow.WATCHLIST`; `--watchlist PATH`), print the file they read (`watchlist`) and take `--refresh` and the window (`--from`, `--to`), which `main` resolves from the New York date and checks before the data directory, the settings or any request; builds the EDGAR client from `SEC_USER_AGENT` and the EarningsCalls.dev client from `EARNINGSCALLS_API` (`CALLS_SETTING`) for `fetch` only, before the watchlist is read; ASCII-only JSON output, `show`'s Markdown; exit codes. |
 | `script/workflow.py` | The commands over `raw/`, `formatted/` and `reports/`: `fetch` (CIK lookup, the submissions JSON, then for each window period, oldest first, its 10-K or 10-Q, each release's filing index page and its EX-99 exhibits in Seq order, each only while it is not in `raw/`, or, with `--refresh`, requested again and compared with its file (`verified`, `changed`), never rewritten; `truncated` and the pending releases; then the calls list when due, or always with `--refresh`, and the transcripts, one whose bytes changed written beside the stored copy with `--refresh` (`refreshed`); `unsupported` and `stopped` calls), `plan` (the window periods' documents, calls, texts and reports, the series' freshness and the next action), `text`, `check` (`check_report`, with a call's turns), `render` and `show`. |
-| `script/client.py` | EDGAR over HTTPS: URL builders (`submissions_url`, `archive_url`, `index_url`), `User-Agent` check, pacing, status, encoding and size rules (`JSON_LIMIT`, `DOCUMENT_LIMIT`, `INDEX_LIMIT`), the refusal of a body cut short of its `Content-Length`, no redirect followed, `EdgarError`; an injectable `Fetch`, `sleep` and clock; `decode_document` (strict UTF-8, else Latin-1); the HTTP reading `earningscalls` shares (`Response`, `read_body`, `lower_headers`, `declared_length`, `count_order`, `failure_reason`). |
-| `script/earningscalls.py` | EarningsCalls.dev over HTTPS: the key check (`check_api_key`, `API_KEY_SETTING`), `HOST` only (`allowed_url`), pacing, status, encoding and size rules (`BODY_LIMIT`), no redirect followed, `EarningsCallsError` and `LimitReached` (HTTP 429); `EarningsCallsClient` (`events_page`, `transcript`) with an injectable `Fetch` (`urllib_fetch`), `sleep` and clock; the strict reading of a calls page (`parse_events_page`), of a capture (`check_capture`, `check_issuer`, `Ambiguous`) and of a transcript against its listed call (`parse_transcript`); a call's derived text and turns (`call_text`, `CallText`). |
+| `script/client.py` | EDGAR over HTTPS: URL builders (`submissions_url`, `archive_url`, `index_url`), `User-Agent` check, pacing, status, encoding and size rules (`JSON_LIMIT`, `DOCUMENT_LIMIT`, `INDEX_LIMIT`), the refusal of a body cut short of its `Content-Length`, no redirect followed, `EdgarError`; `decode_document` (strict UTF-8, else Latin-1); the HTTP reading `earningscalls` shares (`Response`, `read_body`, `lower_headers`, `declared_length`, `count_order`, `failure_reason`). |
+| `script/earningscalls.py` | EarningsCalls.dev over HTTPS: the key check (`check_api_key`, `API_KEY_SETTING`), `HOST` only (`allowed_url`), pacing, status, encoding and size rules (`BODY_LIMIT`), no redirect followed, `EarningsCallsError` and `LimitReached` (HTTP 429); `EarningsCallsClient` (`events_page`, `transcript`); the strict reading of a calls page (`parse_events_page`), of a capture (`check_capture`, `check_issuer`, `Ambiguous`) and of a transcript against its listed call (`parse_transcript`); a call's derived text and turns (`call_text`, `CallText`). |
 | `script/filings.py` | Pure: the strict reading of `company_tickers.json`, of the submissions JSON's `filings.recent` (`RECENT_COLUMNS`, `items` included) and of an 8-K's filing index page (`parse_filing_index`: the `EX-99` and `EX-99.*` rows of the `Document Format Files` table, `EXHIBIT_PATTERN`, `.pdf` copies skipped); the window (`Window`, `default_window`); the periods and their releases by Rule B (`select_periods` → `Periods` of `Period` and `Release`, the pending releases, `truncated`; `NoPeriodicFilings`), and Rule B for any dated item (`rule_b`, `Periods.place`, `PENDING`). |
 | `script/documents.py` | One ticker's `raw/` tree read into its listed periods and their documents (`period_documents` → `RawState` of `PeriodFiles`), every raw file it reads validated and each invalid one listed with its reason; the newest calls capture (`Capture`), the newest copy of each call's transcript (`RawState.transcript_files`), each call placed by Rule B, each period's call (`CallState`: `transcript`, `missing`, `unavailable`, `waiting`; `due_date`, `CALL_WAIT`), the pending and unlisted calls, and when the list is due again (`RawState.events_due`); what a period older than every listed one leaves out (`RawState.before_listing`); the names (`edgar_folder`, `doc_id`, `call_doc_id`, `events_name`, `transcript_name`, `Document.text_name`), the sentence rule's mode (`layout_mode`) and each document's derived text (`derive_text`, `derive_call`). |
 | `script/text.py` | Pure: derived text of HTML and plain text (a Latin-1 filing or exhibit read as windows-1252); `normalise` and `locate`; the research rule `sentence_bounded` (sentence rule v2: `SENTENCE_ENDS`, `CLOSERS`, `OPENERS`, `BULLETS`; layout or block mode, and the speaker label). |
 | `script/research.py` | Pure: the eleven fields (`FIELDS`, `FIELD_TITLES`), the wording rule (`WORDING`), the per-document report grammar (`parse_report`) and the rules each quote keeps against its document's derived text (`quote_problems`: length, location and spelling, sentence rule, speaker, wording, and a call's turns: `Turn`, `EXECUTIVE`). |
 | `script/report.py` | Pure: the time series in Markdown (`render_series`; `SeriesPeriod` with each period's status and what it misses, `CALL_MISSING`, `CALL_WAITING`; `call_label`, `UNAVAILABLE`), its as-of date (`report_as_of`), its file names (`series_name`, `series_files`, `newest_series`) and freshness (`same_series`). |
 | `data/` | Runtime files (below); ignored by Git except `data/.gitignore`. |
-
-Dependencies point one way: `__main__` uses `workflow`, `client` and `earningscalls` (the
-clients and their errors) and `filings` (`Window` and `default_window`); `workflow` uses
-`client`, `documents`, `earningscalls`, `filings`, `report` and `research`; `report` uses
-`documents` and `research`; `documents` uses `client` (limits and `decode_document`),
-`earningscalls`, `filings` and `text`; `earningscalls` uses `client` (`Response`, `Fetch`
-and the HTTP reading it shares), `research` (`Turn`) and `text`; `research` uses `text`.
-`client`, `filings` and `text` depend on nothing else in the package. From
-`market_state_research.common`, `__main__` takes its parser, argument types and `fail`
-(`cli`), the settings (`env`) and `DataLayout` (`layout`); `workflow` names the domain's
-watchlist and reads it (`watchlist`) and normalises tickers (`text`);
-`documents`, `report` and `workflow` use `layout`; `client`, `earningscalls`, `filings`,
-`report`, `research` and `workflow` keep messages on one line with `text.printable`; and
-the modules read the clock and convert times through `times`. This domain imports
-nothing from `stock_iv_regime`; EDGAR and EarningsCalls.dev are its only network peers.
 
 ## Runtime files
 

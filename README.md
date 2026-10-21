@@ -1,15 +1,17 @@
 # margin_edge
 
-Market state research: each domain discloses one aspect of the state of the market as
-reproducible facts and calculations, kept beside the source documents and records they rest
-on. Hypotheses, investment calls and publication stay with the analyst: nothing here adds
-regime or sentiment labels, rankings or trading advice.
+This repository is the manual of an AI agent with a shell, such as Grok Bot or Muse Bot (the
+bot), and the bot is its reader. The rules the bot obeys are in the `AGENTS.md` and
+`PROCEDURE.md` files, beginning with the root [AGENTS.md](AGENTS.md): what the bot does and
+writes, whom it serves, and how it reports what blocks it or could be better, as an issue on
+[yewcast97/margin_edge](https://github.com/yewcast97/margin_edge/issues) (Feedback). This
+overview states no rule: it says where each one is.
 
-The repository is the manual of an AI bot with a shell, such as Grok Bot or Muse Bot
-([AGENTS.md](AGENTS.md), The bot): its rules and scripts say how the bot yields the data you
-read. The bot runs the domains from its own host, keeps the watchlists, never edits a rule or
-a script, and opens an issue on [yewcast97/margin_edge](https://github.com/yewcast97/margin_edge/issues)
-when one blocks it or could be better (Feedback). Nothing the bot produces is tracked.
+The bot runs market state research from its own host: each domain discloses one aspect of the
+state of the market as reproducible facts and calculations, kept beside the source documents
+and records they rest on, for the people the bot serves to read. Hypotheses, investment calls
+and publication stay with them: nothing the bot yields adds a regime or sentiment label, a
+ranking or trading advice, and nothing it yields is tracked.
 
 ## Domains
 
@@ -18,40 +20,42 @@ when one blocks it or could be better (Feedback). Nothing the bot produces is tr
 | [`stock_iv_regime`](market_state_research/stock_iv_regime/AGENTS.md) ([procedure](market_state_research/stock_iv_regime/PROCEDURE.md)) | Per ticker and session, option-implied volatility percentiles (the 14-DTE 25-delta skew and ATM IV) and return–IV correlations, in one interactive report of two charts. | EODHD's options API, Tiingo's daily prices |
 | [`market_position_regime`](market_state_research/market_position_regime/AGENTS.md) ([procedure](market_state_research/market_position_regime/PROCEDURE.md)) | For the US equity market over a window of dates, margin debt by month, S&P 500 futures positioning by week (asset managers' net long and leveraged funds' net short as percentiles over 52 weeks) and the VIX by session (its close as a percentile over 252 sessions), in one interactive report of three charts. | FINRA's margin statistics, the CFTC's Traders in Financial Futures, Cboe's VIX history |
 | [`fundamentals`](market_state_research/fundamentals/AGENTS.md) ([procedure](market_state_research/fundamentals/PROCEDURE.md)) | Per issuer and fiscal period, what its filings, earnings releases and earnings calls say, in eleven fields of verbatim quotes compiled into a time series. | SEC EDGAR, EarningsCalls.dev |
-| [`posts`](market_state_research/posts/AGENTS.md) ([procedure](market_state_research/posts/PROCEDURE.md)) | What the social-media posters you nominate say, archived verbatim, fact-checked as `true`, `unverified` or `fake` with cited evidence, and reported on request, all by the bot's hand. | Each account, by the route the bot's host offers |
+| [`posts`](market_state_research/posts/AGENTS.md) ([procedure](market_state_research/posts/PROCEDURE.md)) | What the social-media posters the user nominates say, archived verbatim, fact-checked as `true`, `unverified` or `fake` with cited evidence, and reported on request, all by the bot's hand. | Each account, by the route the bot's host offers |
 
 Each domain's `AGENTS.md` says what its outputs mean and how they are obtained, and its
 `PROCEDURE.md` how the bot runs it; what the domains share (New York time, the `raw/`,
 `formatted/` and `reports/` sections of their data, the API rule, the watchlists) is in
 [market_state_research/AGENTS.md](market_state_research/AGENTS.md). Apart from them,
-[`explore_hypothesis/`](explore_hypothesis/AGENTS.md) is where the bot tests the hypotheses
-you state against the domains' data with [seikan](https://github.com/yewcast97/seikan), as its
+[`explore_hypothesis/`](explore_hypothesis/AGENTS.md) is where the bot tests the user's
+hypotheses against the domains' data with [seikan](https://github.com/yewcast97/seikan), as its
 own work.
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/) and Python 3.13 or newer. From the repository root:
+The host needs [uv](https://docs.astral.sh/uv/) and Python 3.13 or newer. From the repository
+root:
 
 ```sh
 uv sync --locked
 ```
 
-The keys go in the repository-root `.env`, which Git ignores; each domain's `PROCEDURE.md`
-says what its keys need (`market_position_regime` needs none):
+The settings are lines of the repository-root `.env`, which Git ignores (a variable of the
+process environment takes precedence). Each domain's `PROCEDURE.md` says which it reads and
+what to do while one is missing; `market_position_regime` reads none:
 
 ```sh
 EODHD_API="..."                            # stock_iv_regime: EODHD's "US Stock Options Data" (UnicornBay)
 TIINGO_API="..."                           # stock_iv_regime: Tiingo's daily prices
-SEC_USER_AGENT="Name contact@example.com"  # fundamentals: who runs the EDGAR client
+SEC_USER_AGENT="Name contact@example.com"  # fundamentals: whom EDGAR's requests are made for
 EARNINGSCALLS_API="..."                    # fundamentals: EarningsCalls.dev's transcripts
 ```
 
-`posts` needs a key only where the bot reads a platform through its API (`X_API="..."`).
-The bot keeps the watchlists, which Git ignores: each ticker domain's own `watchlist.json`
-([format](market_state_research/AGENTS.md#watchlists)) and the posters in
+`posts` reads a key only where the bot reads a platform through its API (`X_API="..."`). The
+watchlists, which Git ignores, are the bot's to keep: each ticker domain's own
+`watchlist.json` ([format](market_state_research/AGENTS.md#watchlists)) and the posters in
 `market_state_research/posts/watchlist.json`
-([format](market_state_research/posts/AGENTS.md#posters-accounts-and-routes)). Tell it which
-stocks and posters to follow, or let it judge.
+([format](market_state_research/posts/AGENTS.md#posters-accounts-and-routes)), holding the
+stocks and posters the user names or the bot judges worth following.
 
 ## Use
 
@@ -64,8 +68,8 @@ uv run --locked python -m market_state_research.market_position_regime.script pl
 uv run --locked python -m market_state_research.fundamentals.script plan
 ```
 
-`posts` has no command: ask the bot in your own words, such as "Did some_analyst say anything
-about the semiconductor supply chain yesterday?"
+`posts` has no command: the user asks in their own words, such as "Did some_analyst say
+anything about the semiconductor supply chain yesterday?", and the bot does the work by hand.
 
 ## License
 

@@ -21,10 +21,10 @@ yields in the domains: it binds only the reruns of its own hypothesis, nothing t
 it, no domain or other hypothesis depends on it, and it is never a rule of the repository,
 so a convention the bot needs changed is asked for in an issue, never set aside in its
 `procedure.md`. This file's conventions are the rules of that work and keep it readable:
-whoever opens a hypothesis's folder later, the bot included, can read what was tested, from
-which data, and run it again. Nothing under `explore_hypothesis/<name>/` is tracked: the root
-`.gitignore` ignores everything here but this file. When a convention or seikan blocks the
-bot, it opens an issue (root [AGENTS.md](../AGENTS.md), Feedback).
+a later run, by this bot or another, can read what was tested, from which data, and run it
+again. Nothing under `explore_hypothesis/<name>/` is tracked: the root `.gitignore` ignores
+everything here but this file. When a convention or seikan blocks the bot, it opens an
+issue (root [AGENTS.md](../AGENTS.md), Feedback).
 
 ## Independence
 

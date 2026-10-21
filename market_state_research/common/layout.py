@@ -7,8 +7,8 @@ suffix ``.rejected`` by the bot and is skipped by every read.
 ``formatted/{TICKER}/`` holds what Python derives from ``raw/``: tables and text that a
 later run rebuilds, so they are overwritten.
 
-``reports/{TICKER}/`` holds what people read. Python never overwrites a report: a name that
-exists fails the command, and older reports remain until someone deletes them by hand.
+``reports/{TICKER}/`` holds what the user reads. Python never overwrites or deletes a report:
+a name that exists fails the command, and older reports stay.
 
 Names that carry a New York time token (``common.times.timestamp_token``) are ordered by
 the instant the token names, never as text: on the fall-back day ``...T010000EST``
