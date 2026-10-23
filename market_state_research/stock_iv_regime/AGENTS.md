@@ -136,9 +136,11 @@ whose next monthly expiry lies more than 30 days out (`no expiry is listed 1 to 
 
 `formatted/{TICKER}/volatility.csv`, rewritten from `raw/` by `record` and replaced only when
 its bytes would change: one row per fetched session, those before the window included,
-ascending by date. It caches the levels and nothing derived from them: no indicator,
-percentile, return or correlation, each of which `record` and `show` compute again from
-these levels by the Method (an absent level is blank, its reason in the report's gaps).
+ascending by date. It caches the levels, Tiingo's closes as written and the IVs read at each
+horizon's target deltas (The levels of a horizon, in the Method), and nothing derived from
+them: no indicator, percentile, return or correlation, each of which `record` and `show`
+compute again from these levels by the Method (an absent level is blank, its reason in the
+report's gaps).
 Python compares it by bytes and never parses it. Columns, in order:
 
 | Column | Contents |
