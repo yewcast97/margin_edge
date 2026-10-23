@@ -1,17 +1,17 @@
 """The dates the three sources publish by, and when each document is due.
 
 FINRA dates its balances by month (``Month``, as of the month's last business day), the CFTC
-its positions by week, and Cboe the VIX by day. The CFTC reports one week's positions as of
-its Tuesday, or as of its Monday when the Tuesday is a holiday, so a week is named by its
-Tuesday (``week_of``), whatever day its report is dated. The VIX is read by XNYS session
-(``common.sessions``): the calendar the domain uses knows the sessions from 2000-01-03, so
-a span of days holds only the sessions from then on (``sessions_within``). A document is due
-from the earliest time its source publishes it: a FINRA month from the 15th of the month
-after it (FINRA publishes in the third week); a CFTC week from its Friday at 15:30 New York
-time; a session's VIX from a quarter of an hour after its XNYS close (``vix_due``), when Cboe
-ends the day's calculation of the index (Cboe replaces its file later that evening). A due
-document the source has not published yet is ``pending`` after a ``fetch``. Every function
-here is pure.
+its positions by week, and Cboe the VIX and the SKEW by day. The CFTC reports one week's
+positions as of its Tuesday, or as of its Monday when the Tuesday is a holiday, so a week is
+named by its Tuesday (``week_of``), whatever day its report is dated. The VIX and the SKEW
+are read by XNYS session (``common.sessions``): the calendar the domain uses knows the
+sessions from 2000-01-03, so a span of days holds only the sessions from then on
+(``sessions_within``). A document is due from the earliest time its source publishes it: a
+FINRA month from the 15th of the month after it (FINRA publishes in the third week); a CFTC
+week from its Friday at 15:30 New York time; a session's VIX and SKEW from a quarter of an
+hour after its XNYS close (``cboe_due``), when Cboe ends the day's calculation of the VIX
+(Cboe replaces each file later that evening). A due document the source has not published
+yet is ``pending`` after a ``fetch``. Every function here is pure.
 """
 
 import re
@@ -24,7 +24,7 @@ from market_state_research.common.times import NEW_YORK, to_eastern
 
 FINRA_DUE_DAY: Final = 15  # of the month after the month
 CFTC_RELEASE: Final = time(15, 30)  # New York time, on the week's Friday
-VIX_SETTLE: Final = timedelta(minutes=15)  # Cboe calculates the VIX until 15 minutes after XNYS closes
+CBOE_SETTLE: Final = timedelta(minutes=15)  # Cboe calculates the VIX until 15 minutes after XNYS closes
 TUESDAY: Final = 1  # date.weekday()
 FRIDAY: Final = 4
 WEEK: Final = timedelta(days=7)
@@ -135,14 +135,14 @@ def sessions_within(start: date, end: date) -> tuple[date, ...]:
     return sessions_between(start, end)
 
 
-def vix_due(session: date) -> datetime:
-    """When the VIX of ``session`` is due: a quarter of an hour after its XNYS close (16:15 New
-    York time on a full day), when Cboe ends the day's calculation of the index."""
-    return to_eastern(session_close(session) + VIX_SETTLE)
+def cboe_due(session: date) -> datetime:
+    """When the VIX and the SKEW of ``session`` are due: a quarter of an hour after its XNYS close
+    (16:15 New York time on a full day), when Cboe ends the day's calculation of the VIX."""
+    return to_eastern(session_close(session) + CBOE_SETTLE)
 
 
-def vix_is_due(session: date, at: datetime) -> bool:
-    """Whether the VIX of ``session`` is due at ``at``; only a session of ``at``'s New York day
-    needs its close looked up."""
+def cboe_is_due(session: date, at: datetime) -> bool:
+    """Whether the VIX and the SKEW of ``session`` are due at ``at``; only a session of ``at``'s
+    New York day needs its close looked up."""
     day = to_eastern(at, "at").date()
-    return session < day or (session == day and vix_due(session) <= at)
+    return session < day or (session == day and cboe_due(session) <= at)

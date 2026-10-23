@@ -129,7 +129,11 @@ three by hand, under that domain's `AGENTS.md`:
   validator exists, the bot writes each raw file once and withdraws one it finds wrong the
   same way.
 - **`formatted/` is a function of `raw/`.** Its command (`record`, or `text`) rebuilds it and
-  overwrites it; nothing there is the only copy of anything. In `posts` it is not: the
+  overwrites it; nothing there is the only copy of anything. In `stock_iv_regime` and
+  `market_position_regime` a formatted table caches the levels read from `raw/` (an implied
+  volatility, a close, a balance, a position) and nothing derived from them: no percentile,
+  correlation or other indicator, each of which `record` and `show` compute again from those
+  levels for every report. In `posts` it is not: the
   fact-check of a raw file rests on the evidence found at each check as well, is updated in
   place with a dated history, cannot be rebuilt, and is kept like `raw/`.
 - **`reports/` is never overwritten.** A report name that exists fails the command, and
@@ -177,9 +181,9 @@ three by hand, under that domain's `AGENTS.md`:
 - Work as of the last completed XNYS session and never on intraday live data. The bot may
   run at any time; a domain that reads market data fetches a session's end-of-day values
   only after its close, and a raw file fetched before the close of its session is invalid:
-  `stock_iv_regime` (a session's option chain, a ticker's daily prices) and, for the VIX,
-  `market_position_regime` (Cboe's daily history, invalid when it holds a row of a session
-  whose VIX was not due yet, a quarter of an hour after XNYS closes). Sessions, holidays and
+  `stock_iv_regime` (a session's option chain, a ticker's daily prices) and, for the VIX and
+  the SKEW, `market_position_regime` (Cboe's daily histories, each invalid when it holds a
+  row of a session whose values were not due yet, a quarter of an hour after XNYS closes). Sessions, holidays and
   closes come from the pinned `exchange-calendars` release, which knows only closures
   announced before it was published: a raw file of a day that is not a session is invalid (a
   history of many days keeps its source's rows of other days and never uses them), and an
@@ -193,7 +197,8 @@ three by hand, under that domain's `AGENTS.md`:
   HTTPS, with bounded bodies and no redirect followed: a public read-only API that publishes
   an access policy the client follows to the letter (SEC EDGAR, in `fundamentals`), a public
   API or file that needs no key (the CFTC's Socrata API, FINRA's margin statistics workbook
-  and Cboe's daily history of the VIX, in `market_position_regime`), or a provider's API
+  and Cboe's daily histories of the VIX and of the SKEW, in `market_position_regime`), or a
+  provider's API
   under the user's own key, kept in the ignored `.env`, sent only to its host and never
   written, printed or stored (EODHD and Tiingo in `stock_iv_regime`, EarningsCalls.dev in
   `fundamentals`). No source of a scripted domain is read in a browser, and no command
@@ -220,7 +225,7 @@ three by hand, under that domain's `AGENTS.md`:
 | Domain | Aim | Sources |
 | --- | --- | --- |
 | [`stock_iv_regime`](stock_iv_regime/AGENTS.md) ([procedure](stock_iv_regime/PROCEDURE.md)) | Per session, the 14-DTE 25Δ skew, the 14-DTE ATM IV and the term structure (the 30-DTE ATM IV minus the 14-DTE) with their 252-session percentiles, and the 15-session correlations of the stock's daily return with the changes of the 14-DTE 25Δ call and put IVs, over a look-back window, in two charts read together. | EODHD options API (`EODHD_API`) and Tiingo daily prices (`TIINGO_API`). |
-| [`market_position_regime`](market_position_regime/AGENTS.md) ([procedure](market_position_regime/PROCEDURE.md)) | For the US equity market over a window of dates, FINRA's margin debt by month, S&P 500 futures positioning by week (asset managers' net long and leveraged funds' net short, each as its percentile over 52 weeks) and the VIX by session (its close as a percentile over 252 sessions), in three charts read together. | FINRA's margin statistics workbook, the CFTC's Traders in Financial Futures (Socrata API) and Cboe's daily VIX history, none with a key. |
+| [`market_position_regime`](market_position_regime/AGENTS.md) ([procedure](market_position_regime/PROCEDURE.md)) | For the US equity market over a window of dates, FINRA's margin debt by month, S&P 500 futures positioning by week (asset managers' net long and leveraged funds' net short, each as its percentile over 52 weeks) and the VIX and the SKEW by session (each as a percentile over 252 sessions), in three charts read together. | FINRA's margin statistics workbook, the CFTC's Traders in Financial Futures (Socrata API) and Cboe's daily VIX and SKEW histories, none with a key. |
 | [`fundamentals`](fundamentals/AGENTS.md) ([procedure](fundamentals/PROCEDURE.md)) | What each stock issuer's own documents of each fiscal period say, in eleven fields of verbatim quotes, compiled into a time series. | SEC EDGAR (`SEC_USER_AGENT`) and the EarningsCalls.dev transcript API (`EARNINGSCALLS_API`). |
 | [`posts`](posts/AGENTS.md) ([procedure](posts/PROCEDURE.md)) | Per nominated poster, every post of the intervals the user asked about, archived verbatim and fact-checked claim by claim against cited evidence (`true`, `unverified` or `fake`); a profile with the poster's background and the count of verdicts so far; a report per request. | The poster's accounts, by the route the bot's host offers (a key only when that route is a platform's API: `{PLATFORM}_API`); evidence from primary sources first. |
 
@@ -256,20 +261,21 @@ ending today), `fetch` writes to `raw/market/` what the window lacks of three so
 with a key: FINRA's margin statistics workbook as received (`finra_margin_{TOKEN}.xlsx`, the
 customers' debit and free credit balances of every month since 1997), the CFTC's Traders in
 Financial Futures rows of the S&P 500 Consolidated (`cftc_tff_{FIRST}_{LAST}_{TOKEN}.json`,
-one report a week since 2010) and Cboe's daily history of the VIX as received, in gzip
-(`cboe_vix_{TOKEN}.csv.gz`, every day since 1990). Each document is due from the time its
-source publishes it, and one the source has not published yet is `pending`. Each month's
-margin debt is FINRA's debit balances as published; each week gets the net long position of
-asset managers and the net short position of leveraged funds, in E-mini equivalents (the
-CFTC changed its contract from $250 to $50 times the index on 2023-05-02), and the
-percentile of each among the 52 weeks ending with it; each XNYS session gets the percentile
-of its VIX close among the 252 sessions ending with it. `plan` (read-only) says `fetch`,
-`record` or `reuse`; `record` rewrites `formatted/market/margin_debt.csv`,
-`formatted/market/index_futures.csv` and `formatted/market/vix.csv` and writes the report
+one report a week since 2010) and Cboe's daily histories of the VIX and of the SKEW as
+received, in gzip (`cboe_vix_{TOKEN}.csv.gz` and `cboe_skew_{TOKEN}.csv.gz`, every day since
+1990). Each document is due from the time its source publishes it, and one the source has
+not published yet is `pending`. Each month's margin debt is FINRA's debit balances as
+published; each week gets the net long position of asset managers and the net short
+position of leveraged funds, in E-mini equivalents (the CFTC changed its contract from $250
+to $50 times the index on 2023-05-02), and the percentile of each among the 52 weeks ending
+with it; each XNYS session gets the percentiles of its VIX close and of its SKEW among the
+252 sessions ending with it. `plan` (read-only) says `fetch`, `record` or `reuse`; `record`
+rewrites `formatted/market/margin_debt.csv`, `formatted/market/index_futures.csv` and
+`formatted/market/vix_skew.csv`, caches of the levels alone, and writes the report
 `reports/market/market_{FROM}_{TO}_{TOKEN}.html`, three charts on their own time axes,
-margin debt by month, futures positioning by week and the VIX by session, always served
-together, and its Markdown twin; `show` prints the twin recomputed from `raw/`. Nothing adds
-a regime label.
+margin debt by month, futures positioning by week and the VIX and the SKEW by session, always
+served together, and its Markdown twin; `show` prints the twin recomputed from `raw/`.
+Nothing adds a regime label.
 
 ### fundamentals
 

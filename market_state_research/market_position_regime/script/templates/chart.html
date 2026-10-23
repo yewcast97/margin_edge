@@ -20,6 +20,7 @@
   --series-2: #eb6834;
   --series-3: #7b4fd1;
   --series-4: #c93f7c;
+  --series-5: #1baf7a;
   --warning: #fab219;
   --focus: #2a78d6;
 }
@@ -38,6 +39,7 @@
     --series-2: #d95926;
     --series-3: #9670e0;
     --series-4: #d9558f;
+    --series-5: #199e70;
     --focus: #3987e5;
   }
 }
@@ -55,6 +57,7 @@
   --series-2: #d95926;
   --series-3: #9670e0;
   --series-4: #d9558f;
+  --series-5: #199e70;
   --focus: #3987e5;
 }
 * { box-sizing: border-box; }
@@ -119,7 +122,7 @@ footer a { color: var(--text-secondary); }
 <main>
 <header>
 <h1>{{HEADING}}</h1>
-<p class="subtitle">Three charts, read together: FINRA margin debt by month, in $ millions; S&amp;P 500 futures positioning by week, asset managers' net long and leveraged funds' net short as percentiles over 52 weeks; and the VIX by XNYS session, its close as a percentile over 252 sessions · {{START}} → {{END}}</p>
+<p class="subtitle">Three charts, read together: FINRA margin debt by month, in $ millions; S&amp;P 500 futures positioning by week, asset managers' net long and leveraged funds' net short as percentiles over 52 weeks; and the VIX and the SKEW by XNYS session, each as a percentile over 252 sessions · {{START}} → {{END}}</p>
 <dl class="meta">
 <div><dt>Window</dt><dd>{{START}} → {{END}}</dd></div>
 <div><dt>Coverage</dt><dd>{{COVERAGE}}</dd></div>
@@ -164,20 +167,22 @@ footer a { color: var(--text-secondary); }
 <div class="chart" id="chart-futures" tabindex="0" role="group" aria-describedby="futures-hint" aria-label="S&amp;P 500 futures positioning by week: asset managers' net long and leveraged funds' net short positions, each as its percentile over 52 weeks"></div>
 <p class="hint" id="futures-hint">Both percentiles are on a fixed 0–100 scale with a line at 50; each rests on the 52 weekly reports ending with the week, positions in E-mini equivalents ($50 times the index). Each week is drawn on its report's date. A line breaks where a week has no value: a week not fetched, or a fetched week without the 52 reports its percentile needs.</p>
 </section>
-<section class="card" aria-labelledby="vix-heading">
-<h2 id="vix-heading">VIX · daily</h2>
+<section class="card" aria-labelledby="indices-heading">
+<h2 id="indices-heading">VIX and SKEW · daily</h2>
 <div class="toolbar">
-<div class="readout" id="vix-readout" aria-live="polite">
-<span class="when"><span id="vix-readout-date">{{VIX_DATE}}</span> <span class="label" id="vix-readout-detail">{{VIX_DETAIL}}</span></span>
-<span class="item"><span class="key" style="background: var(--series-2)"></span><span class="value" id="vix-readout-value-0">{{VIX_VALUE_0}}</span><span class="label">VIX close, percentile over 252 sessions</span></span>
-<span class="item"><span class="value" id="vix-readout-value-1">{{VIX_VALUE_1}}</span><span class="label">VIX close</span></span>
+<div class="readout" id="indices-readout" aria-live="polite">
+<span class="when"><span id="indices-readout-date">{{INDICES_DATE}}</span> <span class="label" id="indices-readout-detail">{{INDICES_DETAIL}}</span></span>
+<span class="item"><span class="key" style="background: var(--series-2)"></span><span class="value" id="indices-readout-value-0">{{INDICES_VALUE_0}}</span><span class="label">VIX close, percentile over 252 sessions</span></span>
+<span class="item"><span class="value" id="indices-readout-value-1">{{INDICES_VALUE_1}}</span><span class="label">VIX close</span></span>
+<span class="item"><span class="key" style="background: var(--series-5)"></span><span class="value" id="indices-readout-value-2">{{INDICES_VALUE_2}}</span><span class="label">SKEW, percentile over 252 sessions</span></span>
+<span class="item"><span class="value" id="indices-readout-value-3">{{INDICES_VALUE_3}}</span><span class="label">SKEW</span></span>
 </div>
 <div class="controls">
-<button type="button" id="vix-fit">Fit all</button>
+<button type="button" id="indices-fit">Fit all</button>
 </div>
 </div>
-<div class="chart" id="chart-vix" tabindex="0" role="group" aria-describedby="vix-hint" aria-label="The VIX by XNYS session: its close as a percentile over 252 sessions"></div>
-<p class="hint" id="vix-hint">The percentile is on a fixed 0–100 scale with a line at 50; each rests on the closes of the 252 XNYS sessions ending with the session, from Cboe's daily history of the index. A line breaks where a session has no value: a session not fetched, or one without a close on every one of the 252 sessions.</p>
+<div class="chart" id="chart-indices" tabindex="0" role="group" aria-describedby="indices-hint" aria-label="The VIX and the SKEW by XNYS session: the VIX close and the SKEW, each as a percentile over 252 sessions"></div>
+<p class="hint" id="indices-hint">Both percentiles are on a fixed 0–100 scale with a line at 50; each ranks the session's value among those of the 252 XNYS sessions ending with it that have one (n, in the readout), from Cboe's daily histories of the two indices. A line breaks where a session has no value: a session not fetched, a session Cboe's file holds no row of, or one whose 252 sessions begin before 2000-01-03.</p>
 </section>
 <p class="hint">Drag to pan, scroll or pinch to zoom. With a chart focused, left and right arrow keys step through its points, Home and End jump to the first and last, Escape returns to the latest. The data tables list every value.</p>
 <noscript><p class="hint">JavaScript is required for the interactive charts; the data tables list every value.</p></noscript>
@@ -187,8 +192,8 @@ footer a { color: var(--text-secondary); }
 {{MARGIN_TABLE}}
 <h2>S&amp;P 500 futures positioning</h2>
 {{FUTURES_TABLE}}
-<h2>VIX</h2>
-{{VIX_TABLE}}
+<h2>VIX and SKEW</h2>
+{{INDICES_TABLE}}
 <h2>Gaps</h2>
 {{GAP_ROWS}}
 </details>
@@ -210,7 +215,7 @@ footer a { color: var(--text-secondary); }
   const LWC = window.LightweightCharts;
   const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
   // Three charts, each on its own time axis: monthly margin debt, weekly futures positioning
-  // and the VIX by session. A series names its scale; `range` fixes that scale, `reference`
+  // and the VIX and the SKEW by session. A series names its scale; `range` fixes that scale, `reference`
   // draws a line at a value, `grouped` writes whole numbers with thousands separators.
   const CHARTS = [
     {
@@ -231,11 +236,12 @@ footer a { color: var(--text-secondary); }
       ],
     },
     {
-      id: "vix",
-      points: data.vix,
-      title: "VIX · close as a percentile over 252 XNYS sessions (0–100)",
+      id: "indices",
+      points: data.indices,
+      title: "VIX and SKEW · percentiles over 252 XNYS sessions (0–100)",
       series: [
-        { key: "close_252s_percentile", color: "--series-2", scale: "right", range: [0, 100], reference: 50 },
+        { key: "vix_close_252s_percentile", color: "--series-2", scale: "right", range: [0, 100], reference: 50 },
+        { key: "skew_252s_percentile", color: "--series-5", scale: "right", range: [0, 100] },
       ],
     },
   ];

@@ -2,24 +2,26 @@
 
 The domain has one subject, the market, so each section of ``data/`` holds one folder,
 ``market/``, where a ticker domain holds one per ticker. ``fetch`` writes FINRA's workbooks
-(``finra``), the CFTC's answers (``cftc``) and Cboe's VIX files (``cboe``) to
+(``finra``), the CFTC's answers (``cftc``) and Cboe's VIX and SKEW files (``cboe``) to
 ``raw/market/``. Every read validates every listed raw file; a file that fails is reported,
 never skipped silently, until it is renamed with ``.rejected``, after which every read skips
 it.
 
 Selection: the newest valid workbook (by ``fetched_at``, then by name) is the workbook; the
-newest valid VIX file, likewise, is the VIX history; per week, the report of the newest
-valid CFTC answer holding that week is the week's report. Nothing else records what was
-fetched.
+newest valid VIX file, likewise, is the VIX history, and the newest valid SKEW file the SKEW
+history; per week, the report of the newest valid CFTC answer holding that week is the
+week's report. Nothing else records what was fetched.
 
 ``derive_margin`` gives every month of the workbook its row (its balances as FINRA
 published them), ``derive_futures`` every stored week its row (the positions, the two nets
-and their percentiles over 52 weeks) and ``derive_vix`` every XNYS session from the first of
-the calendar the domain uses to the newest day of the VIX history its row (the close and its
-percentile over 252 sessions), so a row rests on the whole archive, not on a report's
-window. ``formatted/market/margin_debt.csv``, ``formatted/market/index_futures.csv`` and
-``formatted/market/vix.csv`` hold them in date order and are rewritten from ``raw/`` by
-``record``, each only when its bytes change.
+and their percentiles over 52 weeks) and ``derive_indices`` every XNYS session from the first
+of the calendar the domain uses to the newer of the two histories' newest days its row (the
+VIX close and the SKEW, each with its percentile over 252 sessions, from each history that
+reaches the session), so a row rests on the whole archive, not on a report's window.
+``formatted/market/margin_debt.csv``, ``formatted/market/index_futures.csv`` and
+``formatted/market/vix_skew.csv`` cache the levels of those rows in date order, and nothing
+derived from them (the reports compute every percentile again); ``record`` rewrites them from
+``raw/``, each only when its bytes change.
 """
 
 import csv
@@ -36,7 +38,7 @@ from market_state_research.common.sessions import FIRST_SUPPORTED_DATE
 from market_state_research.common.times import et_isoformat
 
 from . import cboe, cftc, finra
-from .cboe import Bar, History
+from .cboe import History, Index
 from .cftc import Answer, Report
 from .finra import Balance, Workbook
 from .indicators import Percentile, percentile, session_percentile
@@ -46,8 +48,10 @@ DATA_DIRECTORY: Final = Path(__file__).resolve().parent.parent / "data"
 FOLDER: Final = "market"  # the one folder of each section
 MARGIN_CSV: Final = "margin_debt.csv"
 FUTURES_CSV: Final = "index_futures.csv"
-VIX_CSV: Final = "vix.csv"
-RAW_NAMES: Final = "finra_margin_TOKEN.xlsx, cftc_tff_FIRST_LAST_TOKEN.json or cboe_vix_TOKEN.csv.gz"
+INDICES_CSV: Final = "vix_skew.csv"
+RAW_NAMES: Final = (
+    "finra_margin_TOKEN.xlsx, cftc_tff_FIRST_LAST_TOKEN.json, cboe_vix_TOKEN.csv.gz or cboe_skew_TOKEN.csv.gz"
+)
 FIRST_WEEK: Final = week_of(cftc.FIRST_REPORT)
 MARGIN_COLUMNS: Final = (
     "month",
@@ -69,12 +73,12 @@ FUTURES_COLUMNS: Final = (
     "lev_money_spread",
     "asset_mgr_net_emini",
     "lev_money_net_short_emini",
-    "asset_mgr_net_52w_percentile",
-    "lev_money_net_short_52w_percentile",
     "fetched_at",
     "source",
 )
-VIX_COLUMNS: Final = ("date", "close", "close_252s_percentile", "source")
+INDICES_COLUMNS: Final = ("date", "vix_close", "skew", "vix_source", "skew_source")
+# The label of each index's ranked value, in the reasons.
+LABELS: Final = {cboe.VIX: "VIX close", cboe.SKEW: "SKEW"}
 
 
 @dataclass(frozen=True)
@@ -103,8 +107,8 @@ class InvalidFile:
 
 @dataclass(frozen=True)
 class Raw:
-    """Every listed raw file, validated: the workbooks, the CFTC answers, the VIX files and the
-    invalid files."""
+    """Every listed raw file, validated: the workbooks, the CFTC answers, the VIX and SKEW files
+    and the invalid files."""
 
     workbooks: tuple[WorkbookFile, ...]
     answers: tuple[AnswerFile, ...]
@@ -143,18 +147,31 @@ class FuturesRow:
 
 
 @dataclass(frozen=True)
-class VixRow:
-    """One XNYS session the VIX history reaches: its bar (None when Cboe's file holds none), the
-    percentile of its close over 252 sessions, and the file's name."""
+class Level:
+    """One index's value of one XNYS session its history reaches: the row (None when Cboe's file
+    holds none of the session), the percentile of its value over 252 sessions and the file's
+    name."""
 
-    session: date
-    bar: Bar | None
+    row: cboe.Row | None
     percentile: Percentile
     source: str
 
     @property
-    def close(self) -> Decimal | None:
-        return None if self.bar is None else self.bar.close_value
+    def value(self) -> Decimal | None:
+        return None if self.row is None else self.row.level_value
+
+
+@dataclass(frozen=True)
+class SessionRow:
+    """One XNYS session either history reaches: its VIX and its SKEW, each None when that
+    index's history does not reach the session (none is stored, or its newest day is earlier)."""
+
+    session: date
+    vix: Level | None
+    skew: Level | None
+
+    def level(self, index: Index) -> Level | None:
+        return self.vix if index == cboe.VIX else self.skew
 
 
 def raw_directory(layout: DataLayout) -> Path:
@@ -162,9 +179,9 @@ def raw_directory(layout: DataLayout) -> Path:
 
 
 def csv_paths(layout: DataLayout) -> tuple[Path, Path, Path]:
-    """The margin debt table, the index futures table and the VIX table."""
+    """The margin debt table, the index futures table and the VIX and SKEW table."""
     directory = layout.formatted(FOLDER)
-    return directory / MARGIN_CSV, directory / FUTURES_CSV, directory / VIX_CSV
+    return directory / MARGIN_CSV, directory / FUTURES_CSV, directory / INDICES_CSV
 
 
 def read_raw(layout: DataLayout, now: datetime) -> Raw:
@@ -194,9 +211,13 @@ def select_workbook(files: Iterable[WorkbookFile]) -> WorkbookFile | None:
     return max(files, key=lambda item: (item.workbook.fetched_at, item.source), default=None)
 
 
-def select_history(files: Iterable[HistoryFile]) -> HistoryFile | None:
-    """The newest VIX file (by ``fetched_at``, then by name), or None."""
-    return max(files, key=lambda item: (item.history.fetched_at, item.source), default=None)
+def select_history(files: Iterable[HistoryFile], index: Index) -> HistoryFile | None:
+    """The newest file of ``index`` (by ``fetched_at``, then by name), or None."""
+    return max(
+        (item for item in files if item.history.index == index),
+        key=lambda item: (item.history.fetched_at, item.source),
+        default=None,
+    )
 
 
 def select_reports(files: Iterable[AnswerFile]) -> dict[date, Stored]:
@@ -236,19 +257,34 @@ def derive_futures(reports: Mapping[date, Stored]) -> dict[date, FuturesRow]:
     }
 
 
-def derive_vix(history: HistoryFile | None) -> dict[date, VixRow]:
-    """Every XNYS session's row from the first of the calendar the domain uses to the newest
-    day of the VIX history, ascending (see the module docstring)."""
+def _levels(history: HistoryFile | None, sessions: tuple[date, ...]) -> dict[date, Level]:
+    """The level of each of ``sessions`` (ascending, from the first of the calendar the domain
+    uses) that ``history`` reaches."""
     if history is None:
         return {}
-    bars = history.history.by_day()
-    sessions = sessions_within(FIRST_SUPPORTED_DATE, history.history.newest)
-    closes = {session: bars[session].close_value for session in sessions if session in bars}
+    rows = history.history.by_day()
+    reached = tuple(session for session in sessions if session <= history.history.newest)
+    values = {session: rows[session].level_value for session in reached if session in rows}
+    label = LABELS[history.history.index]
     return {
-        session: VixRow(
-            session, bars.get(session), session_percentile(sessions, index, closes), history.source
+        session: Level(
+            rows.get(session), session_percentile(reached, position, values, label), history.source
         )
-        for index, session in enumerate(sessions)
+        for position, session in enumerate(reached)
+    }
+
+
+def derive_indices(vix: HistoryFile | None, skew: HistoryFile | None) -> dict[date, SessionRow]:
+    """Every XNYS session's row from the first of the calendar the domain uses to the newer of
+    the two histories' newest days, ascending (see the module docstring)."""
+    newest = max((item.history.newest for item in (vix, skew) if item is not None), default=None)
+    if newest is None:
+        return {}
+    sessions = sessions_within(FIRST_SUPPORTED_DATE, newest)
+    vix_levels, skew_levels = _levels(vix, sessions), _levels(skew, sessions)
+    return {
+        session: SessionRow(session, vix_levels.get(session), skew_levels.get(session))
+        for session in sessions
     }
 
 
@@ -276,7 +312,8 @@ def margin_text(rows: Iterable[MarginRow]) -> str:
 
 
 def futures_text(rows: Iterable[FuturesRow]) -> str:
-    """The index futures table of ``rows`` in the given order."""
+    """The index futures table of ``rows`` in the given order: the positions and the two nets,
+    not their percentiles."""
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(FUTURES_COLUMNS)
@@ -296,8 +333,6 @@ def futures_text(rows: Iterable[FuturesRow]) -> str:
                 report.lev_money_spread,
                 report.asset_mgr_net,
                 report.lev_money_net_short,
-                _text(row.asset_mgr.value),
-                _text(row.lev_money.value),
                 et_isoformat(row.stored.fetched_at),
                 row.stored.source,
             ]
@@ -305,14 +340,27 @@ def futures_text(rows: Iterable[FuturesRow]) -> str:
     return buffer.getvalue()
 
 
-def vix_text(rows: Iterable[VixRow]) -> str:
-    """The VIX table of ``rows`` in the given order: the close as Cboe wrote it."""
+def _level_text(level: Level | None) -> str:
+    return "" if level is None or level.row is None else level.row.level
+
+
+def indices_text(rows: Iterable[SessionRow]) -> str:
+    """The VIX and SKEW table of ``rows`` in the given order: each value as Cboe wrote it (blank
+    where the file holds no row of the session or does not reach it) and the file it comes from
+    (blank where none reaches the session), not their percentiles."""
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(VIX_COLUMNS)
+    writer.writerow(INDICES_COLUMNS)
     for row in rows:
-        close = "" if row.bar is None else row.bar.close
-        writer.writerow([row.session.isoformat(), close, _text(row.percentile.value), row.source])
+        writer.writerow(
+            [
+                row.session.isoformat(),
+                _level_text(row.vix),
+                _level_text(row.skew),
+                "" if row.vix is None else row.vix.source,
+                "" if row.skew is None else row.skew.source,
+            ]
+        )
     return buffer.getvalue()
 
 

@@ -26,6 +26,8 @@ from .support import (
     save_all,
     save_answer,
     save_history,
+    save_skew,
+    skew_bytes,
     tff_row,
     vix_close,
     weekly_rows,
@@ -42,6 +44,7 @@ def sources(**changes) -> FakeSources:
         workbook=workbook_bytes(),
         rows=weekly_rows(weeks_back(NEWEST_WEEK, 220)),
         history=history_bytes(date(2026, 10, 20)),
+        skew=skew_bytes(date(2026, 10, 20)),
     )
     for name, value in changes.items():
         setattr(fake, name, value)
@@ -91,31 +94,36 @@ def test_plan_on_an_empty_directory_lists_everything_due_and_says_fetch(layout):
     found = planned["sources"]
     assert found["finra"]["lacking"] == {"count": 36, "first": "2023-10", "last": "2026-09"}
     assert found["cftc"]["lacking"] == {"count": 207, "first": "2022-11-01", "last": "2026-10-13"}
-    assert found["cboe"]["lacking"] == {"count": 1003, "first": "2022-10-20", "last": "2026-10-20"}
-    assert found["cboe"]["status"] == "lacking" and found["cboe"]["path"] is None
+    for name in ("cboe_vix", "cboe_skew"):
+        assert found[name]["lacking"] == {"count": 1003, "first": "2022-10-20", "last": "2026-10-20"}
+        assert found[name]["status"] == "lacking" and found[name]["path"] is None
+    assert list(found) == ["finra", "cftc", "cboe_vix", "cboe_skew"]
     assert planned["not_due"] == ["the CFTC reports of the weeks of 2026-10-20 (due 2026-10-23 15:30:00 EDT)"]
-    assert planned["tables"] == {"margin_debt": None, "index_futures": None, "vix": None}
+    assert planned["tables"] == {"margin_debt": None, "index_futures": None, "vix_skew": None}
     assert planned["report"] == {"status": "missing", "path": None, "reason": None}
     assert not (layout.root).exists()  # plan writes nothing
 
 
-def test_the_sessions_vix_is_not_due_before_a_quarter_past_four(layout):
+def test_the_sessions_vix_and_skew_are_not_due_before_a_quarter_past_four(layout):
     planned = plan(layout, WINDOW, edt(2026, 10, 20, 16, 14))
-    assert planned["sources"]["cboe"]["lacking"]["last"] == "2026-10-19"
-    assert "Cboe's VIX of 2026-10-20 (due 2026-10-20 16:15:00 EDT)" in planned["not_due"]
+    assert planned["sources"]["cboe_vix"]["lacking"]["last"] == "2026-10-19"
+    assert planned["sources"]["cboe_skew"]["lacking"]["last"] == "2026-10-19"
+    assert "Cboe's VIX and SKEW of 2026-10-20 (due 2026-10-20 16:15:00 EDT)" in planned["not_due"]
 
 
 def test_fetch_writes_each_source_once_then_requests_nothing(layout):
     fake = sources()
     fetched = fetch(layout, WINDOW, NOW, fake.client())
-    assert fetched["requests"] == 3 and "fred_key" not in fetched
+    assert fetched["requests"] == 4 and "fred_key" not in fetched
     assert {name: entry["status"] for name, entry in fetched["sources"].items()} == {
         "finra": "new",
         "cftc": "new",
-        "cboe": "new",
+        "cboe_vix": "new",
+        "cboe_skew": "new",
     }
     assert all(entry["pending"]["count"] == 0 for entry in fetched["sources"].values())
     assert raw_names(layout) == [
+        "cboe_skew_20261020T180000EDT.csv.gz",
         "cboe_vix_20261020T180000EDT.csv.gz",
         "cftc_tff_2022-10-31_2026-10-18_20261020T180000EDT.json",
         "finra_margin_20261020T180000EDT.xlsx",
@@ -131,41 +139,56 @@ def test_refresh_requests_again_and_writes_only_what_differs(layout):
     fetch(layout, WINDOW, NOW, fake.client())
     later = edt(2026, 10, 20, 19, 0)
     refreshed = fetch(layout, WINDOW, later, fake.client(later), refresh=True)
-    assert refreshed["requests"] == 3
+    assert refreshed["requests"] == 4
     assert {entry["status"] for entry in refreshed["sources"].values()} == {"verified"}
-    assert len(raw_names(layout)) == 3
+    assert len(raw_names(layout)) == 4
     revised = history_bytes(date(2026, 10, 20), close=lambda index: vix_close(index + (index == 6_000)))
     newer = fetch(layout, WINDOW, later, sources(history=revised).client(later), refresh=True)
-    assert newer["sources"]["cboe"]["status"] == "new"
-    assert newer["sources"]["cboe"]["path"].endswith("cboe_vix_20261020T190000EDT.csv.gz")
-    assert newer["sources"]["finra"]["status"] == "verified"
-    assert len(raw_names(layout)) == 4
+    assert newer["sources"]["cboe_vix"]["status"] == "new"
+    assert newer["sources"]["cboe_vix"]["path"].endswith("cboe_vix_20261020T190000EDT.csv.gz")
+    assert (newer["sources"]["finra"]["status"], newer["sources"]["cboe_skew"]["status"]) == (
+        "verified",
+        "verified",
+    )
+    assert len(raw_names(layout)) == 5
     assert plan(layout, WINDOW, later, refresh=True)["action"] == "fetch"
 
 
 def test_a_due_document_the_source_has_not_published_is_pending(layout):
     fake = sources(
-        workbook=workbook_bytes(balances(Month(2026, 8))), history=history_bytes(date(2026, 10, 19))
+        workbook=workbook_bytes(balances(Month(2026, 8))),
+        history=history_bytes(date(2026, 10, 19)),
+        skew=skew_bytes(date(2026, 10, 19)),
     )
     fetched = fetch(layout, WINDOW, NOW, fake.client())
     assert fetched["sources"]["finra"]["status"] == "new"
     assert fetched["sources"]["finra"]["pending"] == {"count": 1, "first": "2026-09", "last": "2026-09"}
-    assert fetched["sources"]["cboe"]["status"] == "new"
-    assert fetched["sources"]["cboe"]["pending"] == {"count": 1, "first": "2026-10-20", "last": "2026-10-20"}
+    for name in ("cboe_vix", "cboe_skew"):
+        assert fetched["sources"][name]["status"] == "new"
+        assert fetched["sources"][name]["pending"] == {
+            "count": 1,
+            "first": "2026-10-20",
+            "last": "2026-10-20",
+        }
     planned = plan(layout, WINDOW, NOW)
     assert planned["action"] == "fetch"
     assert planned["sources"]["finra"]["lacking"] == {"count": 1, "first": "2026-09", "last": "2026-09"}
-    assert planned["sources"]["cboe"]["lacking"] == {"count": 1, "first": "2026-10-20", "last": "2026-10-20"}
+    assert planned["sources"]["cboe_skew"]["lacking"] == {
+        "count": 1,
+        "first": "2026-10-20",
+        "last": "2026-10-20",
+    }
     # The same answers again are verified, and still pending.
     again = fetch(layout, WINDOW, NOW, fake.client())
     assert [
         (again["sources"][name]["status"], again["sources"][name]["pending"]["count"])
-        for name in ("finra", "cboe")
+        for name in ("finra", "cboe_vix", "cboe_skew")
     ] == [
         ("verified", 1),
         ("verified", 1),
+        ("verified", 1),
     ]
-    assert len(raw_names(layout)) == 3
+    assert len(raw_names(layout)) == 4
 
 
 def test_cftc_is_asked_only_for_the_lacking_weeks(layout):
@@ -181,9 +204,10 @@ def test_cftc_is_asked_only_for_the_lacking_weeks(layout):
         )
         == 1
     )
-    assert [fetched["sources"][name]["status"] for name in ("finra", "cftc", "cboe")] == [
+    assert [fetched["sources"][name]["status"] for name in ("finra", "cftc", "cboe_vix", "cboe_skew")] == [
         "reused",
         "new",
+        "reused",
         "reused",
     ]
     nothing_new = fetch(layout, WINDOW, later, sources(rows=[]).client(later))
@@ -205,20 +229,46 @@ def test_a_session_after_the_newest_is_lacking_until_cboe_publishes_it(layout):
     save_all(layout)
     window = Window(date(2026, 1, 2), date(2026, 10, 23))
     later = edt(2026, 10, 23, 16, 0)  # the VIX of 2026-10-21 and 2026-10-22 is due, that of 10-23 is not
-    assert plan(layout, window, later)["sources"]["cboe"]["lacking"] == {
-        "count": 2,
-        "first": "2026-10-21",
-        "last": "2026-10-22",
-    }
+    for name in ("cboe_vix", "cboe_skew"):
+        assert plan(layout, window, later)["sources"][name]["lacking"] == {
+            "count": 2,
+            "first": "2026-10-21",
+            "last": "2026-10-22",
+        }
     fetched = fetch(layout, window, later, sources(rows=[]).client(later))  # Cboe has not published them
-    assert (fetched["sources"]["cboe"]["status"], fetched["sources"]["cboe"]["pending"]["count"]) == (
-        "verified",
-        2,
+    for name in ("cboe_vix", "cboe_skew"):
+        assert (fetched["sources"][name]["status"], fetched["sources"][name]["pending"]["count"]) == (
+            "verified",
+            2,
+        )
+    assert (
+        "Cboe's VIX and SKEW of 2026-10-23 (due 2026-10-23 16:15:00 EDT)"
+        in plan(layout, window, later)["not_due"]
     )
-    assert "Cboe's VIX of 2026-10-23 (due 2026-10-23 16:15:00 EDT)" in plan(layout, window, later)["not_due"]
-    published = sources(rows=[], history=history_bytes(date(2026, 10, 22)))
-    assert fetch(layout, window, later, published.client(later))["sources"]["cboe"]["status"] == "new"
-    assert plan(layout, window, later)["sources"]["cboe"]["lacking"]["count"] == 0
+    # Cboe replaces the two files separately in the evening: the SKEW's came first on 2026-10-22.
+    published = sources(rows=[], skew=skew_bytes(date(2026, 10, 22)))
+    fetched = fetch(layout, window, later, published.client(later))
+    assert (fetched["sources"]["cboe_vix"]["status"], fetched["sources"]["cboe_skew"]["status"]) == (
+        "verified",
+        "new",
+    )
+    planned = plan(layout, window, later)
+    assert (
+        planned["sources"]["cboe_vix"]["lacking"]["count"],
+        planned["sources"]["cboe_skew"]["lacking"]["count"],
+    ) == (
+        2,
+        0,
+    )
+    published = sources(
+        rows=[], history=history_bytes(date(2026, 10, 22)), skew=skew_bytes(date(2026, 10, 22))
+    )
+    fetched = fetch(layout, window, later, published.client(later))
+    assert (fetched["sources"]["cboe_vix"]["status"], fetched["sources"]["cboe_skew"]["status"]) == (
+        "new",
+        "reused",
+    )
+    assert plan(layout, window, later)["sources"]["cboe_vix"]["lacking"]["count"] == 0
 
 
 def test_a_failing_source_does_not_stop_the_others(layout):
@@ -228,7 +278,7 @@ def test_a_failing_source_does_not_stop_the_others(layout):
     assert finra["status"] == "failed"
     assert finra["reason"].endswith("HTTP 503 Scripted; FINRA is unavailable: wait and run fetch again")
     assert finra["pending"] == {"count": 36, "first": "2023-10", "last": "2026-09"}
-    assert [fetched["sources"][name]["status"] for name in ("cftc", "cboe")] == ["new", "new"]
+    assert [fetched["sources"][name]["status"] for name in ("cftc", "cboe_vix", "cboe_skew")] == ["new"] * 3
 
 
 def test_an_answer_that_fails_validation_is_reported_and_never_written(layout):
@@ -236,14 +286,17 @@ def test_an_answer_that_fails_validation_is_reported_and_never_written(layout):
     rows[-3] = dict(rows[-3], contract_units="(S&P 500 INDEX X $5.00)")  # the week of 2026-09-29
     changed = history_bytes().replace(b"DATE,OPEN,HIGH,LOW,CLOSE", b"Date,Open,High,Low,Close")
     fetched = fetch(layout, WINDOW, NOW, sources(rows=rows, history=changed).client())
-    cftc_entry, cboe_entry = fetched["sources"]["cftc"], fetched["sources"]["cboe"]
+    cftc_entry, cboe_entry = fetched["sources"]["cftc"], fetched["sources"]["cboe_vix"]
     assert cftc_entry["status"] == "failed" and "row 205: contract_units must be" in cftc_entry["reason"]
     assert cboe_entry["status"] == "failed"
     assert cboe_entry["reason"].endswith(
         "VIX_History.csv: the first line must be exactly DATE,OPEN,HIGH,LOW,CLOSE"
     )
     assert cboe_entry["pending"]["count"] == 1003
-    assert raw_names(layout) == ["finra_margin_20261020T180000EDT.xlsx"]
+    assert raw_names(layout) == [
+        "cboe_skew_20261020T180000EDT.csv.gz",
+        "finra_margin_20261020T180000EDT.xlsx",
+    ]
 
 
 def test_record_writes_the_tables_and_a_report_that_plan_then_calls_fresh(layout):
@@ -252,7 +305,7 @@ def test_record_writes_the_tables_and_a_report_that_plan_then_calls_fresh(layout
     assert {name: table["rows"] for name, table in recorded["tables"].items()} == {
         "margin_debt": 357,
         "index_futures": 220,
-        "vix": 6_740,
+        "vix_skew": 6_740,
     }
     assert all(table["written"] is True for table in recorded["tables"].values())
     page = recorded["report"]["path"]
@@ -260,11 +313,17 @@ def test_record_writes_the_tables_and_a_report_that_plan_then_calls_fresh(layout
     assert recorded["report"]["markdown"] == page.removesuffix(".html") + ".md"
     assert recorded["months"][-1] == {"month": "2026-09", "debit_balances_musd": 456_000}
     assert recorded["weeks"][-1]["report_date"] == "2026-10-13"
-    assert recorded["vix"] == {
+    assert recorded["indices"] == {
         "sessions": 752,
-        "newest": {"date": "2026-10-20", "close": "77.390000", "close_252s_percentile": "100.0"},
+        "newest": {
+            "date": "2026-10-20",
+            "vix_close": "77.390000",
+            "vix_close_252s_percentile": "100.0",
+            "skew": "187.390000",
+            "skew_252s_percentile": "100.0",
+        },
     }
-    assert recorded["lacking"] == {"months": [], "weeks": [], "sessions": []}
+    assert recorded["lacking"] == {"months": [], "weeks": [], "vix_sessions": [], "skew_sessions": []}
     assert recorded["gaps"] == []
     later = edt(2026, 10, 20, 19, 0)
     planned = plan(layout, WINDOW, later)
@@ -288,6 +347,20 @@ def test_a_new_raw_file_makes_the_report_stale(layout):
     planned = plan(layout, WINDOW, later)
     assert planned["action"] == "record"
     assert planned["report"]["status"] == "stale"
+
+
+def test_record_names_a_session_one_cboe_file_lacks(layout):
+    save_all(layout)
+    for path in raw_directory(layout).glob("cboe_skew_*"):
+        path.unlink()
+    save_skew(layout, skew_bytes(date(2026, 10, 19)), edt(2026, 10, 20, 9, 0))
+    assert plan(layout, WINDOW, NOW)["action"] == "fetch"
+    recorded = record(layout, WINDOW, NOW)
+    assert (recorded["lacking"]["vix_sessions"], recorded["lacking"]["skew_sessions"]) == ([], ["2026-10-20"])
+    newest = recorded["indices"]["newest"]
+    assert (newest["vix_close"], newest["skew"], newest["skew_252s_percentile"]) == ("77.390000", None, None)
+    markdown = Path(recorded["report"]["markdown"]).read_text(encoding="utf-8")
+    assert "Not fetched although due: 1 session of Cboe's SKEW (2026-10-20)." in markdown
 
 
 def test_record_names_what_is_lacking_in_the_report(layout):
@@ -330,7 +403,8 @@ def test_show_prints_a_status_line_and_the_twin(layout):
     status, _, twin = text.partition("\n\n")
     assert status == "Action: record. Tables: none. Report: none (missing)."
     assert twin.startswith(
-        "# US equity positioning · margin debt, S&P 500 futures and the VIX · 2023-10-20 → 2026-10-20"
+        "# US equity positioning · margin debt, S&P 500 futures, the VIX and the SKEW · "
+        "2023-10-20 → 2026-10-20"
     )
     recorded = record(layout, WINDOW, NOW)
     assert show(layout, WINDOW, NOW).split("\n\n", 1)[0].startswith("Action: reuse. Tables: ")

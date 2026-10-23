@@ -6,8 +6,9 @@ inputs always produce the same text. The pinned library (``common.chart``) is in
 page opens offline and from ``file://`` indefinitely. The page holds three charts, each on
 its own time axis and always served together: margin debt by month (FINRA's debit balances
 in $ millions); S&P 500 futures positioning by week (asset managers' net long and leveraged
-funds' net short, as percentiles over 52 weeks on a fixed 0–100 scale); and the VIX by XNYS
-session (its close as a percentile over 252 sessions, on the same scale). Their data are
+funds' net short, as percentiles over 52 weeks on a fixed 0–100 scale); and the VIX and the
+SKEW by XNYS session (the VIX close and the SKEW, each as a percentile over 252 sessions, on
+the same scale). Their data are
 embedded as JSON, which the page's own script draws (nothing reads it back), and repeated as
 static data tables. Everything the page shows beyond plotting is computed here: each point's
 readout line and values, the tables, the banners and the gaps, so the page only plots
@@ -33,17 +34,18 @@ from market_state_research.common.chart import (
 )
 from market_state_research.common.times import et_display, et_isoformat
 
-from . import cftc
-from .indicators import PERCENTILE_PLACES, SESSIONS, WEEKS
+from . import cboe, cftc
+from .cboe import Index
+from .indicators import PERCENTILE_PLACES, SESSIONS, WEEKS, Percentile
 from .periods import Month
-from .store import FuturesRow, MarginRow, VixRow
+from .store import FuturesRow, Level, MarginRow, SessionRow
 
 TEMPLATE_PATH: Final = Path(__file__).resolve().parent / "templates" / "chart.html"
-TITLE: Final = "US equity positioning · margin debt, S&P 500 futures and the VIX"
+TITLE: Final = "US equity positioning · margin debt, S&P 500 futures, the VIX and the SKEW"
 SOURCE_DESCRIPTION: Final = (
     "FINRA margin statistics (customer margin balances of member firms, monthly) · "
     f"CFTC Traders in Financial Futures, futures only, {cftc.MARKET} ({cftc.CONTRACT}, weekly) · "
-    "Cboe VIX daily history (VIX_History.csv, daily)"
+    "Cboe VIX and SKEW daily histories (VIX_History.csv and SKEW_History.csv, daily)"
 )
 METHOD: Final = (
     "Margin debt is FINRA's debit balances in customers' securities margin accounts, in $ millions, as of "
@@ -55,11 +57,12 @@ METHOD: Final = (
     f"week's percentile is 100 times the share of the other {WEEKS - 1} weeks of the {WEEKS} weeks ending "
     "with the week whose value is strictly below the week's, rounded half-even to "
     f"{PERCENTILE_PLACES} decimal place; it needs every one of the {WEEKS} weeks' reports. A session's VIX "
-    f"percentile is 100 times the share of the other {SESSIONS - 1} of the {SESSIONS} XNYS sessions ending "
-    "with the session whose close, in Cboe's daily history of the index, is strictly below the session's "
-    f"close, rounded half-even to {PERCENTILE_PLACES} decimal place; it needs a close on every one of the "
-    f"{SESSIONS} sessions, and Cboe's rows of days XNYS does not trade are not used. Values are computed "
-    "exactly and rounded once."
+    "percentile is 100 times the share of the other sessions of the "
+    f"{SESSIONS} XNYS sessions ending with the session whose VIX close, in Cboe's daily history of the "
+    "index, is strictly below the session's, among those with a close (n), rounded half-even to "
+    f"{PERCENTILE_PLACES} decimal place; the SKEW's percentile is the same from Cboe's daily history of the "
+    "SKEW. Cboe's rows of days XNYS does not trade are not used. Values are computed exactly and rounded "
+    "once."
 )
 MARGIN_COLUMNS: Final = (
     "Month",
@@ -83,12 +86,23 @@ FUTURES_COLUMNS: Final = (
     "Fetched (ET)",
     "Source",
 )
-VIX_COLUMNS: Final = ("Session", "VIX close", f"Close percentile ({SESSIONS}s)", "Source")
+INDICES_COLUMNS: Final = (
+    "Session",
+    "VIX close",
+    f"VIX close percentile ({SESSIONS}s, n)",
+    "SKEW",
+    f"SKEW percentile ({SESSIONS}s, n)",
+    "VIX file",
+    "SKEW file",
+)
 LABELS: Final = {
     "asset_mgr_net_52w_percentile": "asset managers' net percentile",
     "lev_money_net_short_52w_percentile": "leveraged funds' net short percentile",
-    "close_252s_percentile": "VIX close percentile",
+    "vix_close_252s_percentile": "VIX close percentile",
+    "skew_252s_percentile": "SKEW percentile",
 }
+# Each index's percentile series, by the name its gaps and the page's data give it.
+PERCENTILE_KEYS: Final = {cboe.VIX: "vix_close_252s_percentile", cboe.SKEW: "skew_252s_percentile"}
 GAPS_NOTE: Final = "Points of the window without a value, per series, and why."
 NO_GAPS: Final = "None: every point of the window has every value."
 NO_VALUE: Final = "—"
@@ -122,10 +136,15 @@ class WeekEntry:
 
 @dataclass(frozen=True)
 class SessionEntry:
-    """One XNYS session of the window that is stored or due: its row, or None when it is not fetched."""
+    """One XNYS session of the window that is stored or due: its row, or None when neither Cboe
+    history reaches it."""
 
     session: date
-    row: VixRow | None
+    row: SessionRow | None
+
+    def level(self, index: Index) -> Level | None:
+        """The session's level of ``index``, or None when that history does not reach it."""
+        return None if self.row is None else self.row.level(index)
 
 
 @dataclass(frozen=True)
@@ -154,7 +173,8 @@ class ChartSpec:
     sessions: tuple[SessionEntry, ...]
     upcoming: tuple[str, ...]
     workbook: str | None
-    history: str | None
+    vix_file: str | None
+    skew_file: str | None
     csv: tuple[str, str, str]
 
     def __post_init__(self) -> None:
@@ -191,9 +211,9 @@ class ChartSpec:
     def missing_weeks(self) -> tuple[date, ...]:
         return tuple(entry.week for entry in self.weeks if entry.row is None)
 
-    @property
-    def missing_sessions(self) -> tuple[date, ...]:
-        return tuple(entry.session for entry in self.sessions if entry.row is None)
+    def missing_sessions(self, index: Index) -> tuple[date, ...]:
+        """The due sessions ``index``'s history does not reach."""
+        return tuple(entry.session for entry in self.sessions if entry.level(index) is None)
 
     @property
     def gaps(self) -> tuple[Gap, ...]:
@@ -208,10 +228,12 @@ class ChartSpec:
                 if item.value is None:
                     found.append(Gap(week.time.isoformat(), key, item.reason or ""))
         for entry in self.sessions:
-            if entry.row is not None and entry.row.percentile.value is None:
-                found.append(
-                    Gap(entry.session.isoformat(), "close_252s_percentile", entry.row.percentile.reason or "")
-                )
+            for index in cboe.INDICES:
+                level = entry.level(index)
+                if level is not None and level.percentile.value is None:
+                    found.append(
+                        Gap(entry.session.isoformat(), PERCENTILE_KEYS[index], level.percentile.reason or "")
+                    )
         return tuple(found)
 
 
@@ -228,12 +250,21 @@ def _count(value: int | Decimal | None) -> str:
     return NO_VALUE if value is None else f"{value:,}"
 
 
-def _close(row: VixRow) -> str:
-    """The close as Cboe wrote it, without the trailing zeros beyond two places (exact), or ``—``."""
-    if row.bar is None:
+def _level(level: Level | None) -> str:
+    """The value as Cboe wrote it, without the trailing zeros beyond two places (exact), or ``—``."""
+    if level is None or level.row is None:
         return NO_VALUE
-    whole, _, places = row.bar.close.partition(".")
+    whole, _, places = level.row.level.partition(".")
     return f"{whole}.{places.rstrip('0').ljust(2, '0')}"
+
+
+def _ranked(found: Percentile) -> str:
+    """A percentile with the count of sessions it rests on, or ``—``."""
+    return NO_VALUE if found.value is None else f"{found.value} (n {found.n})"
+
+
+def _level_percentile(level: Level | None) -> str:
+    return NO_VALUE if level is None else _ranked(level.percentile)
 
 
 def _week_detail(entry: WeekEntry) -> str:
@@ -243,8 +274,15 @@ def _week_detail(entry: WeekEntry) -> str:
 
 
 def _detail(row: object) -> str:
-    """A month's or a session's readout detail: empty, or ``not fetched``."""
+    """A month's readout detail: empty, or ``not fetched``."""
     return "not fetched" if row is None else ""
+
+
+def _session_detail(entry: SessionEntry) -> str:
+    """A session's readout detail: empty, or what is not fetched of it."""
+    if entry.row is None:
+        return "not fetched"
+    return " · ".join(f"{index.name} not fetched" for index in cboe.INDICES if entry.level(index) is None)
 
 
 def _margin_readout(entry: MonthEntry) -> tuple[str, ...]:
@@ -265,9 +303,17 @@ def _futures_readout(entry: WeekEntry) -> tuple[str, ...]:
     )
 
 
-def _vix_readout(entry: SessionEntry) -> tuple[str, ...]:
-    row = entry.row
-    return (NO_VALUE,) * 2 if row is None else (_shown(row.percentile.value), _close(row))
+def _indices_readout(entry: SessionEntry) -> tuple[str, ...]:
+    """The VIX close's percentile and the close, then the SKEW's percentile and the SKEW."""
+    return tuple(
+        text
+        for index in cboe.INDICES
+        for text in (_level_percentile(entry.level(index)), _level(entry.level(index)))
+    )
+
+
+def _percentile_value(level: Level | None) -> str | None:
+    return None if level is None else _text(level.percentile.value)
 
 
 def payload(spec: ChartSpec, library_version: str = LIBRARY_VERSION) -> dict[str, Any]:
@@ -305,13 +351,13 @@ def payload(spec: ChartSpec, library_version: str = LIBRARY_VERSION) -> dict[str
             }
             for entry in spec.weeks
         ],
-        "vix": [
+        "indices": [
             {
                 "time": entry.session.isoformat(),
                 "label": entry.session.isoformat(),
-                "detail": _detail(entry.row),
-                "close_252s_percentile": None if entry.row is None else _text(entry.row.percentile.value),
-                "readout": list(_vix_readout(entry)),
+                "detail": _session_detail(entry),
+                **{PERCENTILE_KEYS[index]: _percentile_value(entry.level(index)) for index in cboe.INDICES},
+                "readout": list(_indices_readout(entry)),
             }
             for entry in spec.sessions
         ],
@@ -343,8 +389,16 @@ def _futures_cells(row: FuturesRow) -> list[str]:
     ]
 
 
-def _vix_cells(row: VixRow) -> list[str]:
-    return [_close(row), _shown(row.percentile.value), row.source]
+def _indices_cells(entry: SessionEntry) -> list[str]:
+    vix, skew = entry.level(cboe.VIX), entry.level(cboe.SKEW)
+    return [
+        _level(vix),
+        _level_percentile(vix),
+        _level(skew),
+        _level_percentile(skew),
+        "not fetched" if vix is None else vix.source,
+        "not fetched" if skew is None else skew.source,
+    ]
 
 
 def _table(columns: tuple[str, ...], rows: list[tuple[str, list[str] | None]]) -> str:
@@ -381,9 +435,9 @@ def _futures_rows(spec: ChartSpec) -> list[tuple[str, list[str] | None]]:
     ]
 
 
-def _vix_rows(spec: ChartSpec) -> list[tuple[str, list[str] | None]]:
+def _indices_rows(spec: ChartSpec) -> list[tuple[str, list[str] | None]]:
     return [
-        (entry.session.isoformat(), None if entry.row is None else _vix_cells(entry.row))
+        (entry.session.isoformat(), None if entry.row is None else _indices_cells(entry))
         for entry in spec.sessions
     ]
 
@@ -416,9 +470,11 @@ def _missing_clauses(spec: ChartSpec) -> list[str]:
     if spec.missing_weeks:
         listed = ", ".join(week.isoformat() for week in spec.missing_weeks)
         clauses.append(f"{_plural(len(spec.missing_weeks), 'week')} of CFTC reports (the weeks of {listed})")
-    if spec.missing_sessions:
-        listed = ", ".join(session.isoformat() for session in spec.missing_sessions)
-        clauses.append(f"{_plural(len(spec.missing_sessions), 'session')} of Cboe's VIX ({listed})")
+    for index in cboe.INDICES:
+        missing = spec.missing_sessions(index)
+        if missing:
+            listed = ", ".join(session.isoformat() for session in missing)
+            clauses.append(f"{_plural(len(missing), 'session')} of Cboe's {index.name} ({listed})")
     return clauses
 
 
@@ -467,7 +523,10 @@ def _newest(spec: ChartSpec) -> str:
 
 
 def _files(spec: ChartSpec) -> str:
-    return f"{spec.workbook or 'no FINRA workbook'}, {spec.history or 'no Cboe VIX file'}"
+    return (
+        f"{spec.workbook or 'no FINRA workbook'}, {spec.vix_file or 'no Cboe VIX file'}, "
+        f"{spec.skew_file or 'no Cboe SKEW file'}"
+    )
 
 
 def _coverage(spec: ChartSpec) -> str:
@@ -505,11 +564,13 @@ def render_html(spec: ChartSpec, library: Library) -> str:
         "MARGIN_DETAIL": escape("no month fetched" if latest_month is None else ""),
         "FUTURES_DATE": escape(NO_VALUE if latest_week is None else latest_week.time.isoformat()),
         "FUTURES_DETAIL": escape("no week fetched" if latest_week is None else _week_detail(latest_week)),
-        "VIX_DATE": escape(NO_VALUE if latest_session is None else latest_session.session.isoformat()),
-        "VIX_DETAIL": escape("no session fetched" if latest_session is None else ""),
+        "INDICES_DATE": escape(NO_VALUE if latest_session is None else latest_session.session.isoformat()),
+        "INDICES_DETAIL": escape(
+            "no session fetched" if latest_session is None else _session_detail(latest_session)
+        ),
         "MARGIN_TABLE": _table(MARGIN_COLUMNS, _margin_rows(spec)),
         "FUTURES_TABLE": _table(FUTURES_COLUMNS, _futures_rows(spec)),
-        "VIX_TABLE": _table(VIX_COLUMNS, _vix_rows(spec)),
+        "INDICES_TABLE": _table(INDICES_COLUMNS, _indices_rows(spec)),
         "MONTHS": escape(len(spec.months)),
         "WEEKS": escape(len(spec.weeks)),
         "SESSIONS": escape(len(spec.sessions)),
@@ -520,7 +581,7 @@ def render_html(spec: ChartSpec, library: Library) -> str:
     readouts = {
         "MARGIN": (NO_VALUE,) if latest_month is None else _margin_readout(latest_month),
         "FUTURES": (NO_VALUE,) * 5 if latest_week is None else _futures_readout(latest_week),
-        "VIX": (NO_VALUE,) * 2 if latest_session is None else _vix_readout(latest_session),
+        "INDICES": (NO_VALUE,) * 4 if latest_session is None else _indices_readout(latest_session),
     }
     for chart_name, texts in readouts.items():
         for index, text in enumerate(texts):
@@ -560,8 +621,8 @@ def render_markdown(spec: ChartSpec) -> str:
     lines.extend(_markdown_table(MARGIN_COLUMNS, _margin_rows(spec)))
     lines.extend(["", f"## S&P 500 futures positioning, weekly ({cftc.MARKET})", ""])
     lines.extend(_markdown_table(FUTURES_COLUMNS, _futures_rows(spec)))
-    lines.extend(["", "## VIX, by XNYS session", ""])
-    lines.extend(_markdown_table(VIX_COLUMNS, _vix_rows(spec)))
+    lines.extend(["", "## VIX and SKEW, by XNYS session", ""])
+    lines.extend(_markdown_table(INDICES_COLUMNS, _indices_rows(spec)))
     lines.extend(["", "## Gaps", "", GAPS_NOTE, ""])
     if spec.gaps:
         lines.append(_markdown_row(["Point", "Series", "Reason"]))

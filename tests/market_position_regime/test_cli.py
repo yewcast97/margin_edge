@@ -26,7 +26,7 @@ from market_state_research.market_position_regime.script.__main__ import (
 from market_state_research.market_position_regime.script.store import DATA_DIRECTORY
 
 from .fake_sources import FakeSources
-from .support import NOW, history_bytes, save_all, workbook_bytes
+from .support import NOW, history_bytes, save_all, skew_bytes, workbook_bytes
 
 MODULE = "market_state_research.market_position_regime.script"
 SCRIPT_DIRECTORY = Path(script_package.__file__).resolve().parent
@@ -87,20 +87,21 @@ def test_the_default_window_is_three_years_to_today(capsys, layout):
 
 
 def test_fetch_needs_no_key_and_asks_each_source(capsys, layout, monkeypatch):
-    fake = FakeSources(workbook=workbook_bytes(), history=history_bytes())
+    fake = FakeSources(workbook=workbook_bytes(), history=history_bytes(), skew=skew_bytes())
     defaults = client_module.Client.__init__.__defaults__
     # The client is built by main; the fake answers through its HTTP layer.
     monkeypatch.setattr(client_module.Client.__init__, "__defaults__", (fake, lambda: NOW) + defaults[2:])
     code, out, err = run(capsys, "fetch", "--data-dir", str(layout.root))
     assert (code, err) == (0, "")
     output = json.loads(out)
-    assert output["requests"] == 3
-    assert [output["sources"][name]["status"] for name in ("finra", "cftc", "cboe")] == [
+    assert output["requests"] == 4
+    assert [output["sources"][name]["status"] for name in ("finra", "cftc", "cboe_vix", "cboe_skew")] == [
         "new",
         "verified",
         "new",
+        "new",
     ]
-    assert len(fake.calls) == 3  # the fake holds no CFTC row: nothing new from the CFTC
+    assert len(fake.calls) == 4  # the fake holds no CFTC row: nothing new from the CFTC
 
 
 def test_the_package_reads_no_setting():
@@ -165,7 +166,8 @@ def test_module_entry_point_uses_its_own_data_directory(tmp_path):
     output = json.loads(result.stdout)
     assert output["invalid_files"] == []
     assert output["sources"]["finra"]["path"].startswith(str(domain / "data" / "raw" / "market"))
-    assert output["sources"]["cboe"]["path"].startswith(str(domain / "data" / "raw" / "market"))
+    assert output["sources"]["cboe_vix"]["path"].startswith(str(domain / "data" / "raw" / "market"))
+    assert output["sources"]["cboe_skew"]["path"].startswith(str(domain / "data" / "raw" / "market"))
     assert output["window"]["from"] == "2026-01-01"
     assert list(working.iterdir()) == []
     assert snapshot(root) == before

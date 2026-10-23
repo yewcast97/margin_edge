@@ -1,4 +1,4 @@
-"""The three indicators and the values they rest on, each computed exactly and rounded once.
+"""The indicators and the values they rest on, each computed exactly and rounded once.
 
 - **Margin debt** of month M is FINRA's debit balances as published: no value is derived.
 - **Asset managers' net position** of week W = long − short, and **leveraged funds' net
@@ -7,11 +7,12 @@
   ending with W whose value is strictly below W's, divided by ``n``, the number of those
   weeks that have a value; equal values are not counted. There is none when any of the
   ``WEEKS`` weeks has no stored report (the reason counts them and names the first).
-- **Percentile over 252 sessions** of XNYS session D: 100 × the number of the other
-  ``SESSIONS`` − 1 sessions ending with D whose VIX close is strictly below D's, divided by
-  ``SESSIONS`` − 1; equal closes are not counted. There is none when any of the ``SESSIONS``
-  sessions has no close (the reason counts them and names the first), or when they begin
-  before the first session of the calendar the domain uses.
+- **Percentile over 252 sessions** of XNYS session D, of the VIX close or of the SKEW: 100 ×
+  the number of the other ``SESSIONS`` − 1 sessions ending with D whose value is strictly
+  below D's, divided by ``n``, the number of those sessions that have a value; equal values
+  are not counted. There is none when D has no value, when the ``SESSIONS`` sessions begin
+  before the first session of the calendar the domain uses, or when no other of them has a
+  value.
 
 Both percentiles are rounded half-even to ``PERCENTILE_PLACES`` decimal place: the stock IV
 regime's percentile, over weeks or over sessions. Every function here is pure; a value is
@@ -83,17 +84,20 @@ def percentile(
     return Percentile(rounded(Fraction(100 * below, len(others)), PERCENTILE_PLACES), len(others))
 
 
-def session_percentile(sessions: Sequence[date], index: int, closes: Mapping[date, Decimal]) -> Percentile:
-    """The percentile of the close of ``sessions[index]`` among the ``SESSIONS`` sessions ending
+def session_percentile(
+    sessions: Sequence[date], index: int, values: Mapping[date, Decimal], label: str
+) -> Percentile:
+    """The percentile of the value of ``sessions[index]`` among the ``SESSIONS`` sessions ending
     with it.
 
     ``sessions`` holds every XNYS session from the first of the calendar the domain uses,
-    ascending; ``closes`` the VIX close of each session Cboe's file holds one for.
+    ascending; ``values`` the value of each session Cboe's file holds one for; ``label``
+    names the value in the reasons (``VIX close``, ``SKEW``).
     """
     session = sessions[index]
-    current = closes.get(session)
+    current = values.get(session)
     if current is None:
-        return Percentile(None, None, f"Cboe's file holds no close of {session.isoformat()}")
+        return Percentile(None, None, f"Cboe's file holds no {label} of {session.isoformat()}")
     if index < SESSIONS - 1:
         return Percentile(
             None,
@@ -101,15 +105,10 @@ def session_percentile(sessions: Sequence[date], index: int, closes: Mapping[dat
             f"the {SESSIONS} sessions to {session.isoformat()} begin before {sessions[0].isoformat()}, "
             "the first session of the XNYS calendar the domain uses",
         )
-    window = sessions[index - SESSIONS + 1 : index + 1]
-    absent = [day for day in window if day not in closes]
-    if absent:
-        count = len(absent)
+    others = [values[day] for day in sessions[index - SESSIONS + 1 : index] if day in values]
+    if not others:
         return Percentile(
-            None,
-            None,
-            f"{count} of the {SESSIONS} sessions to {session.isoformat()} {'has' if count == 1 else 'have'} "
-            f"no close in Cboe's file, the first {absent[0].isoformat()}",
+            None, 0, f"no other session of the {SESSIONS} to {session.isoformat()} has a {label}"
         )
-    below = sum(1 for day in window[:-1] if closes[day] < current)
-    return Percentile(rounded(Fraction(100 * below, SESSIONS - 1), PERCENTILE_PLACES), SESSIONS - 1)
+    below = sum(1 for value in others if value < current)
+    return Percentile(rounded(Fraction(100 * below, len(others)), PERCENTILE_PLACES), len(others))

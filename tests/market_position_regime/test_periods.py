@@ -6,12 +6,12 @@ import pytest
 
 from market_state_research.market_position_regime.script.periods import (
     Month,
+    cboe_due,
+    cboe_is_due,
     cftc_release,
     finra_due,
     months_ending_within,
     sessions_within,
-    vix_due,
-    vix_is_due,
     week_days,
     week_of,
     weeks_ending,
@@ -87,13 +87,13 @@ def test_the_sessions_of_a_span_are_xnys_sessions_from_2000():
     assert sessions_within(date(1990, 1, 2), date(1999, 12, 31)) == ()
 
 
-def test_a_sessions_vix_is_due_a_quarter_of_an_hour_after_its_close():
-    assert vix_due(date(2026, 10, 20)) == edt(2026, 10, 20, 16, 15)
-    assert vix_due(date(2026, 11, 27)) == est(2026, 11, 27, 13, 15)  # an early close
-    assert vix_due(date(2026, 11, 2)) == est(2026, 11, 2, 16, 15)  # after the clocks fell back
+def test_a_sessions_vix_and_skew_are_due_a_quarter_of_an_hour_after_its_close():
+    assert cboe_due(date(2026, 10, 20)) == edt(2026, 10, 20, 16, 15)
+    assert cboe_due(date(2026, 11, 27)) == est(2026, 11, 27, 13, 15)  # an early close
+    assert cboe_due(date(2026, 11, 2)) == est(2026, 11, 2, 16, 15)  # after the clocks fell back
     with pytest.raises(ValueError):
-        vix_due(date(2026, 9, 7))  # Labor Day is no session
-    assert not vix_is_due(date(2026, 10, 20), edt(2026, 10, 20, 16, 14, 59))
-    assert vix_is_due(date(2026, 10, 20), edt(2026, 10, 20, 16, 15))
-    assert vix_is_due(date(2026, 10, 19), edt(2026, 10, 20, 9, 0))
-    assert not vix_is_due(date(2026, 10, 21), edt(2026, 10, 20, 23, 0))
+        cboe_due(date(2026, 9, 7))  # Labor Day is no session
+    assert not cboe_is_due(date(2026, 10, 20), edt(2026, 10, 20, 16, 14, 59))
+    assert cboe_is_due(date(2026, 10, 20), edt(2026, 10, 20, 16, 15))
+    assert cboe_is_due(date(2026, 10, 19), edt(2026, 10, 20, 9, 0))
+    assert not cboe_is_due(date(2026, 10, 21), edt(2026, 10, 20, 23, 0))

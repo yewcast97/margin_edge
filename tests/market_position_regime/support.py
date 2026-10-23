@@ -3,8 +3,9 @@
 Expected instants are written with fixed ``EDT``/``EST`` offsets, independently of
 ``zoneinfo`` and of the code under test. FINRA's workbook is built byte by byte in the layout
 verified live (inline strings, whole numbers, the free credits split from February 2010),
-CFTC rows and Cboe's VIX file from small numbers, so every expected value in a test can be
-worked out by hand. No FINRA or Cboe answer is recorded; one CFTC answer is (``fixtures/``).
+CFTC rows and Cboe's VIX and SKEW files from small numbers, so every expected value in a test
+can be worked out by hand. No FINRA or Cboe answer is recorded; one CFTC answer is
+(``fixtures/``).
 """
 
 import io
@@ -18,7 +19,7 @@ from market_state_research.common.layout import DataLayout
 from market_state_research.common.sessions import completed_session
 from market_state_research.market_position_regime.script import cboe, cftc, finra
 from market_state_research.market_position_regime.script.periods import (
-    VIX_SETTLE,
+    CBOE_SETTLE,
     Month,
     sessions_within,
     week_of,
@@ -39,7 +40,8 @@ def est(*fields: int) -> datetime:
 
 # Tuesday evening: FINRA's 2026-09 is due (since 2026-10-15), the CFTC week of 2026-10-13 is
 # due (since Friday 2026-10-16 15:30) and that of 2026-10-20 is not, and the VIX of the session
-# 2026-10-20 is due (since 16:15). The VIX file is fetched after that, the other sources before.
+# 2026-10-20 is due (since 16:15). The VIX and SKEW files are fetched after that, the other
+# sources before.
 NOW = edt(2026, 10, 20, 18, 0)
 FETCHED = edt(2026, 10, 20, 12, 0)
 VIX_FETCHED = edt(2026, 10, 20, 17, 0)
@@ -237,40 +239,68 @@ def vix_close(index: int) -> str:
     return f"{cents // 100}.{cents % 100:02d}0000"
 
 
+def skew_value(index: int) -> str:
+    """Synthetic SKEWs as Cboe writes them: 120.00 on the first session, rising by 0.01 a session."""
+    cents = 12_000 + index
+    return f"{cents // 100}.{cents % 100:02d}0000"
+
+
 def history_bytes(
     newest: date = date(2026, 10, 20),
     close: Callable[[int], str] = vix_close,
     extra: Mapping[date, str] | None = None,
+    index: cboe.Index = cboe.VIX,
+    missing: Iterable[date] = (),
 ) -> bytes:
-    """Cboe's file in its verified layout: a row of 1990-01-02, then one row per XNYS session from
-    2000-01-03 to ``newest``, the ``index``-th session's values all ``close(index)``; ``extra``
-    adds rows of other days (a holiday Cboe calculated the index on) with the close given."""
+    """Cboe's file of ``index`` in its verified layout: a row of 1990-01-02, then one row per XNYS
+    session from 2000-01-03 to ``newest`` but those ``missing``, the ``n``-th session's values all
+    ``close(n)``; ``extra`` adds rows of other days (a holiday Cboe calculated the index on) with
+    the value given."""
     rows = {cboe.FIRST_DAY: "20.000000"}
-    rows |= {session: close(index) for index, session in enumerate(sessions_within(date(2000, 1, 3), newest))}
+    rows |= {session: close(n) for n, session in enumerate(sessions_within(date(2000, 1, 3), newest))}
+    for day in missing:
+        del rows[day]
     rows |= dict(extra or {})
-    lines = [
-        cboe.HEADER,
-        *(f"{day:%m/%d/%Y},{value},{value},{value},{value}" for day, value in sorted(rows.items())),
-    ]
+    width = len(index.fields)
+    lines = [index.header, *(f"{day:%m/%d/%Y}" + f",{value}" * width for day, value in sorted(rows.items()))]
     return ("\n".join(lines) + "\n").encode("ascii")
 
 
-def save_history(layout: DataLayout, data: bytes | None = None, fetched_at: datetime = VIX_FETCHED) -> str:
-    """Write a Cboe raw file as ``fetch`` names and compresses it; its name. By default the file
-    holds every session whose VIX was due at ``fetched_at``."""
+def skew_bytes(newest: date = date(2026, 10, 20), missing: Iterable[date] = (), **options: object) -> bytes:
+    """Cboe's SKEW file in its verified layout: ``history_bytes`` of the SKEW, the ``n``-th
+    session's SKEW ``skew_value(n)``."""
+    return history_bytes(newest, skew_value, index=cboe.SKEW, missing=missing, **options)  # type: ignore[arg-type]
+
+
+def save_history(
+    layout: DataLayout,
+    data: bytes | None = None,
+    fetched_at: datetime = VIX_FETCHED,
+    index: cboe.Index = cboe.VIX,
+) -> str:
+    """Write a Cboe raw file of ``index`` as ``fetch`` names and compresses it; its name. By
+    default the file holds every session whose values were due at ``fetched_at``."""
     if data is None:
-        data = history_bytes(completed_session(fetched_at, VIX_SETTLE))
-    name = cboe.raw_name(fetched_at)
+        newest = completed_session(fetched_at, CBOE_SETTLE)
+        data = history_bytes(newest) if index == cboe.VIX else skew_bytes(newest)
+    name = cboe.raw_name(index, fetched_at)
     directory = raw_directory(layout)
     directory.mkdir(parents=True, exist_ok=True)
     (directory / name).write_bytes(cboe.dump(data))
     return name
 
 
+def save_skew(layout: DataLayout, data: bytes | None = None, fetched_at: datetime = VIX_FETCHED) -> str:
+    """Write a Cboe SKEW raw file; its name."""
+    return save_history(layout, data, fetched_at, cboe.SKEW)
+
+
 def save_all(
     layout: DataLayout, fetched_at: datetime = FETCHED, vix_fetched_at: datetime = VIX_FETCHED
 ) -> None:
-    """A complete archive as of ``NOW``: the workbook, 220 weeks of reports and the VIX history."""
+    """A complete archive as of ``NOW``: the workbook, 220 weeks of reports and the VIX and SKEW
+    histories (both fetched at ``vix_fetched_at``)."""
     save_workbook(layout, fetched_at=fetched_at)
     save_answer(layout, weekly_rows(weeks_back(NEWEST_WEEK, 220)), fetched_at=fetched_at)
     save_history(layout, fetched_at=vix_fetched_at)
+    save_skew(layout, fetched_at=vix_fetched_at)

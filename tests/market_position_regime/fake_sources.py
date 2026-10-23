@@ -4,7 +4,7 @@ It serves, as each source does (verified live; see the domain's ``AGENTS.md``): 
 workbook at its fixed address, its bytes as given; the CFTC's Socrata API, the rows whose
 report date lies in the ``$where`` clause's ``between`` dates, in date order, numbers as text
 (the clause and the other parameters are checked to be exactly what ``cftc.query_url``
-writes); and Cboe's VIX history at its fixed address, its bytes as given. ``statuses``
+writes); and Cboe's VIX and SKEW histories at their fixed addresses, their bytes as given. ``statuses``
 scripts the status of a request by its number (1-based); every request's URL is recorded.
 """
 
@@ -27,6 +27,7 @@ class FakeSources:
     workbook: bytes | None = None
     rows: list[dict[str, str]] = field(default_factory=list)  # CFTC rows, ascending
     history: bytes | None = None  # Cboe's VIX file
+    skew: bytes | None = None  # Cboe's SKEW file
     statuses: dict[int, int] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
 
@@ -41,10 +42,11 @@ class FakeSources:
                 return Response(404, "Not Found", {}, b"")
             kind = {"content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
             return Response(200, "OK", kind, self.workbook)
-        if url == cboe.URL:
-            if self.history is None:
+        if url in (cboe.VIX.url, cboe.SKEW.url):
+            body = self.history if url == cboe.VIX.url else self.skew
+            if body is None:
                 return Response(404, "Not Found", {}, b"")
-            return Response(200, "OK", {"content-type": "text/csv"}, self.history)
+            return Response(200, "OK", {"content-type": "text/csv"}, body)
         if parts.netloc == cftc.HOST:
             return self._cftc(url, dict(parse_qsl(parts.query, keep_blank_values=True)))
         return Response(404, "Not Found", {}, b"")

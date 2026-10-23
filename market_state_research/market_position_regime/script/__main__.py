@@ -3,13 +3,14 @@
 Three charts of the US equity market's positioning over a window of New York dates: FINRA's
 monthly margin debt; the CFTC's weekly S&P 500 futures positions, as the percentiles over 52
 weeks of asset managers' net long and leveraged funds' net short positions; and Cboe's daily
-VIX, its close as a percentile over 252 XNYS sessions. Every command takes the window as
+VIX and SKEW, each as a percentile over 252 XNYS sessions. Every command takes the window as
 --from and --to, dates written YYYY-MM-DD (both included): --to defaults to today and must
 not be after it, and --from defaults to the same day three years before --to and must not be
 after --to; a refused window is one MARKET_POSITION_REGIME: line before any work.
 
 fetch is the one command that uses the network. It reads FINRA's workbook, the CFTC's public
-API and Cboe's VIX history, none of which needs a key, so no command reads a setting. It
+API and Cboe's VIX and SKEW histories, none of which needs a key, so no command reads a
+setting. It
 writes what is new to data/raw/market/. plan, record and show work offline: they plan the
 next step, record the raw files into the three formatted tables and a report, and show the
 window. The clock is read in New York time, and every time printed is New York time.

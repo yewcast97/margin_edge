@@ -65,7 +65,7 @@ the domain's `AGENTS.md` and its `PROCEDURE.md`. For hypothesis tests with seika
 [explore_hypothesis/AGENTS.md](explore_hypothesis/AGENTS.md).
 Never invent observations, edit stored values directly or weaken validation to
 admit a failed file. Market data of a session (`stock_iv_regime`'s chains and prices,
-`market_position_regime`'s VIX) is read as of the last completed XNYS session, and no
+`market_position_regime`'s VIX and SKEW) is read as of the last completed XNYS session, and no
 intraday live value is stored; a document that is no session's (`market_position_regime`'s
 months and weeks, `fundamentals`, `posts`) has no session logic and is dated by its own date
 (see [market_state_research/AGENTS.md](market_state_research/AGENTS.md)).
@@ -87,7 +87,8 @@ months and weeks, `fundamentals`, `posts`) has no session logic and is dated by 
 The domains are [stock_iv_regime](market_state_research/stock_iv_regime/AGENTS.md)
 (EODHD's options API and Tiingo's daily prices),
 [market_position_regime](market_state_research/market_position_regime/AGENTS.md) (FINRA's
-margin statistics, the CFTC's Traders in Financial Futures and Cboe's VIX history),
+margin statistics, the CFTC's Traders in Financial Futures and Cboe's VIX and SKEW
+histories),
 [fundamentals](market_state_research/fundamentals/AGENTS.md) (SEC EDGAR and the
 EarningsCalls.dev transcript API) and [posts](market_state_research/posts/AGENTS.md) (what
 nominated posters say, read by the bot's own route and fact-checked by hand). Each domain's

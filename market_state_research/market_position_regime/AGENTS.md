@@ -3,7 +3,7 @@
 This domain records how the US equity market as a whole is positioned, from three public
 sources: FINRA's monthly margin statistics (customers' debit balances in margin accounts),
 the CFTC's weekly Traders in Financial Futures report of S&P 500 futures, and Cboe's daily
-history of the VIX. Over a window of dates it charts four indicators. This file says what the
+histories of the VIX and of the SKEW. Over a window of dates it charts five indicators. This file says what the
 work aims at, what its tables and reports hold and mean, how each value is obtained, and how
 the code and the raw files are built, with the source facts verified live. The operations
 are in [PROCEDURE.md](PROCEDURE.md). The conventions every domain shares (the layout, the
@@ -15,25 +15,28 @@ no watchlist: its subject is the market.
 
 For the market as a whole, a reproducible record of the indicators below, and a report of a
 window that is read whole: three charts, margin debt by month, futures positioning by week
-and the VIX by session, served together also when one indicator is asked about, since one
-chart alone biases the reading. Its values are the sources' published figures and what the
+and the VIX and the SKEW by session, served together also when one indicator is asked about,
+since one chart alone biases the reading. Its values are the sources' published figures and what the
 stated method computes from them, with dates, coverage and a reason wherever a value is
 absent. The record names no regime, applies no threshold and gives no advice: its reading is
 the user's.
 
 ## The indicators
 
-| Indicator | Column | Meaning | Unit |
+| Indicator | Series | Meaning | Unit |
 | --- | --- | --- | --- |
 | Margin debt | `debit_balances_musd` | FINRA's debit balances in customers' securities margin accounts, as published (below). | $ millions |
 | Asset managers' net percentile | `asset_mgr_net_52w_percentile` | Where the week's net long S&P 500 futures position of asset managers lies among the 52 weeks ending with it. | 0–100 |
 | Leveraged funds' net short percentile | `lev_money_net_short_52w_percentile` | Where the week's net short position of leveraged funds lies among the 52 weeks ending with it. | 0–100 |
-| VIX close percentile | `close_252s_percentile` | Where the session's VIX close lies among the 252 XNYS sessions ending with it. | 0–100 |
+| VIX close percentile | `vix_close_252s_percentile` | Where the session's VIX close lies among the 252 XNYS sessions ending with it. | 0–100 |
+| SKEW percentile | `skew_252s_percentile` | Where the session's Cboe SKEW Index lies among the 252 XNYS sessions ending with it. | 0–100 |
 
-Every value the indicators rest on is archived in the tables: the month's three balances;
-each week's long, short and spreading positions of both groups as reported, the open
-interest, the contract's unit and the two nets in E-mini equivalents; each session's VIX
-close as Cboe wrote it.
+Each series is named as `record` and the reports state it. Every value the indicators rest
+on is archived in the tables, and the tables hold nothing derived from those values: the
+month's three balances; each week's long, short and spreading positions of both groups as
+reported, the open interest, the contract's unit and the two nets in E-mini equivalents;
+each session's VIX close and SKEW as Cboe wrote them. Every percentile is computed again
+from them for each report.
 
 ## Method
 
@@ -57,21 +60,25 @@ rounded half-even once at the end; zero is written without a sign (`indicators.p
   none when any of the 52 weeks has no stored report (the reason counts them and names the
   first), or when the 52 weeks begin before the market's first report (2010-06-15), so the
   market's first 51 weeks have none.
-- **Percentile of session D**: over the 252 consecutive XNYS sessions ending with D, 100 ×
-  the number of the other 251 sessions whose VIX close is strictly below D's / 251; equal
-  closes are not counted. It is rounded to one decimal place. There is none when any of the
-  252 sessions has no close in Cboe's file (the reason counts them and names the first), or
-  when the 252 sessions begin before 2000-01-03, the first session of the XNYS calendar the
-  domain uses (`common.sessions`), so the first 251 sessions of 2000 have none. Cboe's rows
-  of days XNYS does not trade are kept in the raw file and never ranked.
+- **Percentile of session D**, of the VIX close or of the SKEW: over the 252 consecutive XNYS
+  sessions ending with D, 100 × the number of the other 251 sessions whose value is strictly
+  below D's / n, n being the number of those sessions that have a value in Cboe's file; equal
+  values are not counted. It is rounded to one decimal place and shown with n. There is none
+  when Cboe's file holds no row of D, when the 252 sessions begin before 2000-01-03, the
+  first session of the XNYS calendar the domain uses (`common.sessions`), so the first 251
+  sessions of 2000 have none, or when n is 0. The VIX has a row of every session since
+  2000, so n is 251; the SKEW lacks 15 sessions (facts below), each a gap of its own and one
+  session fewer in n for the 251 sessions after it. Cboe's rows of days XNYS does not trade
+  are kept in the raw file and never ranked.
 
 ## Months, weeks, sessions, window and span
 
 - FINRA reports by month, the CFTC by week, Cboe by day. The CFTC reports a week's
   positions as of its Tuesday, or of its Monday when the Tuesday is a holiday, so a week is
   named by its Tuesday whatever day its report is dated (`periods.week_of`); every week has
-  one report. The VIX is read by XNYS session, and a session's close is the index at the end
-  of Cboe's calculation of the day, a quarter of an hour after XNYS closes.
+  one report. The VIX and the SKEW are read by XNYS session; a session's VIX close is the
+  index at the end of Cboe's calculation of the day, a quarter of an hour after XNYS closes,
+  and its SKEW is the one value Cboe's SKEW file gives the day.
 - The window runs from `--from` to `--to` (New York dates, both included; by default the
   three years ending today). Its months are those whose last day lies in it, its weeks those
   whose Tuesday does, and its sessions the XNYS sessions in it, from 2000-01-03 on. The span
@@ -79,24 +86,29 @@ rounded half-even once at the end; zero is written without a sign (`indicators.p
   sessions before its first session.
 - A document is due from the earliest time its source publishes it: FINRA's month M from the
   15th of the month after M; the CFTC's week from its Friday at 15:30 New York time; a
-  session's VIX from a quarter of an hour after the session's XNYS close, 16:15 New York time
-  on a full day (`periods`). A due document of the window or its span that `raw/` does not
-  hold is **lacking**: for the VIX, a due session after the newest day of the stored file
-  (Cboe's file holds every day it published, so an earlier session without a close is a gap,
-  not lacking). One not due yet is listed as not due and is no gap.
-- For the VIX the domain works as of the last completed session: a file holding a row of a
-  session whose VIX was not due when the file was fetched is invalid, so no value of a
-  session still being calculated is stored. FINRA's months and the CFTC's weeks are dated by
-  their own periods.
+  session's VIX and SKEW from a quarter of an hour after the session's XNYS close, 16:15 New
+  York time on a full day (`periods.cboe_due`; the SKEW's own publication time is not
+  verified, only that Cboe replaces its file in the evening like the VIX's). A due document of
+  the window or its span that `raw/` does not hold is **lacking**: for each Cboe file, a due
+  session after the newest day of that stored file (Cboe's file holds every day it
+  published, so an earlier session without a row is a gap, not lacking). One not due yet is
+  listed as not due and is no gap.
+- For the VIX and the SKEW the domain works as of the last completed session: a file holding
+  a row of a session whose values were not due when the file was fetched is invalid, so no
+  value of a session still being calculated is stored. FINRA's months and the CFTC's weeks
+  are dated by their own periods.
 - Selection: the newest valid workbook (by its fetch time, then by name) is the workbook; the
-  newest valid VIX file, likewise, is the VIX history; per week, the report of the newest
-  valid CFTC answer holding the week is the week's report. Nothing edits `raw/`; a file is
+  newest valid VIX file, likewise, is the VIX history, and the newest valid SKEW file the
+  SKEW history; per week, the report of the newest valid CFTC answer holding the week is the
+  week's report. Nothing edits `raw/`; a file is
   withdrawn by renaming it `.rejected`.
 
 ## The formatted tables
 
 Three tables in `formatted/market/`, rewritten from `raw/` by `record` and replaced only when
-their bytes would change. Python compares them by bytes and never parses them.
+their bytes would change. They cache the levels the indicators rest on and nothing derived
+from them: no percentile, which `record` and `show` compute again for each report. Python
+compares them by bytes and never parses them.
 
 `margin_debt.csv`: one row per month of the workbook, oldest first. Columns, in order:
 
@@ -119,19 +131,18 @@ their bytes would change. Python compares them by bytes and never parses them.
 | `asset_mgr_long`, `asset_mgr_short`, `asset_mgr_spread` | Asset managers' positions, in the report's contracts. |
 | `lev_money_long`, `lev_money_short`, `lev_money_spread` | Leveraged funds' positions, in the report's contracts. |
 | `asset_mgr_net_emini`, `lev_money_net_short_emini` | The two nets in E-mini equivalents. |
-| `asset_mgr_net_52w_percentile`, `lev_money_net_short_52w_percentile` | The percentiles, one decimal place, or blank. |
 | `fetched_at` | When the week's answer was fetched, ISO 8601 with its New York offset. |
 | `source` | The raw file name of the week's answer. |
 
-`vix.csv`: one row per XNYS session from 2000-01-03 to the newest day of the VIX history,
-oldest first. Columns, in order:
+`vix_skew.csv`: one row per XNYS session from 2000-01-03 to the newer of the two histories'
+newest days, oldest first. Columns, in order:
 
 | Column | Contents |
 | --- | --- |
 | `date` | The session, `YYYY-MM-DD`. |
-| `close` | The VIX close as Cboe wrote it (six decimal places), or blank where Cboe's file holds no row of the session. |
-| `close_252s_percentile` | The percentile, one decimal place, or blank. |
-| `source` | The raw file name of the VIX history. |
+| `vix_close` | The VIX close as Cboe wrote it (six decimal places), or blank where the VIX history holds no row of the session or does not reach it. |
+| `skew` | The SKEW as Cboe wrote it (six decimal places), likewise. |
+| `vix_source`, `skew_source` | The raw file name of each history, or blank where that history does not reach the session (its newest day is earlier). |
 
 ## Reports
 
@@ -145,17 +156,18 @@ window, and one whole: its three charts are served and read together, never one 
 - Three charts, one above the other, each on its own time axis and one scale: margin debt by
   month, each month drawn on its last day, in $ millions; S&P 500 futures positioning by
   week, each week drawn on its report's date, the two percentiles on a fixed 0–100 scale with
-  a line at 50; and the VIX by session, the close percentile on a fixed 0–100 scale with a
-  line at 50. A line breaks where a point has no value; a dot marks each value beside a
-  break.
+  a line at 50; and the VIX and the SKEW by session, the VIX close percentile and the SKEW
+  percentile on a fixed 0–100 scale with a line at 50. A line breaks where a point has no
+  value; a dot marks each value beside a break.
 - A readout per chart, under the pointer or stepped with the arrow keys: the month and its
   debit balances; the report date with its week, the two percentiles, the two nets and the
-  open interest in E-mini equivalents; or the session, its percentile and its close (`—`
-  where blank). It keeps the height of its tallest point.
+  open interest in E-mini equivalents; or the session, the VIX close percentile with its n,
+  the close, the SKEW percentile with its n and the SKEW (`—` where blank, and what is not
+  fetched of the session). It keeps the height of its tallest point.
 - A header with the window, coverage (stored points of the due ones), the newest month,
   report and session, what is not due yet, the generation time, the tables' paths, the
-  workbook and the VIX file read and the sources; banners naming every point that is due and
-  not fetched and, per series, every point without a value.
+  workbook and the two Cboe files read and the sources; banners naming every point that is
+  due and not fetched, per source, and, per series, every point without a value.
 - Collapsible data tables, one row per month, week and session (`not fetched` where due and
   not stored), followed by the gaps: each point's series without a value, with the reason.
 - A footer stating the method and the chart library's attribution.
@@ -183,7 +195,7 @@ each taking `--from DATE`, `--to DATE` and `--data-dir PATH`:
 
 | Command | Does |
 | --- | --- |
-| `fetch [--refresh]` | The one network command. Requests from each source what the window lacks (with `--refresh`, everything the window needs): FINRA's workbook, the CFTC's rows from the first lacking week to the last, Cboe's VIX history; writes an answer only when it holds something `raw/` does not. A source that fails does not stop the others. |
+| `fetch [--refresh]` | The one network command. Requests from each source what the window lacks (with `--refresh`, everything the window needs): FINRA's workbook, the CFTC's rows from the first lacking week to the last, Cboe's VIX history, Cboe's SKEW history; writes an answer only when it holds something `raw/` does not. A source that fails does not stop the others. |
 | `plan [--refresh]` | Read-only. Per source, what is lacking and the newest stored document; what is not due yet; gaps; invalid raw files; the tables and the newest report's freshness; the action. |
 | `record` | Rewrites the three tables from `raw/` and writes a new report of the window and its twin, naming whatever is lacking in it. Refuses while a raw file is invalid or when no month, week or session of the window is fetched. |
 | `show` | Read-only: one status line, then the twin recomputed from `raw/`. |
@@ -202,13 +214,13 @@ script reads this domain's `raw/` ([explore_hypothesis/AGENTS.md](../../explore_
 | Module | Responsibility |
 | --- | --- |
 | `__main__` | The command line (`MARKET_POSITION_REGIME` label); resolves and checks the window first. |
-| `client` | HTTPS to the three fixed endpoints only (`www.finra.org`, `publicreporting.cftc.gov`, `cdn-api.cboe.com`), no key, statuses, bounded and whole bodies, no redirect. |
+| `client` | HTTPS to the four fixed endpoints only (`www.finra.org`, `publicreporting.cftc.gov`, and the VIX and SKEW files on `cdn-api.cboe.com`), no key, statuses, bounded and whole bodies, no redirect. |
 | `periods` | Months, weeks named by their Tuesday, the XNYS sessions of a span; when each source's document is due. |
 | `finra` | The workbook's address, its parsing with the standard library (`zipfile`, `xml.etree`) and every rule (`parse_workbook`, `check_workbook`), its raw name. |
 | `cftc` | The query (`query_url`), the rows and every rule (`check_row`, `check_answer`), the units and the E-mini conversion, the answer raw unit (`dump`, `read_answer`). |
-| `cboe` | The VIX file's address, its parsing and every rule (`parse_history`, `check_history`), the gzip raw unit (`dump`, `load`, `read_history`). |
+| `cboe` | The two files (`Index`: `VIX`, `SKEW`), their addresses, their parsing and every rule (`parse_history`, `check_history`), the gzip raw units (`dump`, `load`, `read_history`). |
 | `indicators` | The percentiles over 52 weeks and over 252 sessions. |
-| `store` | Reading and validating every raw file, the selection, the margin, futures and VIX rows over the whole archive, the three tables. |
+| `store` | Reading and validating every raw file, the selection, the margin, futures and session rows over the whole archive, the three tables of levels. |
 | `chart` and `templates/chart.html` | The report (three charts on one page) and its twin, over `common.chart`: the vendored TradingView Lightweight Charts 5.2.1, pinned by SHA-256, and the page text helpers. |
 | `workflow` | `Window` and its span, what is due and lacking, `plan`, `fetch`, `record`, `show`. |
 
@@ -252,26 +264,28 @@ used, every position a whole number of contracts; one row per week, in date orde
 answer is written only when it holds a week `raw/` lacks or a row that differs from the
 selected one.
 
-### Cboe's VIX files
+### Cboe's VIX and SKEW files
 
-`cboe_vix_{TOKEN}.csv.gz`: the file's bytes as received, in deterministic gzip (level 9, no
-name or time in its header), since the whole history (about 0.5 MB, about 0.1 MB packed) is
-fetched again each time a session is lacking. Every read unpacks it (at most 16 MiB) and
-checks the whole file again (`cboe.check_history`): ASCII lines, each ended by a line feed;
-the first exactly `DATE,OPEN,HIGH,LOW,CLOSE`; then one row per day, in date order, the first
-of 1990-01-02: the day written `MM/DD/YYYY`, then the open, high, low and close, each a
-decimal above 0 with six places (no order among the four is checked); no row dated after
-the day of the fetch, which the name gives, nor a row of an XNYS session whose VIX was not
-due yet then; the fetch time not after the clock. Rows of days XNYS does not trade are valid
-and kept. A newer file is written only when its rows differ from the selected one's.
+`cboe_vix_{TOKEN}.csv.gz` and `cboe_skew_{TOKEN}.csv.gz`: a file's bytes as received, in
+deterministic gzip (level 9, no name or time in its header), since a whole history (the
+VIX's about 0.5 MB, about 0.1 MB packed; the SKEW's about 0.2 MB) is fetched again each time
+a session of it is lacking. Every read unpacks it (at most 16 MiB) and checks the whole file
+again (`cboe.check_history`), as the index its name gives: ASCII lines, each ended by a line
+feed; the first exactly `DATE,OPEN,HIGH,LOW,CLOSE` (the VIX) or `DATE,SKEW` (the SKEW);
+then one row per day, in date order, the first of 1990-01-02: the day written `MM/DD/YYYY`,
+then the open, high, low and close, or the one SKEW, each a decimal above 0 with six places
+(no order among the VIX's four is checked); no row dated after the day of the fetch, which
+the name gives, nor a row of an XNYS session whose values were not due yet then; the fetch
+time not after the clock. Rows of days XNYS does not trade are valid and kept. A newer file
+of an index is written only when its rows differ from the selected one's.
 
 ## Fetching
 
-`fetch` sends at most three requests a run (`workflow.py`): FINRA's workbook when a due month
+`fetch` sends at most four requests a run (`workflow.py`): FINRA's workbook when a due month
 is lacking; the CFTC's rows from the Monday of the first lacking week to the Sunday of the
 last (a few hundred rows at most; the whole market since 2010 is 853); Cboe's VIX file when a
-due session is lacking. With `--refresh` it requests the workbook, every due week of the span
-and the VIX file again, whatever is stored. Per source it reports `reused` (nothing lacking,
+due session of it is lacking, and its SKEW file likewise. With `--refresh` it requests the
+workbook, every due week of the span and both Cboe files again, whatever is stored. Per source it reports `reused` (nothing lacking,
 no request), `new` (an answer written), `verified` (an answer that holds nothing `raw/`
 lacks: nothing written) or `failed` (the request failed or the answer failed a rule: nothing
 written, the reason given), and `pending`: the due documents the source has not published
@@ -322,7 +336,7 @@ yet. An answer is checked by the same rules as a raw file before it is written.
 - A `fetch` on 2026-10-20 asked for 2022-10-31 to 2026-10-18 and stored 207 rows (108,836
   bytes).
 
-## Cboe facts verified live (2026-10-20)
+## Cboe VIX facts verified live (2026-10-20)
 
 - `GET https://cdn-api.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv` answers
   200 without a key, a cookie or a particular user agent (Python's urllib default is served),
@@ -351,3 +365,19 @@ yet. An answer is checked by the same rules as a raw file before it is written.
   limited by one year as you have free subscription"`), it holds flat bars on 2025-12-25,
   2026-01-01 and 2026-04-03, of which Cboe's file has no row, and its bar of 2026-02-06
   (low 19.99, close 20.37) differs from Cboe's (17.27, 17.76).
+
+## Cboe SKEW facts verified live (2026-10-23)
+
+- `GET https://cdn.cboe.com/api/global/us_indices/daily_prices/SKEW_History.csv` answers 307
+  to `https://cdn-api.cboe.com/api/global/us_indices/daily_prices/SKEW_History.csv`, which
+  answers 200 without a key, `content-type: text/csv`, about 204 KB; the client follows no
+  redirect, so the domain asks for the target directly, as for the VIX.
+- The file is ASCII with line feeds and a final one; its header reads `DATE,SKEW`, and 9,254
+  rows follow, from `01/02/1990` (126.09) to `10/22/2026`, each `MM/DD/YYYY,value` with six
+  decimal places. The lowest SKEW is 101.23 (1991-03-19), the highest 183.12 (2025-02-18).
+- It has no row of a day XNYS was closed, and it lacks 15 XNYS sessions since 2000-01-03:
+  2000-09-20 to 2000-09-29 (8 sessions), 2003-10-21, 2003-10-28, 2011-02-09, 2017-09-14,
+  2018-12-03, 2019-07-05 and 2024-11-29.
+- Cboe replaces the two files separately in the evening: on 2026-10-22 the SKEW file's
+  `last-modified` was 21:11 New York time and the VIX file's 21:21, and a read between the
+  two found the SKEW ending 10/22 and the VIX still ending 10/21.

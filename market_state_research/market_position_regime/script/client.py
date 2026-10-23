@@ -1,12 +1,12 @@
 """HTTPS to the domain's three sources: every request ``fetch`` sends.
 
-Three fixed endpoints, each read with one plain GET and none with a key: FINRA's margin
+Four fixed endpoints, each read with one plain GET and none with a key: FINRA's margin
 statistics workbook (``www.finra.org``), the CFTC's Traders in Financial Futures dataset
-through its public Socrata API (``publicreporting.cftc.gov``) and Cboe's daily history of
-the VIX (``cdn-api.cboe.com``). So the domain reads no setting, and no URL it builds, prints
-or stores carries a secret.
+through its public Socrata API (``publicreporting.cftc.gov``) and Cboe's daily histories of
+the VIX and of the SKEW (``cdn-api.cboe.com``). So the domain reads no setting, and no URL it
+builds, prints or stores carries a secret.
 
-Requests go only to the three paths of ``ENDPOINTS``, over HTTPS, without credentials, a
+Requests go only to the four paths of ``ENDPOINTS``, over HTTPS, without credentials, a
 port or a fragment in the URL, and with a query only where the endpoint takes one; no
 redirect is followed. A body is accepted only as sent (a ``Content-Encoding`` other than
 ``identity`` is refused), with status 200, at most its endpoint's limit and not shorter than
@@ -64,7 +64,7 @@ CFTC: Final = Endpoint(
     16 * 1024 * 1024,  # a full page of 5,000 rows is about 2.6 MB
     "application/json",
 )
-CBOE: Final = Endpoint(
+CBOE_VIX: Final = Endpoint(
     "Cboe",
     "cdn-api.cboe.com",
     "/api/global/us_indices/daily_prices/VIX_History.csv",
@@ -72,7 +72,15 @@ CBOE: Final = Endpoint(
     8 * 1024 * 1024,  # the history since 1990 is about 0.5 MB and grows by about 12 KB a year
     "text/csv",
 )
-ENDPOINTS: Final = (FINRA, CFTC, CBOE)
+CBOE_SKEW: Final = Endpoint(
+    "Cboe",
+    "cdn-api.cboe.com",
+    "/api/global/us_indices/daily_prices/SKEW_History.csv",
+    False,
+    8 * 1024 * 1024,  # the history since 1990 is about 0.2 MB and grows by about 5 KB a year
+    "text/csv",
+)
+ENDPOINTS: Final = (FINRA, CFTC, CBOE_VIX, CBOE_SKEW)
 
 # Explicit ASCII classes: \d would also match other Unicode digits.
 _BYTE_COUNT = re.compile(r"[0-9]+", re.ASCII)

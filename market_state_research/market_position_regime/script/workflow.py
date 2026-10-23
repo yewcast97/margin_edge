@@ -11,9 +11,10 @@ the three tables and the newest report of the window are current, and the action
 ``fetch`` while a document is lacking (or with ``refresh``), ``record`` when the tables or
 the report are not current, ``reuse`` otherwise. ``fetch`` requests from each source what is
 lacking: FINRA's workbook whole, the CFTC's rows from the first lacking week to the last,
-Cboe's VIX history whole. It writes an answer only when it holds something ``raw/`` does
-not (``new``), compares it otherwise (``verified``), and names every due document the source
-has not published yet (``pending``); a source that fails does not stop the others.
+Cboe's VIX history whole and its SKEW history whole, each when a session of it is lacking. It
+writes an answer only when it holds something ``raw/`` does not (``new``), compares it
+otherwise (``verified``), and names every due document the source has not published yet
+(``pending``); a source that fails does not stop the others.
 ``record`` rewrites the three tables from ``raw/`` and writes a new report (the page and its
 Markdown twin) each time it runs, naming whatever is lacking in it. ``show`` prints the twin.
 
@@ -40,17 +41,18 @@ from market_state_research.common.sessions import FIRST_SUPPORTED_DATE
 from market_state_research.common.times import et_display, et_isoformat, to_eastern
 
 from . import cboe, cftc, finra
+from .cboe import Index
 from .chart import ChartSpec, MonthEntry, SessionEntry, WeekEntry, load_library, render_html, render_markdown
 from .client import Client, SourceError
 from .indicators import SESSIONS, WEEKS
 from .periods import (
     Month,
+    cboe_due,
+    cboe_is_due,
     cftc_release,
     finra_due,
     months_ending_within,
     sessions_within,
-    vix_due,
-    vix_is_due,
     week_days,
     weeks_ending,
     weeks_within,
@@ -61,27 +63,29 @@ from .store import (
     FuturesRow,
     HistoryFile,
     InvalidFile,
+    Level,
     MarginRow,
+    SessionRow,
     Stored,
-    VixRow,
     WorkbookFile,
     csv_paths,
     derive_futures,
+    derive_indices,
     derive_margin,
-    derive_vix,
     futures_text,
+    indices_text,
     margin_text,
     raw_directory,
     read_raw,
     select_history,
     select_reports,
     select_workbook,
-    vix_text,
     write_table,
 )
 
 DEFAULT_YEARS: Final = 3
 REPORT_PREFIX: Final = "market"
+TABLES: Final = ("margin_debt", "index_futures", "vix_skew")
 
 
 @dataclass(frozen=True)
@@ -154,12 +158,17 @@ class State:
     now: datetime
     workbook: WorkbookFile | None
     reports: dict[date, Stored]
-    history: HistoryFile | None
+    vix_file: HistoryFile | None
+    skew_file: HistoryFile | None
     invalid: tuple[InvalidFile, ...]
     margin: dict[Month, MarginRow]
     futures: dict[date, FuturesRow]
-    vix: dict[date, VixRow]
+    indices: dict[date, SessionRow]
     tables: tuple[Path, Path, Path]
+
+    def history(self, index: Index) -> HistoryFile | None:
+        """The selected file of ``index``, or None."""
+        return self.vix_file if index == cboe.VIX else self.skew_file
 
     # ------------------------------------------------------------------ what is due and lacking
 
@@ -188,12 +197,13 @@ class State:
 
     def due_sessions(self, at: datetime) -> tuple[date, ...]:
         """The sessions the window and its percentiles need that are due at ``at``, ascending."""
-        return tuple(session for session in self.window.span_sessions if vix_is_due(session, at))
+        return tuple(session for session in self.window.span_sessions if cboe_is_due(session, at))
 
-    def lacking_sessions(self, at: datetime | None = None) -> tuple[date, ...]:
-        """The due sessions after the VIX history's newest day: Cboe's file holds every day it
-        published, so an earlier session without a close is a gap, never lacking."""
-        newest_day = None if self.history is None else self.history.history.newest
+    def lacking_sessions(self, index: Index, at: datetime | None = None) -> tuple[date, ...]:
+        """The due sessions after the newest day of ``index``'s history: Cboe's file holds every
+        day it published, so an earlier session without a row is a gap, never lacking."""
+        stored = self.history(index)
+        newest_day = None if stored is None else stored.history.newest
         return tuple(
             session
             for session in self.due_sessions(at or self.now)
@@ -202,7 +212,11 @@ class State:
 
     @property
     def lacking(self) -> bool:
-        return bool(self.lacking_months() or self.lacking_weeks() or self.lacking_sessions())
+        return bool(
+            self.lacking_months()
+            or self.lacking_weeks()
+            or any(self.lacking_sessions(index) for index in cboe.INDICES)
+        )
 
     # ------------------------------------------------------------------ the tables and the report
 
@@ -211,7 +225,7 @@ class State:
         return (
             margin_text(self.margin.values()),
             futures_text(self.futures.values()),
-            vix_text(self.vix.values()),
+            indices_text(self.indices.values()),
         )
 
     @property
@@ -240,11 +254,11 @@ class State:
         sessions = [
             session
             for session in self.window.sessions
-            if not vix_is_due(session, at) and session not in self.vix
+            if not cboe_is_due(session, at) and session not in self.indices
         ]
         if sessions:
-            listed = ", ".join(f"{session} (due {et_display(vix_due(session))})" for session in sessions)
-            items.append(f"Cboe's VIX of {listed}")
+            listed = ", ".join(f"{session} (due {et_display(cboe_due(session))})" for session in sessions)
+            items.append(f"Cboe's VIX and SKEW of {listed}")
         return tuple(items)
 
     def spec(self, layout: DataLayout, at: datetime) -> ChartSpec:
@@ -264,11 +278,11 @@ class State:
             if week in self.futures or week in due_weeks
         )
         sessions = tuple(
-            SessionEntry(session, self.vix.get(session))
+            SessionEntry(session, self.indices.get(session))
             for session in self.window.sessions
-            if session in self.vix or session in due_sessions
+            if session in self.indices or session in due_sessions
         )
-        margin, futures, vix = (path.relative_to(layout.root).as_posix() for path in self.tables)
+        margin, futures, indices = (path.relative_to(layout.root).as_posix() for path in self.tables)
         return ChartSpec(
             start=self.window.start,
             end=self.window.end,
@@ -278,8 +292,9 @@ class State:
             sessions=sessions,
             upcoming=self.upcoming(at),
             workbook=None if self.workbook is None else self.workbook.source,
-            history=None if self.history is None else self.history.source,
-            csv=(margin, futures, vix),
+            vix_file=None if self.vix_file is None else self.vix_file.source,
+            skew_file=None if self.skew_file is None else self.skew_file.source,
+            csv=(margin, futures, indices),
         )
 
     def refuse_invalid(self) -> None:
@@ -305,17 +320,18 @@ def resolve(layout: DataLayout, window: Window, now: datetime) -> State:
     raw = read_raw(layout, now)
     workbook = select_workbook(raw.workbooks)
     reports = select_reports(raw.answers)
-    history = select_history(raw.histories)
+    vix_file, skew_file = (select_history(raw.histories, index) for index in (cboe.VIX, cboe.SKEW))
     return State(
         window=window,
         now=now,
         workbook=workbook,
         reports=reports,
-        history=history,
+        vix_file=vix_file,
+        skew_file=skew_file,
         invalid=raw.invalid,
         margin=derive_margin(workbook),
         futures=derive_futures(reports),
-        vix=derive_vix(history),
+        indices=derive_indices(vix_file, skew_file),
         tables=csv_paths(layout),
     )
 
@@ -366,11 +382,21 @@ def _window(window: Window) -> dict[str, Any]:
     }
 
 
+def _cboe_source(layout: DataLayout, state: State, index: Index) -> dict[str, Any]:
+    stored = state.history(index)
+    lacking = state.lacking_sessions(index)
+    return {
+        "status": "lacking" if lacking else "current",
+        "path": None if stored is None else str(raw_directory(layout) / stored.source),
+        "newest": None if stored is None else stored.history.newest.isoformat(),
+        "lacking": _span(lacking),
+    }
+
+
 def _sources(layout: DataLayout, state: State) -> dict[str, Any]:
-    workbook, history = state.workbook, state.history
+    workbook = state.workbook
     lacking_months = state.lacking_months()
     lacking_weeks = state.lacking_weeks()
-    lacking_sessions = state.lacking_sessions()
     newest_week = max(state.reports, default=None)
     return {
         "finra": {
@@ -385,12 +411,7 @@ def _sources(layout: DataLayout, state: State) -> dict[str, Any]:
             "newest": None if newest_week is None else state.reports[newest_week].report.as_of.isoformat(),
             "lacking": _span(lacking_weeks),
         },
-        "cboe": {
-            "status": "lacking" if lacking_sessions else "current",
-            "path": None if history is None else str(raw_directory(layout) / history.source),
-            "newest": None if history is None else history.history.newest.isoformat(),
-            "lacking": _span(lacking_sessions),
-        },
+        **{f"cboe_{index.key}": _cboe_source(layout, state, index) for index in cboe.INDICES},
     }
 
 
@@ -403,9 +424,8 @@ def _invalid(state: State) -> list[dict[str, str]]:
 
 
 def _tables(state: State) -> dict[str, str | None]:
-    names = ("margin_debt", "index_futures", "vix")
     return {
-        name: str(path) if path.is_file() else None for name, path in zip(names, state.tables, strict=True)
+        name: str(path) if path.is_file() else None for name, path in zip(TABLES, state.tables, strict=True)
     }
 
 
@@ -518,25 +538,29 @@ def _fetch_cftc(client: Client, layout: DataLayout, state: State, refresh: bool)
     return result
 
 
-def _fetch_cboe(client: Client, layout: DataLayout, state: State, refresh: bool) -> dict[str, Any]:
-    stored = state.history
+def _fetch_cboe(
+    client: Client, layout: DataLayout, state: State, refresh: bool, index: Index
+) -> dict[str, Any]:
+    stored = state.history(index)
     stored_path = None if stored is None else raw_directory(layout) / stored.source
-    if not (refresh or state.lacking_sessions()):
+    if not (refresh or state.lacking_sessions(index)):
         result = _outcome("reused", stored_path)
         result["pending"] = _span(())
         return result
     try:
-        data = client.get(cboe.URL)
+        data = client.get(index.url)
         fetched_at = client.now().replace(microsecond=0)
-        history = cboe.check_history(data, fetched_at, fetched_at)
+        history = cboe.check_history(data, index, fetched_at, fetched_at)
     except (SourceError, ValueError) as error:
-        result = _failed(cboe.URL, error)
-        result["pending"] = _span(state.lacking_sessions())
+        result = _failed(index.url, error)
+        result["pending"] = _span(state.lacking_sessions(index))
         return result
-    if stored is not None and stored.history.bars == history.bars:
+    if stored is not None and stored.history.rows == history.rows:
         result = _outcome("verified", stored_path)
     else:
-        names = [cboe.raw_name(fetched_at, "" if n == 0 else f"_{n}") for n in range(cboe.MAX_SUFFIX + 1)]
+        names = [
+            cboe.raw_name(index, fetched_at, "" if n == 0 else f"_{n}") for n in range(cboe.MAX_SUFFIX + 1)
+        ]
         result = _outcome("new", _write_raw(raw_directory(layout), names, cboe.dump(data)))
     newest_day = history.newest
     result["pending"] = _span(
@@ -555,7 +579,7 @@ def fetch(
     sources = {
         "finra": _fetch_finra(client, layout, state, refresh),
         "cftc": _fetch_cftc(client, layout, state, refresh),
-        "cboe": _fetch_cboe(client, layout, state, refresh),
+        **{f"cboe_{index.key}": _fetch_cboe(client, layout, state, refresh, index) for index in cboe.INDICES},
     }
     return {
         "generated_at": et_isoformat(now),
@@ -587,11 +611,23 @@ def _week(row: FuturesRow) -> dict[str, Any]:
     }
 
 
-def _session(row: VixRow) -> dict[str, Any]:
+def _level(level: Level | None) -> tuple[str | None, str | None]:
+    """A level's value as Cboe wrote it and its percentile, each None where blank."""
+    if level is None or level.row is None:
+        return None, None
+    found = level.percentile.value
+    return level.row.level, None if found is None else str(found)
+
+
+def _session(row: SessionRow) -> dict[str, Any]:
+    vix, vix_percentile = _level(row.vix)
+    skew, skew_percentile = _level(row.skew)
     return {
         "date": row.session.isoformat(),
-        "close": None if row.bar is None else row.bar.close,
-        "close_252s_percentile": None if row.percentile.value is None else str(row.percentile.value),
+        "vix_close": vix,
+        "vix_close_252s_percentile": vix_percentile,
+        "skew": skew,
+        "skew_252s_percentile": skew_percentile,
     }
 
 
@@ -615,11 +651,10 @@ def record(layout: DataLayout, window: Window, now: datetime) -> dict[str, Any]:
     twin, page = directory / stamped(stem, now, ".md"), directory / stamped(stem, now, ".html")
     # The twin first, so a page's presence (what freshness reads) implies its twin's.
     documents = [(twin, render_markdown(spec)), (page, render_html(spec, load_library()))]
-    names = ("margin_debt", "index_futures", "vix")
-    counts = (len(state.margin), len(state.futures), len(state.vix))
+    counts = (len(state.margin), len(state.futures), len(state.indices))
     written = {
         name: {"path": str(path), "rows": rows, "written": write_table(path, text)}
-        for name, path, rows, text in zip(names, state.tables, counts, state.table_texts(), strict=True)
+        for name, path, rows, text in zip(TABLES, state.tables, counts, state.table_texts(), strict=True)
     }
     for path, document in documents:
         write_file(path, document)
@@ -629,14 +664,17 @@ def record(layout: DataLayout, window: Window, now: datetime) -> dict[str, Any]:
         "window": _window(window),
         "months": [_month(entry.row) for entry in spec.months if entry.row is not None],
         "weeks": [_week(entry.row) for entry in spec.weeks if entry.row is not None],
-        "vix": {
+        "indices": {
             "sessions": len(stored_sessions),
             "newest": _session(stored_sessions[-1]) if stored_sessions else None,
         },
         "lacking": {
             "months": [month.isoformat() for month in spec.missing_months],
             "weeks": [week.isoformat() for week in spec.missing_weeks],
-            "sessions": [session.isoformat() for session in spec.missing_sessions],
+            **{
+                f"{index.key}_sessions": [session.isoformat() for session in spec.missing_sessions(index)]
+                for index in cboe.INDICES
+            },
         },
         "not_due": list(spec.upcoming),
         "gaps": _gaps(spec),
