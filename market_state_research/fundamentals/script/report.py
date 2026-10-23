@@ -1,255 +1,237 @@
-"""The ticker's time series: its periods' per-document reports compiled into one Markdown file.
+"""A season's report: every item's level, the score, and the triggered items with their evidence.
 
-``render_series`` is a pure function of a ticker's periods (each with its files and the
-passing reports of its documents) and the time it is generated: the same inputs give the
-same text except for the one ``Generated ...`` line, so ``same_series`` compares two
-series apart from that line, and ``plan`` judges the newest series file fresh when it is
-the series rendered now. A period is ``complete`` when every one of its EDGAR documents
-is in ``raw/``, its earnings call is settled (its transcript in ``raw/``, or shown
-unavailable by the transcript provider's list: ``documents.CallState``), and each of its
-documents (its 10-K or 10-Q, every EX-99 exhibit, every call) has a report that passes
-``check``. The series holds one section per complete period, newest first: its documents
-(a period whose call is shown unavailable says so, with the date of the list that shows
-it), then the eleven fields (``research.FIELD_TITLES``), each quote as ``> text`` followed
-by ``— {document label}`` and the speaker the report names, and ``None found in the
-period's documents.`` for a field without a quote. A coverage table lists every period
-whose 10-K or 10-Q is in ``raw/``, complete, ``incomplete`` (naming what is missing) or
-``not researched`` (no report of its documents), with its call: ``transcript``,
-``unavailable (provider lists no call as of DATE)``, ``waiting`` or ``missing``. The
-as-of date is the filing date of the newest filing or exhibit of the complete periods
-(``report_as_of``).
+``render_report`` is a pure function of a season (its files, its Python items in
+``measures.md`` and the bot's passing readings) and the time it is generated: the same inputs
+give the same text but for the one ``Generated ...`` line, so ``same_report`` compares two
+reports apart from that line, and ``plan`` judges the newest report of a season fresh when it
+is the report rendered now. ``render`` writes it as ``reports/{T}/{PERIOD}/report_{TOKEN}.md``
+and never overwrites one.
 
-The series states what the documents say and adds no valuation, forecast, rating or
-investment opinion of its own; its fixed text passes ``research.WORDING``. Quotes are
-shown as the reports write them, their lines joined by one space: ``check`` holds every
-quote to the derived text's own characters, so the series shows the document's words.
+The report states, under its title, the issuer, the season, its call and the seasons its
+baselines name, then the score: red counts 10, yellow 3, grey 1 (``items.SCORES``), a weighted
+count of the comparisons that triggered against the stated baselines, never a valuation;
+then every triggered item, red first, then yellow, then grey, each with what it compared, its
+values or observation, its rule and its quotes with their documents; then the nine sections
+(``items.SECTIONS``) with every item's level. Its fixed text passes ``readings.WORDING``.
 """
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Final
 
 from market_state_research.common.layout import listed, name_instant, stamped
-from market_state_research.common.text import printable
 from market_state_research.common.times import TOKEN_PATTERN, et_display, to_eastern
 
-from .documents import Document, PeriodFiles
-from .research import FIELD_TITLES, FIELDS, Report
+from .documents import SeasonFiles
+from .filings import Seasons
+from .items import ITEMS, SECTIONS, Baseline, Item, score
+from .measures import Measures, Reading, baseline_seasons
+from .readings import ItemReading, Readings
 
-TITLE = "Issuer disclosures"
-GENERATED = "Generated "
-NONE_FOUND = "None found in the period's documents."
-NO_COMPLETE_PERIOD = "no period is complete: every document of a period needs a report that passes check"
-CALL_MISSING = "the earnings call's transcript is not in raw/"
-CALL_WAITING = "the earnings call is not listed yet"
-NOT_IN_RAW = "documents not in raw/"
-UNAVAILABLE = "unavailable (provider lists no call as of {as_of})"
-_NONE = "—"
-
-PeriodStatus = Literal["complete", "incomplete", "not researched"]
+GENERATED: Final = "Generated "
+REPORT_PREFIX: Final = "report"
+NONE_TRIGGERED: Final = "None of the items triggered."
+TRIGGER_ORDER: Final = ("red", "yellow", "grey")
+_REPORT_NAME = re.compile(rf"{REPORT_PREFIX}_(?P<token>{TOKEN_PATTERN})\.md", re.ASCII)
 
 
 @dataclass(frozen=True)
-class SeriesPeriod:
-    """One period whose 10-K or 10-Q is in ``raw/``: its files and the passing report of each
-    of its documents that has one (by ``DOC_ID``)."""
+class Entry:
+    """One item of the season as the report states it: its level, who read it, what it compared
+    with, its values or observation, and the quotes (text, attribution) of a bot item."""
 
-    files: PeriodFiles
-    reports: Mapping[str, Report]
-
-    @property
-    def missing(self) -> tuple[str, ...]:
-        """What keeps the period from being complete: documents not in ``raw/``, an unsettled
-        call and the documents without a passing report, by ``DOC_ID``; empty when complete."""
-        missing = [] if self.files.missing is None else [NOT_IN_RAW]
-        if self.files.call.status == "missing":
-            missing.append(CALL_MISSING)
-        elif self.files.call.status == "waiting":
-            missing.append(CALL_WAITING)
-        missing.extend(
-            document.doc_id for document in self.files.documents if document.doc_id not in self.reports
-        )
-        return tuple(missing)
-
-    @property
-    def status(self) -> PeriodStatus:
-        if not self.missing:
-            return "complete"
-        return "incomplete" if self.reports else "not researched"
+    item: Item
+    level: str
+    who: str
+    baseline: str
+    detail: str
+    quotes: tuple[tuple[str, str], ...] = ()
 
 
-def report_as_of(periods: Sequence[SeriesPeriod]) -> date:
-    """The filing date of the newest 10-K, 10-Q or EX-99 exhibit of the complete ``periods``."""
-    filed = [
-        document.filed
-        for period in periods
-        if period.status == "complete"
-        for document in period.files.documents
-        if document.filed is not None
-    ]
-    if not filed:
-        raise ValueError(NO_COMPLETE_PERIOD)
-    return max(filed)
+def entries(measures: Measures, readings: Readings) -> tuple[Entry, ...]:
+    """Every item of the catalogue, in order, from the Python items and the passing readings."""
+    computed: Mapping[str, Reading] = {reading.item.id: reading for reading in measures.readings}
+    read: Mapping[str, ItemReading] = {reading.item.id: reading for reading in readings.items}
+    found: list[Entry] = []
+    for item in ITEMS:
+        if item.who == "none":
+            found.append(Entry(item, "no source", "no source", "none", item.rule))
+        elif item.who == "python":
+            reading = computed[item.id]
+            found.append(Entry(item, reading.level, "Python", reading.baseline, reading.values))
+        else:
+            bot = read[item.id]
+            baseline = "; ".join(bot.baseline or ()) or "none"
+            quotes = tuple(
+                (quote.text, quote.doc_id if quote.speaker is None else f"{quote.doc_id}, {quote.speaker}")
+                for quote in bot.quotes
+            )
+            found.append(Entry(item, bot.level or "", "bot", baseline, bot.observation or "", quotes))
+    return tuple(found)
 
 
-def series_name(ticker: str, as_of: date, now: datetime) -> str:
-    """``{T}_{AS_OF}_{token}.md``: a series file's name."""
-    return stamped(f"{ticker}_{as_of.isoformat()}", now, ".md")
+def season_score(found: Sequence[Entry]) -> int:
+    return score({entry.item.id: entry.level for entry in found})
 
 
-def series_files(directory: Path, ticker: str) -> list[Path]:
-    """The ticker's series files in ``directory`` (``reports/{T}/``), every other file left out."""
-    pattern = re.compile(
-        rf"{re.escape(ticker)}_[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}_{TOKEN_PATTERN}\.md", re.ASCII
+def _counts(found: Sequence[Entry]) -> str:
+    levels = [entry.level for entry in found]
+    statuses = ("not applicable", "not disclosed", "not computable", "no baseline", "unavailable")
+    return ", ".join(f"{levels.count(status)} {status}" for status in statuses)
+
+
+def score_line(found: Sequence[Entry]) -> str:
+    """The report's score line."""
+    levels = [entry.level for entry in found]
+    who = [entry.item.who for entry in found]
+    return (
+        f"Score: {season_score(found)} ({levels.count('red')} red, {levels.count('yellow')} yellow, "
+        f"{levels.count('grey')} grey) over {len(found)} items: {who.count('python')} read by Python, "
+        f"{who.count('bot')} by the bot, {who.count('none')} without a source; {_counts(found)}."
     )
-    return [path for path in listed(directory, ".md") if pattern.fullmatch(path.name)]
-
-
-def newest_series(directory: Path, ticker: str, now: datetime) -> Path | None:
-    """The series file whose name's token is the latest not after ``now`` (never ordered as text)."""
-    limit = to_eastern(now, "now")
-    named = [
-        (instant, path) for path in series_files(directory, ticker) if (instant := name_instant(path.name))
-    ]
-    candidates = [(instant, path) for instant, path in named if instant <= limit]
-    return max(candidates)[1] if candidates else None
-
-
-def same_series(first: str, second: str) -> bool:
-    """Whether two series texts are the same apart from their ``Generated`` line."""
-    return _content(first) == _content(second)
-
-
-def _content(text: str) -> list[str]:
-    return [line for line in text.split("\n") if not line.startswith(GENERATED)]
-
-
-# --------------------------------------------------------------------------- Markdown
 
 
 def _cell(text: str) -> str:
-    return printable(text).replace("|", "\\|")
+    return text.replace("|", "\\|")
 
 
-def _row(*cells: str) -> str:
-    return "| " + " | ".join(_cell(cell) for cell in cells) + " |"
-
-
-def _call_line(document: Document) -> str:
-    held = _NONE if document.call is None else document.call.day.isoformat()
-    return f"Earnings call: {document.title}, held {held}, transcript (`{document.doc_id}`)"
-
-
-def call_label(files: PeriodFiles) -> str:
-    """The period's call as the coverage table names it."""
-    call = files.call
-    if call.status == "unavailable" and call.as_of is not None:
-        return UNAVAILABLE.format(as_of=call.as_of.isoformat())
-    return call.status
-
-
-def _document_lines(files: PeriodFiles) -> list[str]:
-    filing = files.period.filing
-    lines = []
-    if files.filing is not None:
-        lines.append(f"{filing.form} {filing.accession}, filed {filing.filed} (`{files.filing.doc_id}`)")
-    for release in files.releases:
-        for row, document in release.exhibits:
-            if document is not None:
-                lines.append(
-                    f"{row.exhibit} {row.document} of the 8-K {release.release.accession} dated "
-                    f"{release.release.report_date}, filed {release.release.filed} (`{document.doc_id}`)"
-                )
-    lines.extend(_call_line(document) for document in files.calls)
-    if files.call.status == "unavailable" and files.call.as_of is not None:
-        lines.append(
-            f"Earnings call: none listed by the transcript provider (EarningsCalls.dev) as of "
-            f"{files.call.as_of.isoformat()}"
+def _triggered(found: Sequence[Entry]) -> list[str]:
+    ordered = sorted(
+        (entry for entry in found if entry.level in TRIGGER_ORDER),
+        key=lambda entry: (TRIGGER_ORDER.index(entry.level), ITEMS.index(entry.item)),
+    )
+    if not ordered:
+        return [NONE_TRIGGERED]
+    lines: list[str] = []
+    for entry in ordered:
+        label = "values" if entry.who == "Python" else "observation"
+        lines.extend(
+            [
+                f"### {entry.item.heading} · {entry.level}",
+                "",
+                f"baseline: {entry.baseline}",
+                f"{label}: {entry.detail}",
+                f"rule: {entry.item.rule}",
+            ]
         )
-    return [f"- {printable(line)}" for line in lines]
+        for text, attribution in entry.quotes:
+            lines.extend(["", f"> {text}", f"— {attribution}"])
+        lines.append("")
+    return lines[:-1]
 
 
-def _period_lines(period: SeriesPeriod) -> list[str]:
-    files = period.files
-    lines = [f"## {files.day.isoformat()}", "", *_document_lines(files), ""]
-    documents = {document.doc_id: document for document in files.documents}
-    for name in FIELDS:
-        lines.extend([f"### {FIELD_TITLES[name]}", ""])
-        quoted = [
-            (documents[doc_id], quote)
-            for doc_id, report in period.reports.items()
-            for quote in report.field(name)
-        ]
-        if not quoted:
-            lines.extend([NONE_FOUND, ""])
-        for document, quote in quoted:
-            caption = document.label if quote.speaker is None else f"{document.label}, {quote.speaker}"
-            lines.extend([f"> {printable(quote.text)}", "", f"— {printable(caption)}", ""])
+def _section(number: int, found: Sequence[Entry]) -> list[str]:
+    lines = [
+        f"## {number} {SECTIONS[number]}",
+        "",
+        "| Item | Level | Read by | Baseline | Values or observation |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for entry in found:
+        if entry.item.section == number:
+            lines.append(
+                f"| {_cell(entry.item.heading)} | {entry.level} | {entry.who} | {_cell(entry.baseline)} | "
+                f"{_cell(entry.detail)} |"
+            )
     return lines
 
 
-def _coverage_lines(periods: Sequence[SeriesPeriod]) -> list[str]:
-    header = ("Period", "Status", "Earnings call", "Documents", *(FIELD_TITLES[name] for name in FIELDS))
-    rows = [_row(*header), _row(*("---" for _ in header))]
-    for period in periods:
-        status: str = period.status
-        if period.status == "incomplete":
-            status = f"incomplete: missing {', '.join(period.missing)}"
-        counts = [
-            str(sum(len(report.field(name)) for report in period.reports.values()))
-            if period.status == "complete"
-            else _NONE
-            for name in FIELDS
-        ]
-        rows.append(
-            _row(
-                period.files.day.isoformat(),
-                status,
-                call_label(period.files),
-                str(len(period.files.documents)),
-                *counts,
-            )
-        )
-    return rows
-
-
-def _ordered(period: SeriesPeriod) -> SeriesPeriod:
-    """The period with its reports in the order of its documents."""
-    reports = {
-        document.doc_id: period.reports[document.doc_id]
-        for document in period.files.documents
-        if document.doc_id in period.reports
-    }
-    return SeriesPeriod(period.files, reports)
-
-
-def render_series(
-    ticker: str, cik: str, entity_name: str, periods: Sequence[SeriesPeriod], generated: datetime
-) -> tuple[date, str]:
-    """The as-of date and the Markdown series of ``periods`` (every period whose 10-K or 10-Q is
-    in ``raw/``), generated at ``generated``; ``ValueError`` when none is complete."""
-    ordered = sorted(
-        (_ordered(period) for period in periods), key=lambda period: period.files.day, reverse=True
+def _baselines_line(listing: Seasons, files: SeasonFiles) -> str:
+    named = []
+    kinds: tuple[Baseline, ...] = (
+        "previous quarter",
+        "same quarter last year",
+        "previous 10-K",
+        "previous proxy",
     )
-    as_of = report_as_of(ordered)
-    complete = [period for period in ordered if period.status == "complete"]
-    days = ", ".join(period.files.day.isoformat() for period in complete)
+    for kind in kinds:
+        seasons = baseline_seasons(listing, files.season, kind)
+        named.append(f"{kind} {seasons[0].period if seasons else 'none listed'}")
+    return "Baselines: " + "; ".join(named) + "."
+
+
+def render_report(
+    ticker: str,
+    cik: str,
+    entity_name: str,
+    listing: Seasons,
+    files: SeasonFiles,
+    measures: Measures,
+    readings: Readings,
+    generated_at: datetime,
+) -> str:
+    """The season's report (module docstring)."""
+    own = files.season.filing
+    found = entries(measures, readings)
+    call = files.call
+    as_of = "" if call.as_of is None else f" as of the calls list of {call.as_of}"
     lines = [
-        f"# {ticker} · {TITLE} · as of {as_of.isoformat()}",
+        f"# {ticker} · {files.day} · season report",
         "",
-        f"{GENERATED}{et_display(generated)}.",
+        f"{GENERATED}{et_display(to_eastern(generated_at, 'generated_at'))}.",
         "",
-        printable(
-            f"{entity_name}, CIK {cik}. {len(complete)} of {len(ordered)} periods with documents in raw/ "
-            f"are complete: {days}. As of {as_of.isoformat()}, the filing date of the newest filing or "
-            "exhibit of the complete periods."
-        ),
+        f"Issuer: {entity_name} (CIK {cik}). Season: the {own.form} for the period ended {own.period} "
+        f"(accession {own.accession}, filed {own.filed}). Call: {call.status}{as_of}.",
+        _baselines_line(listing, files),
         "",
+        score_line(found),
+        "",
+        "## Triggered",
+        "",
+        *_triggered(found),
     ]
-    for period in complete:
-        lines.extend(_period_lines(period))
-    lines.extend(["## Coverage", "", *_coverage_lines(ordered), ""])
-    return as_of, "\n".join(lines)
+    for number in SECTIONS:
+        lines.extend(["", *_section(number, found)])
+    return "\n".join(lines) + "\n"
+
+
+def report_name(moment: datetime) -> str:
+    """A report's file name: ``report_{TOKEN}.md``, the token naming ``moment``."""
+    return stamped(REPORT_PREFIX, moment, ".md")
+
+
+def report_files(directory: Path) -> list[Path]:
+    """The season's report files in ``directory``, whatever their token."""
+    return [path for path in listed(directory, ".md") if _REPORT_NAME.fullmatch(path.name)]
+
+
+def newest_report(directory: Path, now: datetime) -> Path | None:
+    """The report whose token names the latest instant not after ``now``, or None."""
+    moment = to_eastern(now, "now")
+    best: tuple[datetime, Path] | None = None
+    for path in report_files(directory):
+        instant = name_instant(path.name)
+        if instant is None or instant > moment:
+            continue
+        if best is None or instant > best[0]:
+            best = (instant, path)
+    return None if best is None else best[1]
+
+
+def _without_generated(text: str) -> list[str]:
+    return [line for line in text.splitlines() if not line.startswith(GENERATED)]
+
+
+def same_report(held: str, rendered: str) -> bool:
+    """Whether two reports are equal apart from their ``Generated`` line."""
+    return _without_generated(held) == _without_generated(rendered)
+
+
+def ranking(rows: Iterable[tuple[str, str, Sequence[Entry], str]]) -> list[str]:
+    """The ranking ``show`` prints: per ticker its newest season's score, highest first; ``rows``
+    are (ticker, season, entries, report path)."""
+    ordered = sorted(rows, key=lambda row: (-season_score(row[2]), row[0]))
+    lines = [
+        "| Ticker | Season | Score | red | yellow | grey | Report |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for ticker, season, found, path in ordered:
+        levels = [entry.level for entry in found]
+        lines.append(
+            f"| {ticker} | {season} | {season_score(found)} | {levels.count('red')} | "
+            f"{levels.count('yellow')} | {levels.count('grey')} | {path} |"
+        )
+    return lines

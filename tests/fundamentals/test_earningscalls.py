@@ -27,6 +27,7 @@ from market_state_research.fundamentals.script.earningscalls import (
     LimitReached,
     Transcript,
     TranscriptTurn,
+    Turn,
     allowed_url,
     call_text,
     check_api_key,
@@ -648,6 +649,34 @@ def test_a_transcript_header_may_write_its_time_with_milliseconds():
     assert parse_transcript(body, Q2_EVENT).at == Q2_EVENT.at
 
 
+def test_a_transcript_gives_the_calls_duration_in_seconds_where_the_provider_gives_one():
+    absent = json.loads(transcript_body(CALL_Q2))
+    del absent["data"]["duration_seconds"]
+
+    assert parse_transcript(transcript_body(CALL_Q2), Q2_EVENT).duration_seconds == 3525
+    assert parse_transcript(transcript_body(CALL_Q2, duration_seconds=0), Q2_EVENT).duration_seconds == 0
+    assert (
+        parse_transcript(transcript_body(CALL_Q2, duration_seconds=None), Q2_EVENT).duration_seconds is None
+    )
+    assert parse_transcript(compact(absent), Q2_EVENT).duration_seconds is None
+
+
+@pytest.mark.parametrize(
+    ("duration", "message"),
+    [
+        pytest.param(-1, "Input should be greater than or equal to 0", id="negative"),
+        pytest.param("3525", "Input should be a valid integer", id="text"),
+        pytest.param(3525.5, "Input should be a valid integer", id="fraction"),
+        pytest.param(3525.0, "Input should be a valid integer", id="float"),
+        pytest.param(True, "Input should be a valid integer", id="boolean"),
+    ],
+)
+def test_a_duration_that_is_not_a_whole_number_from_0_is_refused(duration, message):
+    with pytest.raises(ValueError) as caught:
+        parse_transcript(transcript_body(CALL_Q2, duration_seconds=duration), Q2_EVENT)
+    assert str(caught.value) == f"transcript: data.duration_seconds: {message}"
+
+
 # --------------------------------------------------------------------------- derived text
 
 
@@ -688,6 +717,21 @@ def test_a_calls_text_normalises_whitespace_names_and_empty_turns():
         "unknown",
     )
     assert text.text[last.start : last.end] == "Last.\nWords.\nEnd."
+
+
+def test_a_turns_heading_is_its_speaker_then_its_role_in_parentheses():
+    assert Turn(0, 10, "Lip-Bu Tan", "executive").heading == "Lip-Bu Tan (executive)"
+
+    text = call_text(parse_transcript(transcript_body(CALL_Q2), Q2_EVENT))
+
+    assert [text.text[: turn.start].splitlines()[-1] for turn in text.turns] == [
+        turn.heading for turn in text.turns
+    ]
+    assert [turn.heading for turn in text.turns][:3] == [
+        "Operator (operator)",
+        "John Pitzer (executive)",
+        f"{CEO[0]} ({CEO[1]})",
+    ]
 
 
 def test_every_call_of_the_default_capture_has_its_written_text():

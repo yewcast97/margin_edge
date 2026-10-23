@@ -1,10 +1,11 @@
 """Derived text of raw documents, verbatim quote location and whole quotes.
 
-Every research quote is a span of a document's *derived text*: one deterministic
-function of the raw bytes, written as ``data/formatted/{T}/{DOC_ID}.md`` by ``text`` and
-re-derived from ``raw/`` on every read. Derived text holds no whitespace but ``" "`` and ``"\\n"``:
-each line is trimmed, its whitespace runs (NBSP and the other Unicode spaces included)
-are single spaces, empty lines are dropped, and non-empty text ends with one ``"\\n"``.
+Every quote of the bot's readings is a span of a document's *derived text*: one
+deterministic function of the raw bytes, written as ``data/formatted/{T}/{PERIOD}/{DOC_ID}.md``
+by ``derive`` and re-derived from ``raw/`` on every read. Derived text holds no whitespace
+but ``" "`` and ``"\\n"``: each line is trimmed, its whitespace runs (NBSP and the other
+Unicode spaces included) are single spaces, empty lines are dropped, and non-empty text
+ends with one ``"\\n"``.
 Soft hyphens and zero-width characters are removed and the Latin ligatures expanded, so
 a word reads the same however the issuer typeset it; nothing else is folded.
 
@@ -21,6 +22,9 @@ a word reads the same however the issuer typeset it; nothing else is folded.
   markup, and an unclosed element extends to the end of the document.
 - Plain text (old ``.txt`` filings and exhibits, and each turn of an earnings call's
   transcript, ``earningscalls.call_text``): the line normalisation only.
+- XML (a Schedule 13D or 13G filed in EDGAR's XML form): one line per element that holds
+  text, in document order, ``{name}: {text}``, the element's name without its namespace
+  (``xml_text``). A document that declares a document type or an entity is refused.
 
 ``locate`` finds a quote as the agent copied it from the derived text: the quote's
 whitespace runs match any whitespace (a quote may cross a line break), letters match
@@ -33,7 +37,7 @@ derived text.
 
 ``sentence_bounded`` (sentence rule v2) decides whether a located quote is whole
 sentences, or whole lines of a document whose lines are its own blocks, so that no quote
-cuts a statement. It is a research rule over located quotes, not part of any derivation:
+cuts a statement. It is a quote rule over located quotes, not part of any derivation:
 it changes no derived text and no offset. It reads
 a line break in one of two modes. In *layout* mode (a plain-text filing's hard wraps) a
 line break is ordinary whitespace: such lines are wrapped where the page ran out, as
@@ -66,10 +70,10 @@ heading's colon; a lowercase list item after a dash or an asterisk, which are no
 markers (they also mark empty table cells, wrapped clauses and footnotes), reads as a
 statement of its own; and a speaker label is matched as text, so a clause before an
 inline colon at a statement's start, written as the speaker, reads as a label (``check``
-passes a label for a call document only, and research writes as a speaker only the name
-the document gives). It also refuses some whole statements rather than risk a cut: in a
-plain-text filing a sentence after a heading or a running page header without
-punctuation can only be quoted with that heading, and a sentence a page header
+passes as the label the speaker of a call's quote, the name its turn's heading gives). It
+also refuses some whole statements rather than risk a cut: in a plain-text filing a
+sentence after a heading or a running page header without punctuation can only be quoted
+with that heading, and a sentence a page header
 interrupts only with the header inside it, verbatim; a plain-text table row or bullet
 without a full stop only through to the next sentence end; a sentence that starts in
 lowercase (a brand such as "iPhone") not from its start; a sentence followed by one that
@@ -90,11 +94,12 @@ changes either one has the same effect.
 
 import re
 import unicodedata
+import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Final
 
-# Normalised quote length limits (characters), enforced by check (research.quote_problems).
+# Normalised quote length limits (characters), enforced by check (readings.quote_problems).
 QUOTE_MIN = 20
 QUOTE_MAX = 800
 # Sentence ends: a quote starts after one (and whitespace) and may end with one.
@@ -233,6 +238,38 @@ def html_text(body: str) -> str:
     parser.feed(body)
     parser.close()
     return plain_text("".join(parser.parts))
+
+
+def _local_name(element: ElementTree.Element) -> str:
+    return str(element.tag).rpartition("}")[2]
+
+
+def xml_text(data: bytes) -> str:
+    """The derived text of an XML document: per run of text, in document order, a line
+    ``{name}: {text}``, the name its element's without the namespace (the text after a child
+    element is its parent's), then the line normalisation. A document type or entity
+    declaration is refused, so no entity is ever expanded."""
+    upper = data.upper()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        raise ValueError("the XML document declares a document type or an entity")
+    try:
+        root = ElementTree.fromstring(data)
+    except ElementTree.ParseError as error:
+        raise ValueError(f"the XML document is not well-formed: {error}") from None
+    runs = [(_local_name(root), root.text)]
+    stack = [(root, iter(root))]
+    while stack:  # depth first, without recursion: a deep document cannot exhaust the stack
+        element, children = stack[-1]
+        child = next(children, None)
+        if child is None:
+            stack.pop()
+            if stack:
+                runs.append((_local_name(stack[-1][0]), element.tail))
+            continue
+        runs.append((_local_name(child), child.text))
+        stack.append((child, iter(child)))
+    lines = [f"{name}: {words}" for name, text in runs if (words := " ".join((text or "").split()))]
+    return plain_text("\n".join(lines))
 
 
 def normalise(quote: str) -> str:
@@ -412,8 +449,8 @@ def sentence_bounded(
     in lowercase ("U.S. Government", "2025 vs. 2024"), an HTML sentence split across two
     blocks before a capital letter, in layout mode a colon inside a sentence that ends a
     layout line before a capital letter, a lowercase item after a dash or an asterisk,
-    and a clause before an inline colon given as ``label`` still pass, and research must
-    not cut a quote there. A research rule over located quotes, not part of any derivation.
+    and a clause before an inline colon given as ``label`` still pass, and the bot must
+    not cut a quote there. A quote rule over located quotes, not part of any derivation.
 
     Raises ``ValueError`` unless ``0 <= start <= end <= len(derived)``.
     """

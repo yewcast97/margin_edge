@@ -1,4 +1,4 @@
-"""script/filings.py: EDGAR's ticker map, the submissions JSON subset, periods and releases, index pages.
+"""script/filings.py: EDGAR's ticker map, the submissions JSON subset, seasons and their filings, index pages.
 
 Bodies come from ``edgar_support``, laid out as EDGAR serves them (every column of
 ``filings.recent``, newest filing first; filing index pages with both ``tableFile``
@@ -22,18 +22,19 @@ from market_state_research.fundamentals.script.filings import (
     EXHIBIT_PREFIX,
     INDEX_COLUMNS,
     INDEX_TABLE,
-    ITEM_RESULTS,
     MAX_DESCRIPTION,
+    PENDING,
     PRIMARY_DOCUMENT,
     RECENT_COLUMNS,
+    Dated,
     ExhibitRow,
     Filing,
     FilingIndex,
     NoPeriodicFilings,
-    Period,
-    Periods,
     RecentRow,
-    Release,
+    Season,
+    Seasons,
+    Skipped,
     Submissions,
     Window,
     default_window,
@@ -42,7 +43,8 @@ from market_state_research.fundamentals.script.filings import (
     parse_filing_index,
     parse_submissions,
     release_items,
-    select_periods,
+    rendered_document,
+    select_seasons,
 )
 from market_state_research.fundamentals.script.text import html_text
 
@@ -83,7 +85,6 @@ from .edgar_support import (
     RELEASE_RAMP,
     RELEASE_SUPPLY,
     RELEASE_TITLES,
-    RELEASES,
     SCRIPT_TEXT,
     SEGMENTS,
     STYLE_TEXT,
@@ -105,6 +106,7 @@ from .edgar_support import (
     TEN_Q_SUPPLY,
     IndexRow,
     Row,
+    accepted_at,
     commentary_html,
     exhibit_html,
     filing_index_html,
@@ -297,29 +299,37 @@ def failure(call, *arguments) -> str:
 
 
 def filing(row: Row) -> Filing:
-    assert row.form in ("10-K", "10-Q") and row.period is not None
+    assert row.period is not None
     return Filing(row.form, row.accession, row.filed, row.period, row.primary_document)
 
 
-def release(row: Row) -> Release:
-    assert row.form == "8-K" and row.period is not None
-    return Release(row.accession, row.filed, row.period, row.items)
+def dated(row: Row) -> Dated:
+    """The filing ``row`` as Rule B dates it: an 8-K or a Form 4 by its report date, any other form
+    by its filing date."""
+    day = row.period if row.form in ("8-K", "4") else row.filed
+    assert day is not None
+    return Dated(row.form, row.accession, row.filed, day, row.items, row.primary_document)
 
 
 def recent_row(row: Row) -> RecentRow:
     return RecentRow(row.form, row.accession, row.filed, row.period, row.primary_document, row.items)
 
 
+def parsed_row(row: Row) -> RecentRow:
+    """The row as ``parse_submissions`` reads it from ``submissions_json``: with its acceptance time."""
+    return replace(recent_row(row), accepted=accepted_at(row))
+
+
 def submissions(*rows: Row) -> Submissions:
     return Submissions(cik=CIK, entity_name=ENTITY_NAME, recent=tuple(recent_row(row) for row in rows))
 
 
-def periods_of(*rows: Row) -> Periods:
-    return select_periods(submissions(*rows))
+def seasons_of(*rows: Row) -> Seasons:
+    return select_seasons(submissions(*rows))
 
 
-def releases_by_period(periods: Periods) -> dict[date, tuple[Release, ...]]:
-    return {period.period: period.releases for period in periods.periods}
+def placed(seasons: Seasons) -> dict[date, tuple[Dated, ...]]:
+    return {season.period: season.filings for season in seasons.seasons}
 
 
 def eight_k(number: int, filed: date, event: date | None, items: str = "2.02,9.01", form: str = "8-K") -> Row:
@@ -581,7 +591,7 @@ def test_entry_keys_never_need_to_count_from_zero():
 
 def test_parse_keeps_every_recent_row_in_edgar_order():
     parsed = parse_submissions(submissions_json(), CIK)
-    assert parsed == Submissions(cik=CIK, entity_name=ENTITY_NAME, recent=tuple(map(recent_row, RECENT)))
+    assert parsed == Submissions(cik=CIK, entity_name=ENTITY_NAME, recent=tuple(map(parsed_row, RECENT)))
     assert parsed.recent[PROXY_ROW].period is None  # an empty reportDate
     assert parsed.recent[FORM_4_ROW].primary_document == "xslF345X05/wk-form4_1754251234.xml"
 
@@ -591,13 +601,13 @@ def test_columns_and_keys_the_domain_does_not_read_are_ignored():
         recent = document["filings"]["recent"]
         recent["size"] = PRIVATE
         recent["isXBRL"] = [None]
-        del recent["acceptanceDateTime"]
+        del recent["core_type"]
         recent[PRIVATE] = {PRIVATE: [1.5, None, 10**40]}
         del document["filings"]["files"]
         document["tickers"] = PRIVATE
         del document["sic"]
 
-    assert parse_submissions(changed(change), CIK).recent == tuple(map(recent_row, RECENT))
+    assert parse_submissions(changed(change), CIK).recent == tuple(map(parsed_row, RECENT))
 
 
 def test_empty_recent_columns_give_no_rows():
@@ -833,7 +843,7 @@ def test_other_forms_keep_any_primary_document_and_period():
         Row("8-K", "0000050863-26-000072", date(2026, 8, 3), date(2026, 8, 4), "../x"),
         TEN_K,
     )
-    assert parse_submissions(submissions_json(rows=rows), CIK).recent == tuple(map(recent_row, rows))
+    assert parse_submissions(submissions_json(rows=rows), CIK).recent == tuple(map(parsed_row, rows))
 
 
 def test_the_items_column_is_read_and_kept_as_edgar_writes_it():
@@ -883,36 +893,56 @@ def test_rejected_cells_are_named_by_column_and_row_but_never_echoed(column, ind
     assert message.startswith(f"{PREFIX}filings.recent.{column}[{index}] ")
 
 
-# --------------------------------------------------------------------------- periods
+# --------------------------------------------------------------------------- seasons
 
 
-def test_every_exact_10_k_and_10_q_is_a_period_oldest_first():
-    periods = select_periods(parse_submissions(submissions_json(), CIK))
-    assert periods == Periods(
-        periods=(
-            Period(filing(OLD_TEN_K), ()),
-            Period(filing(OLD_TEN_Q), ()),
-            Period(filing(TEN_K), ()),
-            Period(filing(TEN_Q_1), (release(EIGHT_K_Q1),)),
-            Period(filing(TEN_Q_2), (release(EIGHT_K_Q2),)),
-        ),
-        pending=(),
-        oldest_filed=OLD_TEN_K.filed,
-    )
-    assert [period.period for period in periods.periods] == [
+def test_every_exact_10_k_and_10_q_is_a_season_oldest_first_with_its_filings():
+    seasons = select_seasons(parse_submissions(submissions_json(), CIK))
+    assert [season.filing.accession for season in seasons.seasons] == [
+        row.accession for row in (OLD_TEN_K, OLD_TEN_Q, TEN_K, TEN_Q_1, TEN_Q_2)
+    ]
+    assert [season.period for season in seasons.seasons] == [
         date(2024, 12, 28),
         date(2025, 9, 27),
         TEN_K_PERIOD,
         date(2026, 3, 28),
         TEN_Q_PERIOD,
     ]
+    by_season = {day: [item.accession for item in items] for day, items in placed(seasons).items()}
+    # The 8-K of 2026-02-09 and the proxy filed 2026-03-27 fall after the 10-K's period end and
+    # before the first quarter's; each release in its quarter; the Form 4 dated 2026-07-30 after
+    # the newest 10-Q was filed (2026-07-24) is pending.
+    assert by_season == {
+        date(2024, 12, 28): [],
+        date(2025, 9, 27): [],
+        TEN_K_PERIOD: [EIGHT_K_OTHER.accession, PROXY.accession],
+        date(2026, 3, 28): [EIGHT_K_Q1.accession],
+        TEN_Q_PERIOD: [EIGHT_K_Q2.accession],
+    }
+    assert [item.accession for item in seasons.pending] == [FORM_4.accession]
+    assert seasons.skipped == () and seasons.oldest_filed == OLD_TEN_K.filed
 
 
-def test_row_order_does_not_change_the_selected_periods():
-    expected = periods_of(*RECENT)
-    assert periods_of(*reversed(RECENT)) == expected
-    assert periods_of(*RECENT[3:], *RECENT[:3]) == expected
-    assert periods_of(*LATER_RECENT) == periods_of(*reversed(LATER_RECENT))
+def test_the_seasons_from_hand_built_rows_are_exact_values():
+    assert seasons_of(*RECENT) == Seasons(
+        seasons=(
+            Season(filing(OLD_TEN_K), ()),
+            Season(filing(OLD_TEN_Q), ()),
+            Season(filing(TEN_K), (dated(EIGHT_K_OTHER), dated(PROXY))),
+            Season(filing(TEN_Q_1), (dated(EIGHT_K_Q1),)),
+            Season(filing(TEN_Q_2), (dated(EIGHT_K_Q2),)),
+        ),
+        pending=(dated(FORM_4),),
+        skipped=(),
+        oldest_filed=OLD_TEN_K.filed,
+    )
+
+
+def test_row_order_does_not_change_the_selected_seasons():
+    expected = seasons_of(*RECENT)
+    assert seasons_of(*reversed(RECENT)) == expected
+    assert seasons_of(*RECENT[3:], *RECENT[:3]) == expected
+    assert seasons_of(*LATER_RECENT) == seasons_of(*reversed(LATER_RECENT))
 
 
 @pytest.mark.parametrize(
@@ -932,10 +962,13 @@ def test_row_order_does_not_change_the_selected_periods():
         "10-Q ",
     ],
 )
-def test_only_exact_10_k_and_10_q_rows_are_periods(form):
+def test_only_exact_10_k_and_10_q_rows_are_seasons(form):
     same = Row(form, "0000050863-26-000080", date(2026, 8, 10), TEN_Q_PERIOD, "intc-amend.htm")
     new = Row(form, "0000050863-26-000081", date(2026, 8, 11), date(2026, 7, 31), "intc-other.htm")
-    assert periods_of(same, new, *RECENT) == periods_of(*RECENT)
+    found = seasons_of(same, new, *RECENT)
+    assert [season.filing for season in found.seasons] == [
+        season.filing for season in seasons_of(*RECENT).seasons
+    ]
 
 
 @pytest.mark.parametrize(
@@ -946,9 +979,9 @@ def test_only_exact_10_k_and_10_q_rows_are_periods(form):
         pytest.param(replace(OLD_TEN_Q, accession="0000050863-25-000202", filed=date(2025, 11, 3)), id="old"),
     ],
 )
-def test_two_filings_for_one_period_are_refused_wherever_they_are_listed(repeat):
+def test_two_filings_for_one_season_are_refused_wherever_they_are_listed(repeat):
     assert repeat.period is not None
-    message = failure(select_periods, submissions(repeat, *RECENT))
+    message = failure(select_seasons, submissions(repeat, *RECENT))
     assert message == f"{PREFIX}two filings report the period {repeat.period.isoformat()}"
 
 
@@ -959,7 +992,7 @@ def test_of_several_repeated_periods_the_oldest_is_named():
     )
     for rows in ((*repeats, *RECENT), (*RECENT, *reversed(repeats))):
         assert (
-            failure(select_periods, submissions(*rows)) == f"{PREFIX}two filings report the period 2024-12-28"
+            failure(select_seasons, submissions(*rows)) == f"{PREFIX}two filings report the period 2024-12-28"
         )
 
 
@@ -972,7 +1005,7 @@ def test_no_periodic_filing_names_the_count_and_the_forms_seen():
         EIGHT_K_Q1,
     )
     with pytest.raises(NoPeriodicFilings) as caught:
-        periods_of(*rows)
+        seasons_of(*rows)
     assert isinstance(caught.value, ValueError)
     assert str(caught.value) == (
         "no 10-K or 10-Q among the 5 recent filings; forms seen: 10-K/A, 10-Q/A, 8-K, NT 10-Q"
@@ -981,7 +1014,7 @@ def test_no_periodic_filing_names_the_count_and_the_forms_seen():
 
 def test_no_periodic_filing_among_no_filings():
     with pytest.raises(NoPeriodicFilings) as caught:
-        periods_of()
+        seasons_of()
     assert str(caught.value) == "no 10-K or 10-Q among the 0 recent filings; forms seen: none"
 
 
@@ -991,7 +1024,7 @@ def test_the_forms_seen_are_cut_to_two_hundred_characters_on_one_line():
         for number in range(60)
     ]
     with pytest.raises(NoPeriodicFilings) as caught:
-        periods_of(*rows)
+        seasons_of(*rows)
     message = str(caught.value)
     assert "\n" not in message
     listed = ", ".join(sorted(row.form for row in rows))[:200]
@@ -1002,18 +1035,21 @@ def test_the_forms_seen_are_cut_to_two_hundred_characters_on_one_line():
 
 def test_a_hand_built_filing_row_without_a_period_is_refused():
     with pytest.raises(ValueError) as caught:
-        periods_of(replace(TEN_K, period=None))
-    assert str(caught.value) == "a period's filing must be a 10-K or 10-Q row with a period"
+        seasons_of(replace(TEN_K, period=None))
+    assert str(caught.value) == "a season's filing must be a 10-K or 10-Q row with a period"
 
 
-def test_a_period_is_found_by_its_end_date():
-    periods = periods_of(*RECENT)
-    found = periods.get(date(2026, 3, 28))
-    assert found is not None
-    assert found.filing == filing(TEN_Q_1)
-    assert found.period == TEN_Q_1.period
-    assert periods.get(date(2026, 3, 27)) is None
-    assert periods.get(TEN_Q_1.filed) is None  # a filing date is not a period
+def test_a_season_is_found_by_its_end_date_and_its_predecessors_newest_first():
+    seasons = seasons_of(*RECENT)
+    found = seasons.get(date(2026, 3, 28))
+    assert found is not None and found.filing == filing(TEN_Q_1) and found.period == TEN_Q_1.period
+    assert seasons.get(date(2026, 3, 27)) is None
+    assert seasons.get(TEN_Q_1.filed) is None  # a filing date is not a season
+    assert seasons.index(TEN_Q_PERIOD) == 4 and seasons.index(date(2026, 3, 27)) is None
+    newest = seasons.seasons[-1]
+    assert [season.period for season in seasons.before(newest, 2)] == [date(2026, 3, 28), TEN_K_PERIOD]
+    assert seasons.before(seasons.seasons[0], 4) == ()
+    assert len(seasons.before(newest, 10)) == 4
 
 
 # --------------------------------------------------------------------------- windows
@@ -1055,14 +1091,14 @@ def test_the_default_window_is_the_two_years_up_to_today(today, start):
     assert default_window(today) == Window(start, today)
 
 
-def test_the_window_selects_periods_by_their_end_date_oldest_first():
-    periods = periods_of(*RECENT)
-    assert [period.filing for period in periods.within(WINDOW)] == [
+def test_the_window_selects_seasons_by_their_end_date_oldest_first():
+    seasons = seasons_of(*RECENT)
+    assert [season.filing for season in seasons.within(WINDOW)] == [
         filing(TEN_K),
         filing(TEN_Q_1),
         filing(TEN_Q_2),
     ]
-    assert periods.within(default_window(TODAY)) == periods.periods  # 2024-10-08 to 2026-10-08
+    assert seasons.within(default_window(TODAY)) == seasons.seasons  # 2024-10-08 to 2026-10-08
 
 
 @pytest.mark.parametrize(
@@ -1078,23 +1114,9 @@ def test_the_window_selects_periods_by_their_end_date_oldest_first():
     ],
 )
 def test_the_window_boundaries_are_inclusive(window, expected):
-    assert [period.filing for period in periods_of(*RECENT).within(window)] == [
+    assert [season.filing for season in seasons_of(*RECENT).within(window)] == [
         filing(row) for row in expected
     ]
-
-
-@pytest.mark.parametrize(
-    "window",
-    [
-        pytest.param(Window(TEN_Q_PERIOD + timedelta(days=1), TODAY), id="after-the-newest"),
-        pytest.param(Window(date(2020, 1, 1), date(2024, 12, 27)), id="before-the-oldest"),
-        pytest.param(Window(date(2025, 10, 1), date(2025, 12, 26)), id="between-two"),
-    ],
-)
-def test_a_window_without_periods_selects_nothing(window):
-    periods = periods_of(*RECENT)
-    assert periods.within(window) == ()
-    assert len(periods.periods) == 5  # the periods stay listed
 
 
 @pytest.mark.parametrize(
@@ -1107,20 +1129,20 @@ def test_a_window_without_periods_selects_nothing(window):
     ],
 )
 def test_a_window_before_the_oldest_recent_filing_is_reported_truncated(start, truncated):
-    periods = periods_of(*RECENT)
-    assert periods.oldest_filed == OLD_TEN_K.filed
-    assert periods.truncated(Window(start, TODAY)) is truncated
+    seasons = seasons_of(*RECENT)
+    assert seasons.oldest_filed == OLD_TEN_K.filed
+    assert seasons.truncated(Window(start, TODAY)) is truncated
 
 
 def test_the_oldest_recent_filing_of_any_form_bounds_the_listing():
-    old = Row("4", "0001209191-24-000001", date(2024, 6, 3), None, "form4.xml")
-    periods = periods_of(*RECENT, old)
-    assert periods.oldest_filed == date(2024, 6, 3)
-    assert not periods.truncated(Window(date(2024, 10, 8), TODAY))
-    assert Periods(periods=(), pending=(), oldest_filed=None).truncated(WINDOW)
+    old = Row("13F-HR", "0001209191-24-000001", date(2024, 6, 3), None, "form.xml")
+    seasons = seasons_of(*RECENT, old)
+    assert seasons.oldest_filed == date(2024, 6, 3)
+    assert not seasons.truncated(Window(date(2024, 10, 8), TODAY))
+    assert Seasons(seasons=(), pending=(), skipped=(), oldest_filed=None).truncated(WINDOW)
 
 
-# --------------------------------------------------------------------------- releases
+# --------------------------------------------------------------------------- the filings of a season
 
 
 @pytest.mark.parametrize(
@@ -1128,10 +1150,10 @@ def test_the_oldest_recent_filing_of_any_form_bounds_the_listing():
     [
         ("2.02,9.01", ("2.02", "9.01")),
         (" 2.02 , 9.01 ", ("2.02", "9.01")),
-        ("2.02,,9.01,", ("2.02", "9.01")),
+        ("2.02", ("2.02",)),
         ("", ()),
-        (" , ", ()),
-        ("2.02;9.01", ("2.02;9.01",)),
+        (",,", ()),
+        ("5.02,,9.01", ("5.02", "9.01")),
     ],
 )
 def test_release_items_are_split_on_commas_stripped_and_never_empty(items, parts):
@@ -1142,224 +1164,197 @@ def test_release_items_are_split_on_commas_stripped_and_never_empty(items, parts
     ("items", "is_release"),
     [
         ("2.02,9.01", True),
-        ("9.01,2.02", True),
+        ("9.01, 2.02", True),
         ("2.02", True),
-        ("2.02 ", True),
-        (" 2.02 , 9.01", True),
-        ("7.01,2.02,9.01", True),
-        ("12.02", False),
-        ("2.020", False),
-        ("2.02.1", False),
-        ("2,02", False),
-        ("2.02;9.01", False),
-        ("7.01,9.01", False),
-        ("", False),
+        ("12.02,9.01", False),
+        ("2.021", False),
+        ("5.02", False),
     ],
 )
 def test_an_8_k_is_a_release_only_when_its_items_name_item_2_02_exactly(items, is_release):
-    row = eight_k(50, date(2026, 5, 14), date(2026, 5, 14), items)
-    periods = periods_of(row, *RECENT)
-    q1 = periods.get(TEN_Q_1.period)
-    assert q1 is not None
-    assert (release(row) in q1.releases) is is_release
-    assert periods.pending == ()
-    assert ITEM_RESULTS == "2.02"
+    season = seasons_of(TEN_K, TEN_Q_1, eight_k(30, date(2026, 2, 10), date(2026, 2, 10), items)).seasons[0]
+    assert [item.release for item in season.filings] == [is_release]
+    assert len(season.releases) == int(is_release) and len(season.eight_ks) == 1
 
 
-@pytest.mark.parametrize("form", ["8-K/A", "8-K12G3", "8-K12B", "8-k", " 8-K", "8-K ", "6-K"])
-def test_only_an_exact_8_k_can_be_a_release(form):
-    inside = eight_k(50, date(2026, 5, 14), date(2026, 5, 14), form=form)
-    after = eight_k(51, date(2026, 8, 20), date(2026, 8, 20), form=form)
-    assert periods_of(inside, after, *RECENT) == periods_of(*RECENT)
-
-
-def test_a_release_row_must_name_its_event_date():
-    rows = (FORM_4, eight_k(70, date(2026, 8, 1), None), *RECENT[1:])
-    parsed = parse_submissions(submissions_json(rows=rows), CIK)  # an 8-K may omit its reportDate
-    assert failure(select_periods, parsed) == (
-        f"{PREFIX}filings.recent.reportDate[1] is empty; an 8-K with Item 2.02 must name its event date"
+def test_an_8_k_and_a_form_4_are_dated_by_their_report_date_every_other_form_by_its_filing_date():
+    proxy = Row("DEF 14A", "0000050863-26-000061", date(2026, 3, 23), date(2026, 5, 13), "proxy2026.htm")
+    holder = Row(
+        "SCHEDULE 13G/A",
+        "0000102909-26-000197",
+        date(2026, 1, 30),
+        None,
+        "xslSCHEDULE_13G_X01/primary_doc.xml",
     )
-    without = (FORM_4, eight_k(70, date(2026, 8, 1), None, "5.02,9.01"), *RECENT[1:])
-    assert select_periods(parse_submissions(submissions_json(rows=without), CIK)) == periods_of(*RECENT)
-
-
-def test_a_release_cannot_report_an_event_after_its_filing():
-    same_day = eight_k(50, date(2026, 5, 14), date(2026, 5, 14))
-    later = eight_k(50, date(2026, 5, 14), date(2026, 5, 15))
-    assert release(same_day) in releases_by_period(periods_of(same_day, *RECENT))[TEN_Q_1.period]
-    assert failure(select_periods, submissions(*RECENT, later)) == (
-        f"{PREFIX}filings.recent.reportDate[{len(RECENT)}] is after the 8-K's filing date"
-    )
-
-
-def test_a_release_is_attached_to_the_period_it_reports_on():
-    attached = releases_by_period(periods_of(*RECENT))
-    assert attached == {
-        OLD_TEN_K.period: (),
-        OLD_TEN_Q.period: (),
-        TEN_K_PERIOD: (),  # the officers' 8-K filed after it names no Item 2.02
-        TEN_Q_1.period: (release(EIGHT_K_Q1),),
-        TEN_Q_PERIOD: (release(EIGHT_K_Q2),),
+    old_holder = Row("SC 13G/A", "0001104659-26-021208", date(2026, 2, 13), None, "tv01202-intelcorp.htm")
+    insider = Row("4", "0000050863-26-000086", date(2026, 2, 3), date(2026, 1, 30), "xslF345X05/form4.xml")
+    notice = Row("NT 10-Q", "0000050863-26-000099", date(2026, 5, 7), None, "nt10q.htm")
+    shelf = Row("S-3ASR", "0000050863-26-000023", date(2026, 1, 23), None, "forms-3asr.htm")
+    ignored = Row("13F-HR", "0000050863-26-000024", date(2026, 2, 14), None, "form13f.xml")
+    seasons = seasons_of(TEN_K, TEN_Q_1, TEN_Q_2, proxy, holder, old_holder, insider, notice, shelf, ignored)
+    found = {
+        item.accession: (item.dated, season.period) for season in seasons.seasons for item in season.filings
     }
-    assert RELEASES == {"index_1": EIGHT_K_Q1, "index_2": EIGHT_K_Q2}
-    assert EIGHT_K_OTHER.items == "5.02,9.01"
+    assert found == {
+        proxy.accession: (
+            date(2026, 3, 23),
+            TEN_K_PERIOD,
+        ),  # its reportDate is the meeting's: after its filing
+        holder.accession: (date(2026, 1, 30), TEN_K_PERIOD),
+        old_holder.accession: (date(2026, 2, 13), TEN_K_PERIOD),
+        insider.accession: (date(2026, 1, 30), TEN_K_PERIOD),
+        notice.accession: (date(2026, 5, 7), date(2026, 3, 28)),
+        shelf.accession: (date(2026, 1, 23), TEN_K_PERIOD),
+    }
+    season = seasons.get(TEN_K_PERIOD)
+    assert season is not None
+    assert [item.form for item in season.fetched] == ["SCHEDULE 13G/A", "4", "SC 13G/A", "DEF 14A"]
+    assert [item.form for item in season.of_forms(("S-3ASR", "DEF 14A"))] == ["S-3ASR", "DEF 14A"]
+
+
+def test_an_item_2_02_8_k_without_its_event_date_makes_the_ticker_unsupported():
+    message = failure(select_seasons, submissions(eight_k(30, date(2026, 2, 10), None), *RECENT))
+    assert message == (
+        f"{PREFIX}filings.recent.reportDate[0] is empty; an 8-K with Item 2.02 must name its event date"
+    )
+    late = eight_k(31, date(2026, 2, 10), date(2026, 2, 11))
+    assert failure(select_seasons, submissions(late, *RECENT)) == (
+        f"{PREFIX}filings.recent.reportDate[0] is after the 8-K's filing date; an 8-K with Item 2.02 "
+        "must name its event date"
+    )
+
+
+def test_a_row_without_the_date_or_document_it_needs_is_skipped_and_listed():
+    undated = eight_k(30, date(2026, 2, 10), None, "5.02,9.01")
+    late_form4 = Row("4", "0000050863-26-000087", date(2026, 2, 3), date(2026, 2, 4), "xslF345X05/form4.xml")
+    pathlike = Row("DEF 14A", "0000050863-26-000088", date(2026, 3, 1), None, "../proxy.htm")
+    seasons = seasons_of(undated, late_form4, pathlike, *RECENT)
+    assert seasons.skipped == (
+        Skipped("8-K", undated.accession, undated.filed, "its reportDate is empty"),
+        Skipped("4", late_form4.accession, late_form4.filed, "its reportDate is after the 4's filing date"),
+        Skipped(
+            "DEF 14A", pathlike.accession, pathlike.filed, "its primaryDocument is no file fetch can request"
+        ),
+    )
+    assert placed(seasons) == placed(seasons_of(*RECENT))
 
 
 @pytest.mark.parametrize(
-    ("event", "period"),
+    ("primary", "raw"),
     [
-        pytest.param(date(2026, 3, 28), TEN_K_PERIOD, id="on-a-period-end"),
-        pytest.param(date(2026, 3, 29), date(2026, 3, 28), id="the-day-after-a-period-end"),
-        pytest.param(TEN_Q_PERIOD, date(2026, 3, 28), id="on-the-next-period-end"),
-        pytest.param(date(2025, 12, 28), TEN_K_PERIOD, id="the-day-after-the-year-end"),
+        ("intc-20260627.htm", "intc-20260627.htm"),
+        ("xslF345X06/form4.xml", "form4.xml"),
+        ("xslSCHEDULE_13G_X02/primary_doc.xml", "primary_doc.xml"),
+        ("wk-form4_1754251234.xml", "wk-form4_1754251234.xml"),
+        ("xslF345X06/../form4.xml", None),
+        ("other/form4.xml", None),
+        ("xslF345X06/sub/form4.xml", None),
+        ("", None),
     ],
 )
-def test_a_release_dated_on_a_period_end_belongs_to_the_period_before_it(event, period):
-    row = eight_k(50, event + timedelta(days=2), event)
-    attached = releases_by_period(periods_of(row, *RECENT))
-    assert [day for day, releases in attached.items() if release(row) in releases] == [period]
+def test_a_rendered_primary_document_names_the_raw_file_in_the_filings_folder(primary, raw):
+    assert rendered_document(primary) == raw
 
 
-def test_an_item_2_02_8_k_filed_after_its_periods_10_q_is_still_attached_to_that_period():
-    late = eight_k(50, date(2026, 5, 20), date(2026, 5, 19))  # after TEN_Q_1's filing on 2026-04-24
-    periods = periods_of(late, *RECENT)
-    assert releases_by_period(periods)[TEN_Q_1.period] == (release(EIGHT_K_Q1), release(late))
-    assert periods.pending == ()
+def test_a_dated_filing_names_its_raw_document():
+    item = dated(FORM_4)
+    assert item.document == "wk-form4_1754251234.xml" and item.fetched and not item.release
+    with pytest.raises(ValueError, match="no primary document"):
+        _ = replace(item, primary_document="a/b/c").document
 
 
-def test_a_release_of_the_newest_period_is_attached_up_to_its_10_q_filing_date():
-    on_filing = eight_k(50, TEN_Q_2.filed, TEN_Q_2.filed)
-    after_filing = eight_k(51, TEN_Q_2.filed + timedelta(days=1), TEN_Q_2.filed + timedelta(days=1))
-    periods = periods_of(on_filing, after_filing, *RECENT)
-    assert releases_by_period(periods)[TEN_Q_PERIOD] == (release(EIGHT_K_Q2), release(on_filing))
-    assert periods.pending == (release(after_filing),)
+# --------------------------------------------------------------------------- Rule B
 
 
-def test_a_release_after_the_newest_listed_period_is_pending_until_its_filing_is_listed():
-    pending = periods_of(*PENDING_RECENT)
-    assert pending.periods == periods_of(*RECENT).periods
-    assert pending.pending == (release(EIGHT_K_Q3),)
-    later = periods_of(*LATER_RECENT)
+def test_a_filing_is_placed_in_the_latest_season_ending_before_its_date():
+    seasons = seasons_of(*RECENT)
+    assert seasons.place(date(2026, 3, 29)) == seasons.get(date(2026, 3, 28))
+    assert seasons.place(date(2026, 3, 28)) == seasons.get(TEN_K_PERIOD)  # a period end belongs before it
+    assert seasons.place(TEN_Q_2.filed) == seasons.get(TEN_Q_PERIOD)  # the newest, up to its filing date
+    assert seasons.place(TEN_Q_2.filed + timedelta(days=1)) == PENDING
+    assert seasons.place(OLD_TEN_K.period) is None  # on or before the oldest listed season end: dropped
+
+
+def test_a_pending_filing_joins_its_season_once_a_later_one_is_listed():
+    seasons = seasons_of(*PENDING_RECENT)
+    assert [item.accession for item in seasons.pending] == [FORM_4.accession, EIGHT_K_Q3.accession]
+    later = seasons_of(*LATER_RECENT)
+    # The Form 4 of 2026-07-30 now belongs to the second quarter; the release of 2026-10-06 to the third.
+    assert [item.accession for item in placed(later)[TEN_Q_PERIOD]] == [
+        EIGHT_K_Q2.accession,
+        FORM_4.accession,
+    ]
+    assert [item.accession for item in placed(later)[date(2026, 9, 26)]] == [EIGHT_K_Q3.accession]
     assert later.pending == ()
-    assert later.periods[-1] == Period(filing(TEN_Q_3), (release(EIGHT_K_Q3),))
-    assert later.periods[:-1] == pending.periods
 
 
 @pytest.mark.parametrize(
     "window",
     [
-        pytest.param(WINDOW, id="to-today"),
-        pytest.param(Window(WINDOW.start, date(2026, 10, 6)), id="to-its-event-date"),
-        pytest.param(Window(WINDOW.start, date(2026, 10, 5)), id="to-the-day-before-its-event"),
-        pytest.param(Window(WINDOW.start, TEN_Q_PERIOD), id="to-the-newest-period-end"),
-        pytest.param(Window(date(2026, 10, 7), TODAY), id="from-after-its-event"),
+        pytest.param(WINDOW, id="window"),
+        pytest.param(Window(TEN_Q_PERIOD, TEN_Q_PERIOD), id="on-the-newest-end"),
     ],
 )
-def test_every_pending_release_is_listed_for_a_window_ending_on_or_after_the_newest_period_end(window):
-    # A pending release joins the newest listed period or a later one, whatever its own date.
-    periods = periods_of(*PENDING_RECENT)
-    assert periods.periods[-1].period == TEN_Q_PERIOD
-    assert periods.pending_in(window) == (release(EIGHT_K_Q3),)
+def test_every_pending_filing_is_listed_for_a_window_ending_on_or_after_the_newest_season_end(window):
+    seasons = seasons_of(*PENDING_RECENT)
+    assert seasons.pending_in(window) == seasons.pending
 
 
-@pytest.mark.parametrize(
-    "window",
-    [
-        pytest.param(Window(WINDOW.start, TEN_Q_PERIOD - timedelta(days=1)), id="to-the-day-before"),
-        pytest.param(Window(TEN_K_PERIOD, TEN_K_PERIOD), id="an-older-period-only"),
-    ],
-)
-def test_no_pending_release_is_listed_for_a_window_ending_before_the_newest_period_end(window):
-    assert periods_of(*PENDING_RECENT).pending_in(window) == ()
+def test_no_pending_filing_is_listed_for_a_window_ending_before_the_newest_season_end():
+    seasons = seasons_of(*PENDING_RECENT)
+    assert seasons.pending_in(Window(WINDOW.start, TEN_Q_PERIOD - timedelta(days=1))) == ()
+    assert Seasons(seasons=(), pending=(), skipped=(), oldest_filed=None).pending_in(WINDOW) == ()
 
 
-def test_a_window_lists_no_pending_release_when_none_is_pending_or_no_period_is_listed():
-    assert periods_of(*RECENT).pending_in(WINDOW) == ()
-    # Built by hand: without a listed period no release can be pending for any window.
-    assert Periods(periods=(), pending=(release(EIGHT_K_Q3),), oldest_filed=None).pending_in(WINDOW) == ()
-
-
-def test_a_release_furnished_after_the_newest_10_q_is_listed_pending_then_joins_that_period():
-    # Dated after TEN_Q_2's filing (2026-07-24) and before the next quarter ends (2026-09-26).
-    update = eight_k(75, date(2026, 8, 15), date(2026, 8, 15))
-    before_its_date = Window(date(2026, 6, 1), date(2026, 8, 1))  # admits the newest period only
-    periods = periods_of(update, *RECENT)
-    assert periods.pending == (release(update),)
-    assert [period.period for period in periods.within(before_its_date)] == [TEN_Q_PERIOD]
-    assert periods.pending_in(before_its_date) == (release(update),)
-    # Once the next quarter is listed, the release joins the period the window admitted.
-    later = periods_of(TEN_Q_3, update, *RECENT)
-    assert later.pending == ()
-    assert releases_by_period(later)[TEN_Q_PERIOD] == (release(EIGHT_K_Q2), release(update))
-    assert releases_by_period(later)[TEN_Q_3.period] == ()
-
-
-def test_8_k_amendments_and_8_ks_without_item_2_02_are_neither_attached_nor_pending():
+def test_the_filings_of_a_season_are_ordered_by_date_filing_date_and_accession():
     rows = (
-        eight_k(90, date(2026, 10, 6), date(2026, 10, 6), form="8-K/A"),
-        eight_k(91, date(2026, 10, 6), date(2026, 10, 6), "7.01,9.01"),
-        eight_k(92, date(2026, 4, 30), date(2026, 4, 23), form="8-K/A"),
-        eight_k(93, date(2026, 5, 2), date(2026, 5, 1), "8.01"),
+        eight_k(33, date(2026, 2, 12), date(2026, 2, 10), "8.01"),
+        eight_k(32, date(2026, 2, 11), date(2026, 2, 10), "7.01"),
+        eight_k(31, date(2026, 2, 11), date(2026, 2, 10), "5.02"),
+        eight_k(30, date(2026, 2, 11), date(2026, 2, 9), "5.07"),
     )
-    assert periods_of(*rows, *RECENT) == periods_of(*RECENT)
+    season = seasons_of(TEN_K, TEN_Q_1, *rows).seasons[0]
+    assert [item.accession[-2:] for item in season.filings] == ["30", "31", "32", "33"]
 
 
-def test_several_releases_in_one_period_are_ordered_by_event_date_filing_date_and_accession():
-    preliminary = eight_k(30, date(2026, 4, 2), date(2026, 4, 2), "2.02,7.01,9.01")
-    filed_later = eight_k(35, date(2026, 4, 12), date(2026, 4, 10))
-    filed_first = eight_k(36, date(2026, 4, 10), date(2026, 4, 10))
-    earlier_event = eight_k(37, date(2026, 4, 15), date(2026, 4, 5))  # filed after filed_first
-    same_day = eight_k(39, EIGHT_K_Q1.filed, EIGHT_K_Q1.period)
-    rows = (same_day, filed_first, *RECENT, earlier_event, filed_later, preliminary)
-    expected = tuple(
-        map(release, (preliminary, earlier_event, filed_first, filed_later, same_day, EIGHT_K_Q1))
-    )
-    assert releases_by_period(periods_of(*rows))[TEN_Q_1.period] == expected
-    assert releases_by_period(periods_of(*reversed(rows)))[TEN_Q_1.period] == expected
-
-
-def test_pending_releases_are_ordered_like_attached_ones():
-    second = eight_k(95, date(2026, 10, 8), date(2026, 10, 7))
-    first = eight_k(96, date(2026, 10, 8), date(2026, 10, 6))
-    filed_last = eight_k(94, date(2026, 10, 9), date(2026, 10, 6))  # dated before second, filed after it
-    assert periods_of(second, filed_last, first, *PENDING_RECENT).pending == tuple(
-        map(release, (EIGHT_K_Q3, first, filed_last, second))
-    )
-
-
-@pytest.mark.parametrize("event", [OLD_TEN_K.period, date(2024, 11, 1)])
-def test_a_release_dated_on_or_before_the_oldest_listed_period_end_is_dropped(event):
-    row = eight_k(5, event + timedelta(days=1), event)
-    periods = periods_of(row, *RECENT)
-    assert (periods.periods, periods.pending) == (periods_of(*RECENT).periods, ())
-    assert periods.oldest_filed == event + timedelta(days=1)  # it still bounds the listing
-
-
-def test_releases_of_periods_outside_the_window_are_ignored():
-    within = periods_of(*RECENT).within(Window(date(2026, 6, 1), TODAY))
-    assert within == (Period(filing(TEN_Q_2), (release(EIGHT_K_Q2),)),)
-
-
-def test_selected_periods_are_immutable_values():
-    periods = periods_of(*PENDING_RECENT)
+def test_selected_seasons_are_immutable_values():
+    seasons = seasons_of(*RECENT)
     with pytest.raises(FrozenInstanceError):
-        periods.pending = ()
+        seasons.seasons[0].filing.period = TODAY  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):
-        periods.periods[0].filing = filing(TEN_Q_1)
-    with pytest.raises(FrozenInstanceError):
-        periods.periods[0].filing.period = TEN_Q_PERIOD
-    with pytest.raises(FrozenInstanceError):
-        periods.pending[0].items = ""
-    with pytest.raises(FrozenInstanceError):
-        WINDOW.start = TODAY
-    with pytest.raises(FrozenInstanceError):
-        submissions(*RECENT).recent[0].items = "2.02"
-    index = read_index(q2_page())
-    with pytest.raises(FrozenInstanceError):
-        index.exhibits = ()
-    with pytest.raises(FrozenInstanceError):
-        index.exhibits[0].document = "x.htm"
-    assert isinstance(periods.periods, tuple) and isinstance(index.exhibits, tuple)
+        seasons.pending = ()  # type: ignore[misc]
+
+
+# --------------------------------------------------------------------------- acceptance times
+
+
+def test_the_acceptance_time_is_read_as_new_york_time():
+    rows = parse_submissions(
+        with_cell("acceptanceDateTime", Q2_RELEASE, "2026-07-23T20:09:00.000Z"), CIK
+    ).recent
+    accepted = rows[Q2_RELEASE].accepted
+    assert accepted is not None and accepted.isoformat() == "2026-07-23T16:09:00-04:00"
+    winter = parse_submissions(
+        with_cell("acceptanceDateTime", Q2_RELEASE, "2026-01-22T21:10:56.000Z"), CIK
+    ).recent
+    assert str(winter[Q2_RELEASE].accepted) == "2026-01-22 16:10:56-05:00"
+    empty = parse_submissions(with_cell("acceptanceDateTime", Q2_RELEASE, ""), CIK).recent
+    assert empty[Q2_RELEASE].accepted is None
+
+
+@pytest.mark.parametrize(
+    ("value", "problem"),
+    [
+        ("2026-07-23T20:09:00Z", "must be empty or a UTC time YYYY-MM-DDTHH:MM:SS.fffZ"),
+        ("2026-07-23 20:09:00.000Z", "must be empty or a UTC time YYYY-MM-DDTHH:MM:SS.fffZ"),
+        ("2026-07-23T20:09:00.000+00:00", "must be empty or a UTC time YYYY-MM-DDTHH:MM:SS.fffZ"),
+        ("2026-02-30T20:09:00.000Z", "is not a time that exists"),
+        ("2026-07-23T24:09:00.000Z", "is not a time that exists"),
+    ],
+)
+def test_an_acceptance_time_outside_its_grammar_is_refused_without_echo(value, problem):
+    message = failure(parse_submissions, with_cell("acceptanceDateTime", Q2_RELEASE, value), CIK)
+    assert message == f"{PREFIX}filings.recent.acceptanceDateTime[{Q2_RELEASE}] {problem}"
 
 
 # --------------------------------------------------------------------------- filing index pages

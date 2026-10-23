@@ -34,7 +34,9 @@ An 8-K's exhibits are found on its filing index page (``index_url``, the accessi
 type. ``index_page`` requests it as a document, under the same hosts, pacing, redirect,
 encoding and size rules as every other request, with its own limit ``INDEX_LIMIT``; each
 exhibit it names is then requested at ``archive_url``, so an exhibit's name passes the
-same plain-file-name check as a primary document's.
+same plain-file-name check as a primary document's. ``companyfacts`` requests the XBRL
+facts EDGAR extracted from all of a company's filings (``companyfacts_url``), with its own
+limit ``COMPANYFACTS_LIMIT``.
 
 The HTTP layer is a ``Fetch`` callable, so tests replace it (and ``sleep`` and the clock)
 and never reach the network. ``requests`` counts every request a client attempted,
@@ -74,6 +76,7 @@ from market_state_research.common.times import to_eastern
 
 COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 JSON_LIMIT = 20 * 1024 * 1024
+COMPANYFACTS_LIMIT: Final = 64 * 1024 * 1024  # Intel's was 4.3 MB on 2026-10-23
 DOCUMENT_LIMIT = 50 * 1024 * 1024
 INDEX_LIMIT: Final = 20 * 1024 * 1024  # a filing index page: a listing of the filing's documents
 TIMEOUT = 60  # seconds per request
@@ -132,6 +135,13 @@ def submissions_url(cik: str) -> str:
     if not isinstance(cik, str) or not _CIK.fullmatch(cik):
         raise ValueError("CIK must be 10 ASCII digits")
     return f"https://data.sec.gov/submissions/CIK{cik}.json"
+
+
+def companyfacts_url(cik: str) -> str:
+    """The XBRL company facts of the 10-digit, zero-padded ``cik``."""
+    if not isinstance(cik, str) or not _CIK.fullmatch(cik):
+        raise ValueError("CIK must be 10 ASCII digits")
+    return f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
 
 
 def archive_url(cik: str, accession: str, primary_document: str) -> str:
@@ -382,6 +392,9 @@ class EdgarClient:
 
     def submissions(self, cik: str) -> Fetched:
         return self.get(submissions_url(cik), JSON_ACCEPT, JSON_LIMIT)
+
+    def companyfacts(self, cik: str) -> Fetched:
+        return self.get(companyfacts_url(cik), JSON_ACCEPT, COMPANYFACTS_LIMIT)
 
     def document(self, url: str) -> Fetched:
         return self.get(url, DOCUMENT_ACCEPT, DOCUMENT_LIMIT)

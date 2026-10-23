@@ -1,4 +1,4 @@
-"""EDGAR's ticker map, submissions JSON and filing index pages, read strictly, and the periods.
+"""EDGAR's ticker map, submissions JSON and filing index pages, read strictly, and the seasons.
 
 Pure: the caller fetches the bodies (``client``) and keeps them in ``raw/`` (``workflow``);
 this module reads them. ``company_tickers.json`` maps a ticker to its CIK, matched without
@@ -17,33 +17,32 @@ from a body, so nothing captured or private reaches output. The one exception is
 ``FORMS_SEEN_LIMIT`` characters and escaped onto one line) so an unsupported filer is
 recognisable.
 
-Periods. Every exact ``10-K`` and ``10-Q`` of ``filings.recent`` is one period, named by
-its ``period`` (EDGAR's ``reportDate``): the end of the fiscal year or quarter it
-reports, with one earnings call each. Amendments and transition reports (``10-K/A``,
-``10-KT``, ``10-Q/A``, ``10-QT``, ``NT 10-Q``...) are not periods. Two filings that
-report one period are refused rather than one chosen, wherever they are listed. A
-``Window`` selects the periods whose end falls between its two dates, both included.
+Seasons. Every exact ``10-K`` and ``10-Q`` of ``filings.recent`` is one season, named by its
+``period`` (EDGAR's ``reportDate``): the end of the fiscal year or quarter it reports.
+Amendments and transition reports (``10-K/A``, ``10-KT``, ``10-Q/A``, ``10-QT``,
+``NT 10-Q``...) are not seasons. Two filings that report one period are refused rather than
+one chosen, wherever they are listed. A ``Window`` selects the seasons whose end falls
+between its two dates, both included.
 
-Releases. An exact ``8-K`` whose ``items`` name Item 2.02 (results of operations) is an
-earnings release, dated by its ``reportDate``, the date of the event it reports; it must
-have one. Rule B places a release dated D after the latest listed period end P before D:
-when a later period is listed, D falls on or before that period's end and the release
-belongs to P; when P is the newest listed period, the release belongs to P only when D
-is not after the filing date of P's own 10-K or 10-Q, and is otherwise *pending*: a
-release dated after the newest period's 10-K or 10-Q was filed. Once EDGAR lists a later
-period, the same rule places it again: it joins the latest period ending before its
-date, which is the formerly newest period itself when the later period ends on or after
-that date (a release furnished after the 10-Q, a mid-quarter update), unless that is the
-new newest period and the release is dated after its filing, when it stays pending. A
-pending release so concerns the newest listed period or a later one:
-``Periods.pending_in`` lists every pending release for a window that ends on or after
-the newest listed period end, and none for a window that ends before it. A release
-dated on or before the oldest listed period end is dropped, its period not being
-listed. ``8-K/A`` amendments and 8-Ks without Item 2.02 are neither attached nor
-pending. Rule B uses EDGAR's own dates only: an issuer that furnishes its release after
-its 10-Q stays visibly pending until its next period is listed. ``Periods.place`` applies
-the same rule to any other dated item, an earnings call dated by its New York date
-included: it belongs to a listed period, is pending, or is dropped.
+Filings of a season. Every other row of a form the domain reads (``FETCHED_FORMS``, whose
+documents ``fetch`` writes, and ``LISTED_FORMS``, which the measures list and nothing
+fetches) is dated by its own date: an ``8-K`` and a Form ``4`` by their ``reportDate`` (the
+event or the earliest transaction), which they must have and which may not be after their
+filing date; every other form by its filing date (a proxy statement's ``reportDate`` is its
+meeting's date, after its filing). Rule B places a filing dated D after the latest listed
+season end P before D: when a later season is listed, the filing belongs to P; when P is the
+newest listed season, it belongs to P only when D is not after the filing date of P's own
+10-K or 10-Q, and is otherwise *pending*. Once EDGAR lists a later season, the same rule
+places it again: it joins the latest season ending before its date, which is the formerly
+newest season itself when the later season ends on or after that date, unless that is the
+new newest season and the filing is dated after its filing, when it stays pending.
+``Seasons.pending_in`` lists every pending filing for a window that ends on or after the
+newest listed season end, and none for a window that ends before it. A filing dated on or
+before the oldest listed season end is dropped, its season not being listed. An ``8-K`` with
+Item 2.02 (results of operations: the earnings release) without a ``reportDate``, or with one
+after its filing date, makes the ticker unsupported; any other row without the date or the
+document it needs is *skipped* and listed with the reason. ``Seasons.place`` applies Rule B
+to any other dated item, an earnings call dated by its New York date included.
 
 Filing index pages. ``parse_filing_index`` reads an 8-K's filing index page
 (``{accession}-index.htm``), the one EDGAR page that names each document's exhibit type,
@@ -61,14 +60,16 @@ accession, the row position and the rule, never a cell's text.
 Rules beyond EDGAR's column types, chosen as the conservative reading: an accession
 number may appear only once among the recent rows, a 10-K or 10-Q may not report a
 period after its filing date, ``items`` is printable ASCII of at most ``MAX_ITEMS``
-characters on every row, an Item 2.02 8-K may not report an event after its filing
-date, and a ticker matching two entries with different CIKs is refused rather than
-resolved. On an index page, the ``Document Format Files`` table must end with its
-``</table>`` (a page cut short is refused, not read for fewer exhibits), an exhibit's
-Seq is a whole number from 1 to 999999999 written in ASCII digits without a leading
-zero, its Type is ``EX-99`` alone or ``EX-99.`` followed by 1 to 16 letters, digits or
-dots (``EXHIBIT_PATTERN``; any other Type that starts with ``EX-99``, such as ``EX-99-1``,
-is refused), and neither its Seq nor its document repeats another exhibit's.
+characters on every row, ``acceptanceDateTime`` is empty or a UTC time written
+``YYYY-MM-DDTHH:MM:SS.fffZ``, and a ticker matching two entries with different CIKs is
+refused rather than resolved. A fetched form's primary document is a plain file name or,
+for a form EDGAR renders from XML, ``xsl...`` and ``/`` before it (``rendered_document``
+gives the raw file's name, which ``fetch`` requests). On an index page, the ``Document
+Format Files`` table must end with its ``</table>`` (a page cut short is refused, not read
+for fewer exhibits), an exhibit's Seq is a whole number from 1 to 999999999 written in ASCII
+digits without a leading zero, its Type is ``EX-99`` alone or ``EX-99.`` followed by 1 to 16
+letters, digits or dots (``EXHIBIT_PATTERN``; any other Type that starts with ``EX-99``, such
+as ``EX-99-1``, is refused), and neither its Seq nor its document repeats another exhibit's.
 ``CIK_PATTERN``, ``ACCESSION_PATTERN`` and ``EXHIBIT_PATTERN`` are unanchored texts for
 composing larger patterns: match them whole (``re.fullmatch``, or ``^...$`` where a
 pattern is searched, as pydantic's ``pattern=`` does).
@@ -79,16 +80,16 @@ import re
 from bisect import bisect_left
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from html.parser import HTMLParser
 from itertools import pairwise
 from typing import Final, Literal
 
 from market_state_research.common.text import printable
+from market_state_research.common.times import to_eastern
 
 Form = Literal["10-K", "10-Q"]
-ReleaseForm = Literal["8-K"]
 Pending = Literal["pending"]
 
 # Explicit ASCII classes: \d would also match other Unicode digits, which int() accepts.
@@ -98,11 +99,50 @@ ACCESSION_PATTERN = r"[0-9]{10}-[0-9]{2}-[0-9]{6}"
 PRIMARY_DOCUMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", re.ASCII)
 TICKERS_FILE = "company_tickers.json"
 TICKER_KEYS = frozenset({"cik_str", "ticker", "title"})
-RECENT_COLUMNS = ("accessionNumber", "filingDate", "reportDate", "form", "primaryDocument", "items")
+RECENT_COLUMNS = (
+    "accessionNumber",
+    "filingDate",
+    "reportDate",
+    "acceptanceDateTime",
+    "form",
+    "primaryDocument",
+    "items",
+)
 MAX_ITEMS: Final = 200
 FORMS_SEEN_LIMIT = 200
 # The item an 8-K names when it furnishes results of operations: the earnings release.
 ITEM_RESULTS: Final = "2.02"
+# The forms of a season whose documents fetch writes: every 8-K, the proxy statement, the
+# amendments of the beneficial owners' schedules and the insiders' Form 4.
+FETCHED_FORMS: Final = (
+    "8-K",
+    "DEF 14A",
+    "SC 13D/A",
+    "SC 13G/A",
+    "SCHEDULE 13D/A",
+    "SCHEDULE 13G/A",
+    "4",
+)
+# The forms of a season the measures list and nothing fetches.
+NOTICES: Final = ("NT 10-K", "NT 10-Q")
+REGISTRATIONS: Final = ("S-3", "S-3ASR", "424B2", "424B3", "424B4", "424B5", "424B7")
+AMENDMENTS: Final = ("8-K/A", "4/A", "10-K/A", "10-Q/A")
+LISTED_FORMS: Final = (*NOTICES, *REGISTRATIONS, *AMENDMENTS)
+HOLDER_FORMS: Final = ("SC 13D/A", "SC 13G/A", "SCHEDULE 13D/A", "SCHEDULE 13G/A")
+# The forms dated by their reportDate; every other one by its filing date.
+DATED_BY_REPORT: Final = ("8-K", "4")
+# A folder's form part: the form without spaces or slashes.
+FORM_TOKENS: Final = {
+    "10-K": "10-K",
+    "10-Q": "10-Q",
+    "8-K": "8-K",
+    "DEF 14A": "DEF14A",
+    "SC 13D/A": "SC13DA",
+    "SC 13G/A": "SC13GA",
+    "SCHEDULE 13D/A": "SCHEDULE13DA",
+    "SCHEDULE 13G/A": "SCHEDULE13GA",
+    "4": "4",
+}
 # The filing index page's table of documents, its header and the exhibits read from it.
 INDEX_TABLE: Final = "Document Format Files"
 INDEX_COLUMNS: Final = ("Seq", "Description", "Document", "Type", "Size")
@@ -116,10 +156,12 @@ MAX_DESCRIPTION: Final = 200
 PENDING: Final[Pending] = "pending"
 
 _FORMS: dict[str, Form] = {"10-K": "10-K", "10-Q": "10-Q"}
-_RELEASE_FORM: ReleaseForm = "8-K"
 _CIK = re.compile(CIK_PATTERN, re.ASCII)
 _ACCESSION = re.compile(ACCESSION_PATTERN, re.ASCII)
 _ISO_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", re.ASCII)
+_ACCEPTED = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z", re.ASCII)
+# A document EDGAR renders from XML: its stylesheet's folder, then the raw file's name.
+_RENDERED = re.compile(r"xsl[A-Za-z0-9_]{1,40}/(?P<name>[A-Za-z0-9][A-Za-z0-9._-]{0,199})", re.ASCII)
 # The submissions JSON writes the CIK without its leading zeros, as text.
 _CIK_TEXT = re.compile(r"[0-9]{1,10}", re.ASCII)
 _CIK_LIMIT = 10**10
@@ -166,6 +208,18 @@ def _load_json(body: str) -> object:
 def is_primary_document(name: object) -> bool:
     """Whether ``name`` is a plain file name in a filing's archive folder (no path, no ``..``)."""
     return isinstance(name, str) and PRIMARY_DOCUMENT.fullmatch(name) is not None and ".." not in name
+
+
+def rendered_document(primary: str) -> str | None:
+    """The raw file a primary document names: itself when it is a plain file name, the file
+    after the stylesheet's folder when EDGAR renders it from XML (``xslF345X06/form4.xml``
+    gives ``form4.xml``, the XML in the filing's own folder); None for anything else."""
+    if is_primary_document(primary):
+        return primary
+    match = _RENDERED.fullmatch(primary)
+    if match is None or ".." in match["name"]:
+        return None
+    return match["name"]
 
 
 # --------------------------------------------------------------------------- company_tickers.json
@@ -232,7 +286,8 @@ def lookup_cik(body: str, ticker: str) -> str | None:
 class RecentRow:
     """One row of ``filings.recent``: any form; ``period`` is None where EDGAR gives none.
 
-    ``items`` is EDGAR's ``items`` cell as written (``"2.02,9.01"``, or empty for most forms).
+    ``items`` is EDGAR's ``items`` cell as written (``"2.02,9.01"``, or empty for most forms);
+    ``accepted`` the New York time EDGAR accepted the filing, None where it gives none.
     """
 
     form: str
@@ -241,6 +296,7 @@ class RecentRow:
     period: date | None
     primary_document: str
     items: str
+    accepted: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -254,13 +310,15 @@ class Submissions:
 
 @dataclass(frozen=True)
 class Filing:
-    """The 10-K or 10-Q of one period; ``period`` is the fiscal year or quarter end it reports."""
+    """The 10-K or 10-Q of one season; ``period`` is the fiscal year or quarter end it reports and
+    ``accepted`` the New York time EDGAR accepted it (None where it gives none)."""
 
     form: Form
     accession: str
     filed: date
     period: date
     primary_document: str
+    accepted: datetime | None = None
 
 
 def _iso_date(value: str) -> date | None:
@@ -301,8 +359,30 @@ def _columns(recent: dict[str, object]) -> list[list[str]]:
     return columns
 
 
+def _accepted(index: int, value: str) -> datetime | None:
+    """``acceptanceDateTime``: empty, or a UTC time ``YYYY-MM-DDTHH:MM:SS.fffZ``, in New York time."""
+    if not value:
+        return None
+    if not _ACCEPTED.fullmatch(value):
+        raise ValueError(
+            f"filings.recent.acceptanceDateTime[{index}] must be empty or a UTC time YYYY-MM-DDTHH:MM:SS.fffZ"
+        )
+    try:
+        instant = datetime.fromisoformat(value[:-1]).replace(tzinfo=UTC)
+    except ValueError:
+        raise ValueError(f"filings.recent.acceptanceDateTime[{index}] is not a time that exists") from None
+    return to_eastern(instant, "acceptanceDateTime")
+
+
 def _row(
-    index: int, accession: str, filed_text: str, period_text: str, form: str, document: str, items: str
+    index: int,
+    accession: str,
+    filed_text: str,
+    period_text: str,
+    accepted_text: str,
+    form: str,
+    document: str,
+    items: str,
 ) -> RecentRow:
     if not _ACCESSION.fullmatch(accession):
         raise ValueError(
@@ -327,7 +407,7 @@ def _row(
         raise ValueError(
             f"filings.recent.items[{index}] must be printable ASCII of at most {MAX_ITEMS} characters"
         )
-    return RecentRow(form, accession, filed, period, document, items)
+    return RecentRow(form, accession, filed, period, document, items, _accepted(index, accepted_text))
 
 
 def _parse_submissions(body: str, cik: str) -> Submissions:
@@ -370,10 +450,11 @@ def parse_submissions(body: str, cik: str) -> Submissions:
 
     The body is an object with ``cik`` (EDGAR's unpadded text, or an integer, naming
     ``cik``), ``name`` (the entity name) and ``filings.recent`` whose
-    ``accessionNumber``, ``filingDate``, ``reportDate``, ``form``, ``primaryDocument`` and
-    ``items`` are lists of strings of one length; other keys and columns are ignored.
-    Accession numbers are 10-2-6 digits and unique, dates are ``YYYY-MM-DD``
-    (``reportDate`` may be empty), every exact ``10-K`` and ``10-Q`` names a period not
+    ``accessionNumber``, ``filingDate``, ``reportDate``, ``acceptanceDateTime``, ``form``,
+    ``primaryDocument`` and ``items`` are lists of strings of one length; other keys and
+    columns are ignored. Accession numbers are 10-2-6 digits and unique, dates are
+    ``YYYY-MM-DD`` (``reportDate`` may be empty), ``acceptanceDateTime`` is empty or a UTC
+    time ``YYYY-MM-DDTHH:MM:SS.fffZ``, every exact ``10-K`` and ``10-Q`` names a period not
     after its filing date and a plain primary document file name, and every ``items``
     cell is printable ASCII of at most ``MAX_ITEMS`` characters. Any problem raises one
     ``ValueError`` line, ``submissions CIK{cik}: ...``, naming the field and row index,
@@ -387,12 +468,12 @@ def parse_submissions(body: str, cik: str) -> Submissions:
         raise ValueError(f"submissions CIK{cik}: {error}") from None
 
 
-# --------------------------------------------------------------------------- periods and releases
+# --------------------------------------------------------------------------- seasons
 
 
 @dataclass(frozen=True)
 class Window:
-    """The period ends a command covers: from ``start`` to ``end``, both included."""
+    """The season ends a command covers: from ``start`` to ``end``, both included."""
 
     start: date
     end: date
@@ -418,51 +499,107 @@ def release_items(items: str) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
-class Release:
-    """An exact 8-K naming Item 2.02; ``report_date`` is the date of the event it reports."""
+class Dated:
+    """One filing of a form the domain reads, other than a 10-K or 10-Q: its form, accession,
+    filing date, the date Rule B places it by (``dated``), EDGAR's ``items`` cell, its primary
+    document as EDGAR lists it and the New York time EDGAR accepted it."""
 
+    form: str
     accession: str
     filed: date
-    report_date: date
+    dated: date
     items: str
+    primary_document: str
+    accepted: datetime | None = None
+
+    @property
+    def fetched(self) -> bool:
+        """Whether ``fetch`` writes its documents (``FETCHED_FORMS``)."""
+        return self.form in FETCHED_FORMS
+
+    @property
+    def item_list(self) -> tuple[str, ...]:
+        return release_items(self.items)
+
+    @property
+    def release(self) -> bool:
+        """Whether it is an earnings release: an 8-K with Item 2.02."""
+        return self.form == "8-K" and ITEM_RESULTS in self.item_list
+
+    @property
+    def document(self) -> str:
+        """The raw file of its primary document (``rendered_document``); a fetched filing has one."""
+        name = rendered_document(self.primary_document)
+        if name is None:
+            raise ValueError(f"{self.form} {self.accession}: no primary document")
+        return name
 
 
 @dataclass(frozen=True)
-class Period:
-    """One period: its 10-K or 10-Q and its releases, ordered by (report date, filing date, accession)."""
+class Skipped:
+    """A row of a form the domain reads that Rule B cannot place or ``fetch`` cannot read, and why."""
+
+    form: str
+    accession: str
+    filed: date
+    reason: str
+
+
+@dataclass(frozen=True)
+class Season:
+    """One season: its 10-K or 10-Q and the filings Rule B places in it, ordered by (date, filing
+    date, accession)."""
 
     filing: Filing
-    releases: tuple[Release, ...]
+    filings: tuple[Dated, ...]
 
     @property
     def period(self) -> date:
         return self.filing.period
 
+    def of_forms(self, forms: Iterable[str]) -> tuple[Dated, ...]:
+        wanted = frozenset(forms)
+        return tuple(item for item in self.filings if item.form in wanted)
+
+    @property
+    def eight_ks(self) -> tuple[Dated, ...]:
+        return self.of_forms(("8-K",))
+
+    @property
+    def releases(self) -> tuple[Dated, ...]:
+        """The 8-Ks with Item 2.02."""
+        return tuple(item for item in self.eight_ks if item.release)
+
+    @property
+    def fetched(self) -> tuple[Dated, ...]:
+        """The filings whose documents ``fetch`` writes."""
+        return tuple(item for item in self.filings if item.fetched)
+
 
 @dataclass(frozen=True)
-class Periods:
-    """Every listed period, oldest first, the pending releases and the oldest recent filing date."""
+class Seasons:
+    """Every listed season, oldest first, the pending and skipped filings and the oldest recent
+    filing date."""
 
-    periods: tuple[Period, ...]
-    pending: tuple[Release, ...]
+    seasons: tuple[Season, ...]
+    pending: tuple[Dated, ...]
+    skipped: tuple[Skipped, ...]
     oldest_filed: date | None
 
-    def within(self, window: Window) -> tuple[Period, ...]:
-        """The periods whose end the window admits, oldest first."""
-        return tuple(period for period in self.periods if window.admits(period.period))
+    def within(self, window: Window) -> tuple[Season, ...]:
+        """The seasons whose end the window admits, oldest first."""
+        return tuple(season for season in self.seasons if window.admits(season.period))
 
-    def pending_in(self, window: Window) -> tuple[Release, ...]:
-        """Every pending release when the window ends on or after the newest listed period end.
+    def pending_in(self, window: Window) -> tuple[Dated, ...]:
+        """Every pending filing when the window ends on or after the newest listed season end.
 
-        A pending release is dated after the newest period's 10-K or 10-Q was filed. Once a
-        later period is listed it joins the latest period ending before its date, possibly
-        that newest period, so it concerns the newest period or a later one, which a window
-        can admit only when it ends on or after the newest period end; a window that ends
-        before it lists none. The release's own date does not bound the listing, so a window
-        that admits the newest period lists a release that may add an exhibit to a period
-        already researched.
+        A pending filing is dated after the newest season's 10-K or 10-Q was filed. Once a
+        later season is listed it joins the latest season ending before its date, possibly
+        that newest season, so it concerns the newest season or a later one, which a window
+        can admit only when it ends on or after the newest season end; a window that ends
+        before it lists none.
         """
-        if not self.periods or window.end < self.periods[-1].period:
+        if not self.seasons or window.end < self.seasons[-1].period:
             return ()
         return self.pending
 
@@ -470,29 +607,40 @@ class Periods:
         """Whether the window starts before the oldest filing ``filings.recent`` lists."""
         return self.oldest_filed is None or window.start < self.oldest_filed
 
-    def get(self, day: date) -> Period | None:
-        """The period that ends on ``day``, or None."""
-        return next((period for period in self.periods if period.period == day), None)
+    def get(self, day: date) -> Season | None:
+        """The season that ends on ``day``, or None."""
+        return next((season for season in self.seasons if season.period == day), None)
 
-    def place(self, day: date) -> Period | Pending | None:
-        """Rule B for an item dated ``day``: the period it belongs to, ``PENDING`` or None (dropped).
+    def index(self, day: date) -> int | None:
+        """The position of the season that ends on ``day``, or None."""
+        return next((position for position, season in enumerate(self.seasons) if season.period == day), None)
 
-        The item belongs to the latest listed period ending before ``day``, unless that is
-        the newest listed period and ``day`` is after the filing date of its 10-K or 10-Q
-        (``PENDING``); an item dated on or before the oldest listed period end is dropped.
+    def place(self, day: date) -> Season | Pending | None:
+        """Rule B for an item dated ``day``: the season it belongs to, ``PENDING`` or None (dropped).
+
+        The item belongs to the latest listed season ending before ``day``, unless that is the
+        newest listed season and ``day`` is after the filing date of its 10-K or 10-Q
+        (``PENDING``); an item dated on or before the oldest listed season end is dropped.
         """
-        index = rule_b(tuple(period.filing for period in self.periods), day)
-        return self.periods[index] if isinstance(index, int) else index
+        index = rule_b(tuple(season.filing for season in self.seasons), day)
+        return self.seasons[index] if isinstance(index, int) else index
+
+    def before(self, season: Season, count: int) -> tuple[Season, ...]:
+        """Up to ``count`` listed seasons before ``season``, newest first."""
+        position = self.index(season.period)
+        if position is None:
+            return ()
+        return tuple(reversed(self.seasons[max(0, position - count) : position]))
 
 
 def rule_b(filings: Sequence[Filing], day: date) -> int | Pending | None:
-    """Rule B over ``filings``, one per listed period, oldest first, for an item dated ``day``.
+    """Rule B over ``filings``, one per listed season, oldest first, for an item dated ``day``.
 
-    The index of the filing whose period the item belongs to: the latest period ending
-    before ``day``; ``PENDING`` when that is the newest period and ``day`` is after its
-    filing's date; None when no listed period ends before ``day`` (the item is dropped).
+    The index of the filing whose season the item belongs to: the latest season ending
+    before ``day``; ``PENDING`` when that is the newest season and ``day`` is after its
+    filing's date; None when no listed season ends before ``day`` (the item is dropped).
     """
-    before = bisect_left([filing.period for filing in filings], day)  # listed period ends before day
+    before = bisect_left([filing.period for filing in filings], day)  # listed season ends before day
     if before == 0:
         return None
     if before == len(filings) and day > filings[-1].filed:
@@ -501,7 +649,7 @@ def rule_b(filings: Sequence[Filing], day: date) -> int | Pending | None:
 
 
 class NoPeriodicFilings(ValueError):
-    """The recent filings hold no exact 10-K or 10-Q, so the issuer has no period (a 20-F filer, say)."""
+    """The recent filings hold no exact 10-K or 10-Q, so the issuer has no season (a 20-F filer, say)."""
 
 
 def _filing(row: RecentRow) -> Filing:
@@ -509,8 +657,8 @@ def _filing(row: RecentRow) -> Filing:
     # parse_submissions guarantees both for every exact 10-K and 10-Q; a Submissions built
     # by hand may not.
     if form is None or row.period is None:
-        raise ValueError("a period's filing must be a 10-K or 10-Q row with a period")
-    return Filing(form, row.accession, row.filed, row.period, row.primary_document)
+        raise ValueError("a season's filing must be a 10-K or 10-Q row with a period")
+    return Filing(form, row.accession, row.filed, row.period, row.primary_document, row.accepted)
 
 
 def _forms_seen(forms: Iterable[str]) -> str:
@@ -522,37 +670,54 @@ def _filing_order(filing: Filing) -> tuple[date, date, str]:
     return filing.period, filing.filed, filing.accession
 
 
-def _release_order(release: Release) -> tuple[date, date, str]:
-    return release.report_date, release.filed, release.accession
+def _dated_order(item: Dated) -> tuple[date, date, str]:
+    return item.dated, item.filed, item.accession
 
 
-def _releases(submissions: Submissions) -> list[Release]:
-    """Every exact 8-K naming Item 2.02, in release order; each must name an event not after its filing."""
-    releases: list[Release] = []
+def _dated(submissions: Submissions) -> tuple[list[Dated], list[Skipped]]:
+    """Every row of a form the domain reads but a 10-K or 10-Q, dated for Rule B, in date order,
+    and the rows skipped. An Item 2.02 8-K without its event date, or dated after its filing,
+    raises ``ValueError``."""
+    dated: list[Dated] = []
+    skipped: list[Skipped] = []
     for index, row in enumerate(submissions.recent):
-        if row.form != _RELEASE_FORM or ITEM_RESULTS not in release_items(row.items):
+        if row.form not in FETCHED_FORMS and row.form not in LISTED_FORMS:
             continue
-        where = f"submissions CIK{submissions.cik}: filings.recent.reportDate[{index}]"
-        if row.period is None:
-            raise ValueError(f"{where} is empty; an 8-K with Item {ITEM_RESULTS} must name its event date")
-        if row.period > row.filed:
-            raise ValueError(f"{where} is after the 8-K's filing date")
-        releases.append(Release(row.accession, row.filed, row.period, row.items))
-    return sorted(releases, key=_release_order)
+        if row.form in DATED_BY_REPORT:
+            if row.period is None or row.period > row.filed:
+                problem = "is empty" if row.period is None else f"is after the {row.form}'s filing date"
+                if row.form == "8-K" and ITEM_RESULTS in release_items(row.items):
+                    raise ValueError(
+                        f"submissions CIK{submissions.cik}: filings.recent.reportDate[{index}] {problem}; "
+                        f"an 8-K with Item {ITEM_RESULTS} must name its event date"
+                    )
+                skipped.append(Skipped(row.form, row.accession, row.filed, f"its reportDate {problem}"))
+                continue
+            day = row.period
+        else:
+            day = row.filed
+        if row.form in FETCHED_FORMS and rendered_document(row.primary_document) is None:
+            skipped.append(
+                Skipped(
+                    row.form, row.accession, row.filed, "its primaryDocument is no file fetch can request"
+                )
+            )
+            continue
+        dated.append(
+            Dated(row.form, row.accession, row.filed, day, row.items, row.primary_document, row.accepted)
+        )
+    return sorted(dated, key=_dated_order), skipped
 
 
-def select_periods(submissions: Submissions) -> Periods:
-    """Every period of ``submissions``, oldest first, with its releases placed by Rule B.
+def select_seasons(submissions: Submissions) -> Seasons:
+    """Every season of ``submissions``, oldest first, with its filings placed by Rule B.
 
-    Every exact 10-K and 10-Q is one period; none raises ``NoPeriodicFilings`` listing the
-    forms seen, and two for one period raise ``ValueError`` rather than choose one. Every
-    exact 8-K naming Item 2.02 is a release and must name its event date, not after its
-    filing date. A release dated D belongs to the latest listed period end P before D,
-    unless P is the newest listed period and D is after the filing date of P's own 10-K or
-    10-Q: the release is then pending, and joins the latest period end before D once a
-    later period is listed (P itself when that period ends on or after D). A release dated
-    on or before the oldest listed period end is dropped. The result does not depend on the
-    order of the rows.
+    Every exact 10-K and 10-Q is one season; none raises ``NoPeriodicFilings`` listing the
+    forms seen, and two for one period raise ``ValueError`` rather than choose one. Every row
+    of ``FETCHED_FORMS`` and ``LISTED_FORMS`` is dated (module docstring) and placed by Rule B:
+    in the latest listed season ending before its date, pending when that is the newest
+    season and the date is after its 10-K's or 10-Q's filing date, dropped when no listed
+    season ends before it. The result does not depend on the order of the rows.
     """
     recent = submissions.recent
     periodic = [row for row in recent if row.form in _FORMS]
@@ -567,20 +732,22 @@ def select_periods(submissions: Submissions) -> Periods:
             raise ValueError(
                 f"submissions CIK{submissions.cik}: two filings report the period {later.period.isoformat()}"
             )
-    attached: list[list[Release]] = [[] for _ in filings]
-    pending: list[Release] = []
-    for release in _releases(submissions):
-        index = rule_b(filings, release.report_date)
+    dated, skipped = _dated(submissions)
+    attached: list[list[Dated]] = [[] for _ in filings]
+    pending: list[Dated] = []
+    for item in dated:
+        index = rule_b(filings, item.dated)
         if isinstance(index, int):
-            attached[index].append(release)
-        elif index is not None:  # pending; None: its period is not listed
-            pending.append(release)
-    return Periods(
-        periods=tuple(
-            Period(filing=filing, releases=tuple(releases))
-            for filing, releases in zip(filings, attached, strict=True)
+            attached[index].append(item)
+        elif index is not None:  # pending; None: its season is not listed
+            pending.append(item)
+    return Seasons(
+        seasons=tuple(
+            Season(filing=filing, filings=tuple(items))
+            for filing, items in zip(filings, attached, strict=True)
         ),
         pending=tuple(pending),
+        skipped=tuple(skipped),
         oldest_filed=min(row.filed for row in recent),
     )
 

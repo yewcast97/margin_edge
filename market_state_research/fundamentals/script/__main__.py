@@ -1,28 +1,29 @@
 """Command line for the fundamentals pipeline; see the domain's PROCEDURE.md.
 
-For each fiscal period in a window, the pipeline keeps the period's documents in
-data/raw/ (its 10-K or 10-Q, the filing index pages and EX-99 exhibits of its Item 2.02
-8-Ks, and its earnings calls' transcripts), their derived text in data/formatted/, and the
-agent's eleven-field report of each document (upstream shortage, capacity shortfall,
-capex plans, capacity expansion, earnings guidance, pricing, backlog and contracts,
-product ramp, margin drivers, financing methods and customer concentration) and the
-ticker's time series in data/reports/. fetch and plan take the window as --from and --to,
-New York calendar dates written YYYY-MM-DD that bound the fiscal period ends (both
-included): --to defaults to today and must not be after it, and --from defaults to the
-same day two years before --to and must not be after --to; a refused window is one
-FUNDAMENTALS: line before any work. Only when the user asks, fetch --refresh requests the
-window's documents, transcripts and calls list again, whatever raw/ holds, and rewrites
-nothing: an EDGAR document is compared with its stored file, and a transcript whose bytes
-changed is written beside the stored one; plan --refresh plans that fetch.
+For each season (a fiscal period, named by its end) in a window, the pipeline keeps the
+season's documents in data/raw/ (its 10-K or 10-Q, its 8-Ks with their exhibits, its proxy
+statement, the beneficial owners' schedules and the insiders' Form 4s, its earnings calls'
+transcripts) and the company's XBRL facts; their derived text and each season's
+mechanical comparison (measures.md) in data/formatted/; and the bot's readings of each
+season and the season's report of what changed against its baselines in data/reports/.
+fetch and plan take the window as --from and --to, New York calendar dates written
+YYYY-MM-DD that bound the season ends (both included): --to defaults to today and must not
+be after it, and --from defaults to the same day two years before --to and must not be after
+--to; a refused window is one FUNDAMENTALS: line before any work. Only when the user asks,
+fetch --refresh requests the window's documents, facts, transcripts and calls list again,
+whatever raw/ holds, and rewrites nothing: an EDGAR document is compared with its stored
+file, and a transcript whose bytes changed is written beside the stored one; plan --refresh
+plans that fetch.
 
 fetch is the one command that uses the network, under two settings (from the environment
 or the ignored repository-root .env), which no other command reads and fetch never
 prints: SEC_USER_AGENT (a name and an email address) for SEC EDGAR, and EARNINGSCALLS_API,
 the user's own EarningsCalls.dev key, for the earnings calls' transcripts. Both are
-checked before the watchlist is read or any request is sent. Without tickers, fetch and
-plan read this domain's watchlist.json. The other commands work offline: they plan the
-next step, write derived text, check the agent's reports, render the time series and show
-it. The clock is read in New York time, and every time printed is New York time.
+checked before the watchlist is read or any request is sent. Without tickers, fetch, plan
+and show read this domain's watchlist.json. The other commands work offline: they plan the
+next step, derive the texts and measures, check the bot's readings, render the season
+reports and show them. The clock is read in New York time, and every time printed is New
+York time.
 """
 
 import argparse
@@ -40,7 +41,7 @@ from market_state_research.common.times import NEW_YORK, to_eastern
 from .client import EdgarClient, EdgarError
 from .earningscalls import API_KEY_SETTING, EarningsCallsClient, EarningsCallsError
 from .filings import Window, default_window
-from .workflow import WATCHLIST, check, fetch, plan, render, show, text
+from .workflow import WATCHLIST, check, derive, fetch, plan, render, show
 
 PROGRAM = "python -m market_state_research.fundamentals.script"
 LABEL = "FUNDAMENTALS"
@@ -67,25 +68,27 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="runtime data directory (default: this domain's data/)",
     )
-    selection = FundamentalsParser(add_help=False, parents=[storage])
-    selection.add_argument(
+    listed = FundamentalsParser(add_help=False, parents=[storage])
+    listed.add_argument(
         "tickers", nargs="*", metavar="TICKER", help="default: the stock section of the watchlist"
     )
-    selection.add_argument(
-        "--refresh",
-        action="store_true",
-        help=(
-            "request the window's EDGAR documents, transcripts and calls list again, whatever raw/ holds: "
-            "an EDGAR document is compared with its stored file, never rewritten (verified or changed); "
-            "a transcript whose bytes changed is written beside the stored one (refreshed)"
-        ),
-    )
-    selection.add_argument(
+    listed.add_argument(
         "--watchlist",
         type=file_path,
         default=WATCHLIST,
         metavar="PATH",
         help="watchlist read when no ticker is given (default: this domain's watchlist.json)",
+    )
+    selection = FundamentalsParser(add_help=False, parents=[listed])
+    selection.add_argument(
+        "--refresh",
+        action="store_true",
+        help=(
+            "request the window's EDGAR documents, company facts, transcripts and calls list again, "
+            "whatever raw/ holds: an EDGAR document is compared with its stored file, never rewritten "
+            "(verified or changed); a transcript whose bytes changed is written beside the stored one "
+            "(refreshed)"
+        ),
     )
     window = FundamentalsParser(add_help=False)
     window.add_argument(
@@ -93,7 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="window_from",
         type=calendar_date,
         metavar="YYYY-MM-DD",
-        help="the earliest fiscal period end in the window, a New York calendar date "
+        help="the earliest season end in the window, a New York calendar date "
         "(default: the same day two years before --to)",
     )
     window.add_argument(
@@ -101,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="window_to",
         type=calendar_date,
         metavar="YYYY-MM-DD",
-        help="the latest fiscal period end in the window (default: today, New York date; never after it)",
+        help="the latest season end in the window (default: today, New York date; never after it)",
     )
     commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
@@ -112,45 +115,49 @@ def build_parser() -> argparse.ArgumentParser:
     command(
         "fetch",
         [selection, window],
-        "write each ticker's EDGAR submissions and, for each fiscal period in the window, the 10-K or "
-        "10-Q and the filing index pages and EX-99 exhibits of its Item 2.02 8-Ks that are not in raw/ "
-        "yet, then its earnings calls list from EarningsCalls.dev when due and the transcript of each "
-        "window period's call (uses the network; needs SEC_USER_AGENT and EARNINGSCALLS_API)",
+        "write each ticker's EDGAR submissions and, for each season of the window and the four before it, "
+        "the documents of its 10-K or 10-Q, 8-Ks, proxy statement, beneficial owners' schedules and Form 4s "
+        "that are not in raw/ yet and its company facts, then its earnings calls list from EarningsCalls.dev "
+        "when due and the transcripts of those seasons' calls (uses the network; needs SEC_USER_AGENT and "
+        "EARNINGSCALLS_API)",
     )
     command(
         "plan",
         [selection, window],
-        "list each period's documents, call, texts and reports in the window, the series and the next "
+        "list each season's documents, call, texts, measures, readings and report in the window and the next "
         "action (read-only)",
     )
-    text_command = command(
-        "text",
+    derive_command = command(
+        "derive",
         [storage],
-        "write the derived text of every document in raw/ that has no readable text file, or whose text "
-        "differs from its derivation",
+        "write the derived text of every document in raw/ and the measures.md of every season, each when it "
+        "is missing or differs from its derivation",
     )
-    text_command.add_argument("ticker", metavar="TICKER")
+    derive_command.add_argument("ticker", metavar="TICKER")
     check_command = command(
         "check",
         [storage],
-        "check per-document reports against their documents' derived text (writes nothing)",
+        "check the bot's readings of each season against the documents' derived text (writes nothing)",
     )
     check_command.add_argument("ticker", metavar="TICKER")
     check_command.add_argument(
-        "reports",
+        "readings",
         nargs="*",
         type=file_path,
-        metavar="REPORT_PATH",
-        help="default: every per-document report in reports/TICKER/",
+        metavar="READINGS_PATH",
+        help="default: every season's readings.md in reports/TICKER/; a draft lies in its season's folder",
     )
-    render_command = command("render", [storage], "write a new time series of every complete period")
-    render_command.add_argument("ticker", metavar="TICKER")
-    show_command = command(
-        "show",
+    render_command = command(
+        "render",
         [storage],
-        "print the action plan gives over its default window, status lines and the time series",
+        "write the report of every season whose readings pass and whose report is not current",
     )
-    show_command.add_argument("ticker", metavar="TICKER")
+    render_command.add_argument("ticker", metavar="TICKER")
+    command(
+        "show",
+        [listed],
+        "print each ticker's newest season report and the ranking of the tickers by score (read-only)",
+    )
     return parser
 
 
@@ -209,14 +216,14 @@ def main(
                 output = plan(
                     layout, args.tickers, moment, window, refresh=args.refresh, watchlist=args.watchlist
                 )
-        elif args.command == "text":
-            output = text(layout, args.ticker, moment)
+        elif args.command == "derive":
+            output = derive(layout, args.ticker, moment)
         elif args.command == "check":
-            output = check(layout, args.ticker, moment, args.reports)
+            output = check(layout, args.ticker, moment, args.readings)
         elif args.command == "render":
             output = render(layout, args.ticker, moment)
         else:
-            sys.stdout.write(show(layout, args.ticker, moment))
+            sys.stdout.write(show(layout, args.tickers, moment, watchlist=args.watchlist))
             return 0
     except (EdgarError, EarningsCallsError, ValueError, OSError, OverflowError) as error:
         return fail(LABEL, str(error))

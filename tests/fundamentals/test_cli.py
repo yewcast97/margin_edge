@@ -65,33 +65,34 @@ from market_state_research.fundamentals.script.earningscalls import (
 from market_state_research.fundamentals.script.earningscalls import PACING as CALLS_PACING
 
 from .calls_support import CALL_OLD_Q, CALL_Q1, CALL_Q2
-from .edgar_support import TICKER
+from .edgar_support import TEN_Q_2, TICKER
 from .fake_earningscalls import CANARY, FakeEarningsCalls, calls_client, provider
 from .fake_earningscalls import status as provider_status
 from .fake_edgar import FakeEdgar, RecordingSleep, status
 from .support import NOW, edt, est
 from .workflow_support import (
-    CALLS_TIMES,
+    CALLS_FETCHED_AT,
+    CALLS_OF_SEASONS,
     DEFAULT_WINDOW,
     DOC_IDS,
-    FETCH_TIMES,
     FETCH_URLS,
-    FILINGS,
-    OLD_DOCUMENTS,
-    REFRESH_TIMES,
-    SAMPLES,
+    FETCHED_AT,
+    QUOTE_FILING,
+    RAW,
     WINDOW,
+    WINDOW_SEASONS,
     FetchClock,
-    calls_directory,
+    Reading,
     client,
     edgar,
     fetch,
+    filing_url,
     place,
-    report_file,
-    report_text,
+    readings_file,
+    readings_text,
     research,
     snapshot,
-    write_report,
+    write_readings,
     write_watchlist,
 )
 
@@ -100,14 +101,20 @@ SCRIPT_DIRECTORY = Path(script_package.__file__).resolve().parent
 COMMON_DIRECTORY = Path(common_package.__file__).resolve().parent
 DOMAIN_PARTS = ("market_state_research", "fundamentals")
 USER_AGENT = "Example Tester tester@example.com"  # a test value, never a private setting
-COMMANDS = ("fetch", "plan", "text", "check", "render", "show")
-TICKER_COMMANDS = ("text", "check", "render", "show")  # one TICKER, no window
+COMMANDS = ("fetch", "plan", "derive", "check", "render", "show")
+TICKER_COMMANDS = ("derive", "check", "render")  # one TICKER, no window
 WINDOW_ARGS = ("--from", "2025-12-01", "--to", "2026-10-08")
 WINDOW_JSON = {"from": "2025-12-01", "to": "2026-10-08"}
 DEFAULT_WINDOW_JSON = {"from": "2024-10-08", "to": "2026-10-08"}
-SERIES = f"{TICKER}_2026-07-24_20261008T060000EDT.md"
-# Every URL a first fetch of WINDOW asks the provider for, in order.
-CALLS_URLS = (events_url(TICKER, 1), transcript_url(CALL_Q1.id), transcript_url(CALL_Q2.id))
+# Every URL a first fetch of WINDOW asks the provider for, in order: the list, then the transcripts
+# of the span seasons' calls, oldest season first.
+CALLS_URLS = (
+    events_url(TICKER, 1),
+    transcript_url(CALL_OLD_Q.id),
+    transcript_url(CALL_Q1.id),
+    transcript_url(CALL_Q2.id),
+)
+Q2 = TEN_Q_2.period
 SETTINGS = {"SEC_USER_AGENT": USER_AGENT, "EARNINGSCALLS_API": CANARY}
 
 
@@ -159,13 +166,14 @@ def unread_settings(name: str) -> str | None:
 
 
 class Provider:
-    """The ``cli`` fixture's default ``calls``: a new client over the default fake provider, its
-    clock reading ``CALLS_TIMES``. Pass ``calls=None`` for the client ``main`` builds from
-    ``settings``."""
+    """The ``cli`` fixture's default ``calls``: a new client over the fake provider of the seasons'
+    calls, its clock from ``CALLS_FETCHED_AT``. Pass ``calls=None`` for the client ``main`` builds
+    from ``settings``."""
 
     @staticmethod
     def client(fake: FakeEarningsCalls | None = None) -> EarningsCallsClient:
-        return calls_client(provider() if fake is None else fake, clock=FetchClock(CALLS_TIMES))
+        served = provider(transcripts=CALLS_OF_SEASONS) if fake is None else fake
+        return calls_client(served, clock=FetchClock(CALLS_FETCHED_AT))
 
 
 @pytest.fixture(autouse=True)
@@ -210,7 +218,7 @@ def served(monkeypatch) -> FakeEdgar:
     real = EdgarClient
 
     def build(user_agent: str | None) -> EdgarClient:
-        return real(user_agent, fetch=fake, sleep=RecordingSleep(), clock=FetchClock())
+        return real(user_agent, fetch=fake, sleep=RecordingSleep(), clock=FetchClock(FETCHED_AT))
 
     monkeypatch.setattr(cli_module, "EdgarClient", build)
     return fake
@@ -219,11 +227,11 @@ def served(monkeypatch) -> FakeEdgar:
 @pytest.fixture
 def answering(monkeypatch) -> FakeEarningsCalls:
     """The fake provider behind the ``EarningsCallsClient`` that ``main`` builds from the setting."""
-    fake = provider()
+    fake = provider(transcripts=CALLS_OF_SEASONS)
     real = EarningsCallsClient
 
     def build(api_key: str | None) -> EarningsCallsClient:
-        return real(api_key, fetch=fake, sleep=RecordingSleep(), clock=FetchClock(CALLS_TIMES))
+        return real(api_key, fetch=fake, sleep=RecordingSleep(), clock=FetchClock(CALLS_FETCHED_AT))
 
     monkeypatch.setattr(cli_module, "EarningsCallsClient", build)
     return fake
@@ -265,8 +273,12 @@ def test_parser_defaults_follow_the_procedure():
         assert (listed.window_from, listed.window_to) == (date(2025, 12, 1), date(2026, 10, 8))
         assert parser.parse_args([command, "INTC", "--refresh"]).refresh is True
     parsed = parser.parse_args(["check", "INTC"])
-    assert (parsed.ticker, parsed.reports) == ("INTC", [])
-    assert parser.parse_args(["check", "INTC", "a.md", "b.md"]).reports == [Path("a.md"), Path("b.md")]
+    assert (parsed.ticker, parsed.readings) == ("INTC", [])
+    assert parser.parse_args(["check", "INTC", "a.md", "b.md"]).readings == [Path("a.md"), Path("b.md")]
+    shown = parser.parse_args(["show"])
+    assert (shown.tickers, shown.watchlist) == ([], workflow.WATCHLIST)
+    assert parser.parse_args(["show", "intc", "AMD"]).tickers == ["intc", "AMD"]
+    assert not hasattr(shown, "window_from") and not hasattr(shown, "refresh")
     for command in TICKER_COMMANDS:
         parsed = parser.parse_args([command, "INTC", "--data-dir", "elsewhere"])
         assert (parsed.command, parsed.ticker, parsed.data_dir) == (command, "INTC", Path("elsewhere"))
@@ -307,16 +319,22 @@ def test_main_reads_the_real_settings_by_default():
         (
             ["plan", "--help"],
             [
-                "the series and the next action (read-only)",
+                "readings and report in the window and the next action (read-only)",
                 "--from YYYY-MM-DD",
                 "--to YYYY-MM-DD",
                 "--refresh",
             ],
         ),
-        (["text", "--help"], ["whose text differs from its derivation", "TICKER"]),
-        (["check", "--help"], ["[REPORT_PATH ...]", "default: every per-document report in reports/TICKER/"]),
-        (["render", "--help"], ["write a new time series of every complete period"]),
-        (["show", "--help"], ["print the action plan gives over its default window"]),
+        (["derive", "--help"], ["each when it is missing or differs from its derivation", "TICKER"]),
+        (
+            ["check", "--help"],
+            ["[READINGS_PATH ...]", "default: every season's readings.md in reports/TICKER/"],
+        ),
+        (["render", "--help"], ["write the report of every season whose readings pass"]),
+        (
+            ["show", "--help"],
+            ["print each ticker's newest season report and the ranking", "--watchlist PATH"],
+        ),
     ],
 )
 def test_help_exits_0_and_describes_every_command(capsys, monkeypatch, argv, expected):
@@ -343,9 +361,17 @@ def test_help_exits_0_and_describes_every_command(capsys, monkeypatch, argv, exp
             "argument COMMAND: invalid choice: 'transcribe'",
             id="transcribe-is-gone",
         ),
-        pytest.param(["text"], f"{PROGRAM} text", "the following arguments are required: TICKER", id="text"),
         pytest.param(
-            ["text", "INTC", "--rebuild"], PROGRAM, "unrecognized arguments: --rebuild", id="rebuild-is-gone"
+            ["text", "INTC"], PROGRAM, "argument COMMAND: invalid choice: 'text'", id="text-is-gone"
+        ),
+        pytest.param(
+            ["derive"], f"{PROGRAM} derive", "the following arguments are required: TICKER", id="derive"
+        ),
+        pytest.param(
+            ["derive", "INTC", "--rebuild"],
+            PROGRAM,
+            "unrecognized arguments: --rebuild",
+            id="rebuild-is-gone",
         ),
         pytest.param(
             ["check"], f"{PROGRAM} check", "the following arguments are required: TICKER", id="check"
@@ -353,18 +379,23 @@ def test_help_exits_0_and_describes_every_command(capsys, monkeypatch, argv, exp
         pytest.param(
             ["check", "INTC", ""],
             f"{PROGRAM} check",
-            "argument REPORT_PATH: expected a file path, got an empty value",
+            "argument READINGS_PATH: expected a file path, got an empty value",
             id="check-empty-path",
         ),
         pytest.param(
             ["render"], f"{PROGRAM} render", "the following arguments are required: TICKER", id="render"
         ),
-        pytest.param(["show", "INTC", "AMD"], PROGRAM, "unrecognized arguments: AMD", id="show-two-tickers"),
         pytest.param(
-            ["text", "INTC", "--from", "2026-01-01"],
+            ["show", "INTC", "--from", "2026-01-01"],
             PROGRAM,
             "unrecognized arguments: --from 2026-01-01",
-            id="text-window",
+            id="show-window",
+        ),
+        pytest.param(
+            ["derive", "INTC", "--from", "2026-01-01"],
+            PROGRAM,
+            "unrecognized arguments: --from 2026-01-01",
+            id="derive-window",
         ),
         pytest.param(
             ["plan", "INTC", "--to", "20261008"],
@@ -384,7 +415,7 @@ def test_help_exits_0_and_describes_every_command(capsys, monkeypatch, argv, exp
     ],
 )
 def test_malformed_command_lines_exit_2_before_touching_data(capsys, layout, argv, prog, detail):
-    data = ["--data-dir", str(layout.root)] if argv and argv[0] != "record" else []
+    data = ["--data-dir", str(layout.root)] if argv and argv[0] not in ("record", "text") else []
     message = rejected(capsys, *argv, *data)
     assert message.startswith(f"{prog}: {detail}"), message
     assert not layout.root.exists()
@@ -394,14 +425,11 @@ def test_malformed_command_lines_exit_2_before_touching_data(capsys, layout, arg
 
 
 def test_the_window_defaults_to_the_two_years_ending_today_and_may_be_truncated(cli, layout):
-    served = edgar(documents=(*OLD_DOCUMENTS, *FILINGS.values()))
-    answering = provider(transcripts=(CALL_Q2, CALL_Q1, CALL_OLD_Q))  # the window holds 2025-09-27 too
-
-    output = cli("fetch", "INTC", client=client(served), calls=Provider.client(answering)).json()
+    output = cli("fetch", "INTC", client=client(edgar())).json()
 
     (entry,) = output["tickers"]
     assert (output["window"], entry["truncated"]) == (DEFAULT_WINDOW_JSON, True)
-    assert len(entry["periods"]) == 5
+    assert [season["in_window"] for season in entry["seasons"]] == [True] * 5
     planned = cli("plan", "INTC").json()
     # The command line adds the watchlist it read: none, as a ticker was given.
     assert planned == {**workflow.plan(layout, [TICKER], NOW, DEFAULT_WINDOW), "watchlist": None}
@@ -527,12 +555,12 @@ def test_fetch_builds_its_clients_from_the_settings_and_prints_only_that_they_ar
         "set",
         WINDOW_JSON,
     )
-    assert (output["transcript_requests"], output["api_key"], output["stopped"]) == (3, "set", None)
+    assert (output["transcript_requests"], output["api_key"], output["stopped"]) == (4, "set", None)
     assert settings.asked == ["SEC_USER_AGENT", "EARNINGSCALLS_API"]
     assert served.urls == list(FETCH_URLS)
     assert answering.urls == list(CALLS_URLS)
     assert [headers["User-Agent"] for _, headers, _ in served.calls] == [USER_AGENT] * len(FETCH_URLS)
-    assert [headers["X-API-Key"] for _, headers, _ in answering.calls] == [CANARY] * 3
+    assert [headers["X-API-Key"] for _, headers, _ in answering.calls] == [CANARY] * 4
     for secret in ("tester@example.com", CANARY):
         assert secret not in outcome.out + outcome.err
         assert all(
@@ -552,18 +580,20 @@ def test_fetch_reads_the_settings_through_common_env(cli, tmp_path, monkeypatch,
     output = cli("fetch", "INTC", *WINDOW_ARGS, settings=lambda name: setting(name, env), calls=None).json()
 
     assert (output["user_agent"], output["api_key"]) == ("set", "set")
-    assert [headers["X-API-Key"] for _, headers, _ in answering.calls] == [CANARY] * 3
+    assert [headers["X-API-Key"] for _, headers, _ in answering.calls] == [CANARY] * 4
 
 
 def test_fetch_with_its_clients_never_reads_the_settings_and_paces_its_requests(cli, layout):
     sleep, calls_sleep = RecordingSleep(), RecordingSleep()
-    provided = calls_client(provider(), calls_sleep, clock=FetchClock(CALLS_TIMES))
+    provided = calls_client(
+        provider(transcripts=CALLS_OF_SEASONS), calls_sleep, clock=FetchClock(CALLS_FETCHED_AT)
+    )
 
     output = cli("fetch", "INTC", *WINDOW_ARGS, client=client(edgar(), sleep), calls=provided).json()
 
-    assert (output["requests"], output["transcript_requests"]) == (len(FETCH_URLS), 3)
-    assert sleep.calls == [PACING] * 9
-    assert calls_sleep.calls == [CALLS_PACING] * 2
+    assert (output["requests"], output["transcript_requests"]) == (len(FETCH_URLS), 4)
+    assert sleep.calls == [PACING] * (len(FETCH_URLS) - 1)
+    assert calls_sleep.calls == [CALLS_PACING] * 3
 
 
 @pytest.mark.parametrize("command", [command for command in COMMANDS if command != "fetch"])
@@ -582,7 +612,7 @@ def test_no_other_command_reads_a_setting(cli, layout, command):
 
 def test_an_edgar_refusal_exits_2_with_one_line_and_keeps_the_files_written_before_it(cli, layout):
     served = edgar()
-    failing = FETCH_URLS[6]  # the second 10-Q
+    failing = filing_url(TEN_Q_2)
     served.responses[failing] = status(503, "Service Unavailable")
 
     message = cli("fetch", "INTC", *WINDOW_ARGS, client=client(served)).error()
@@ -591,11 +621,12 @@ def test_an_edgar_refusal_exits_2_with_one_line_and_keeps_the_files_written_befo
         message
         == f"GET {failing}: HTTP 503 Service Unavailable; EDGAR is unavailable: wait and run fetch again"
     )
-    assert (layout.raw(TICKER) / "edgar/10-K_2025-12-27_0000050863-26-000012/intc-20251227.htm").is_file()
+    assert (layout.raw(TICKER) / RAW["ten_k"]).is_file()
+    assert not (layout.raw(TICKER) / RAW["ten_q_2"]).exists()
 
 
 def test_a_provider_refusal_exits_2_with_one_line_and_keeps_edgars_files(cli, layout):
-    refusing = provider()
+    refusing = provider(transcripts=CALLS_OF_SEASONS)
     refusing.responses[CALLS_URLS[0]] = provider_status(401, "Unauthorized")
 
     message = cli(
@@ -606,12 +637,12 @@ def test_a_provider_refusal_exits_2_with_one_line_and_keeps_edgars_files(cli, la
         f"GET {CALLS_URLS[0]}: HTTP 401 Unauthorized; EarningsCalls.dev refused the key: "
         "check EARNINGSCALLS_API"
     )
-    assert (layout.raw(TICKER) / "edgar/10-K_2025-12-27_0000050863-26-000012/intc-20251227.htm").is_file()
-    assert not calls_directory(layout).exists()
+    assert (layout.raw(TICKER) / RAW["ten_k"]).is_file()
+    assert not list(layout.raw(TICKER).glob("calls_*"))
 
 
 def test_the_providers_request_limit_exits_0_with_the_run_stopped(cli, layout):
-    limited = provider()
+    limited = provider(transcripts=CALLS_OF_SEASONS)
     limited.responses[CALLS_URLS[0]] = provider_status(429, "Too Many Requests", retry_after="60")
 
     output = cli("fetch", "INTC", *WINDOW_ARGS, client=client(edgar()), calls=Provider.client(limited)).json()
@@ -627,28 +658,29 @@ def test_the_providers_request_limit_exits_0_with_the_run_stopped(cli, layout):
 
 def test_refresh_reaches_fetch_and_plan(cli, layout):
     cli("fetch", "INTC", *WINDOW_ARGS, client=client(edgar()))
-    served, answering = edgar(), provider()
+    served, answering = edgar(), provider(transcripts=CALLS_OF_SEASONS)
 
     refreshed = cli(
         "fetch",
         "INTC",
         *WINDOW_ARGS,
         "--refresh",
-        client=client(served),
-        calls=calls_client(answering, clock=FetchClock(REFRESH_TIMES)),
+        client=client(served, start=FETCHED_AT + timedelta(minutes=10)),
+        calls=calls_client(answering, clock=FetchClock(CALLS_FETCHED_AT + timedelta(minutes=10))),
     ).json()
 
     assert refreshed["refresh"] is True
     assert (served.urls, answering.urls) == (list(FETCH_URLS), list(CALLS_URLS))
     (entry,) = refreshed["tickers"]
-    assert {period["filing"]["status"] for period in entry["periods"]} == {"verified"}
-    assert [item["status"] for item in entry["calls"]["transcripts"]] == ["verified", "verified"]
+    assert {season["filing"]["status"] for season in entry["seasons"]} == {"verified"}
+    assert [item["status"] for item in entry["calls"]["transcripts"]] == ["verified"] * 3
+    assert entry["companyfacts"]["status"] == "reused"
     planned = cli("plan", "INTC", *WINDOW_ARGS, "--refresh").json()
     assert planned["refresh"] is True
     (ticker,) = planned["tickers"]
     assert (ticker["action"], ticker["reason"]) == ("fetch", workflow.REFRESH_REASON)
     unrefreshed = cli("plan", "INTC", *WINDOW_ARGS).json()
-    assert (unrefreshed["refresh"], unrefreshed["tickers"][0]["action"]) == (False, "text")
+    assert (unrefreshed["refresh"], unrefreshed["tickers"][0]["action"]) == (False, "derive")
 
 
 def test_fetch_and_plan_without_tickers_take_the_stock_section_of_the_watchlist(cli, layout, tmp_path):
@@ -674,23 +706,25 @@ def test_the_pipeline_end_to_end_through_the_command_line(cli, layout, clock):
     fetched = cli("fetch", "INTC", *WINDOW_ARGS, client=client(edgar())).json()
     assert fetched["tickers"][0]["status"] == "fetched"
     assert fetched["tickers"][0]["calls"]["status"] == "fetched"
-    assert cli("plan", "INTC", *WINDOW_ARGS).json()["tickers"][0]["action"] == "text"
+    assert cli("plan", "INTC", *WINDOW_ARGS).json()["tickers"][0]["action"] == "derive"
 
-    texts = cli("text", "INTC").json()
-    assert {document["status"] for document in texts["documents"]} == {"published"}
+    derived = cli("derive", "INTC").json()
+    assert {document["status"] for document in derived["documents"]} == {"published"}
+    assert [entry["status"] for entry in derived["measures"]] == ["published"] * 5
     assert cli("plan", "INTC", *WINDOW_ARGS).json()["tickers"][0]["action"] == "research"
 
-    for role in SAMPLES:
-        write_report(layout, role)
+    for row in WINDOW_SEASONS:
+        write_readings(layout, row.period)
     checked = cli("check", "INTC").json()
-    assert [report["valid"] for report in checked["reports"]] == [True] * len(SAMPLES)
+    assert [readings["valid"] for readings in checked["readings"]] == [True] * 3
     assert cli("plan", "INTC", *WINDOW_ARGS).json()["tickers"][0]["action"] == "render"
 
     rendered = cli("render", "INTC").json()
-    assert rendered["path"] == str(layout.reports(TICKER) / SERIES)
+    assert [report["season"] for report in rendered["reports"]] == ["2025-12-27", "2026-03-28", "2026-06-27"]
     later = clock.tick(60)
     planned = cli("plan", "INTC", *WINDOW_ARGS, now=later).json()["tickers"][0]
-    assert (planned["action"], planned["series"]["status"]) == ("reuse", "fresh")
+    assert planned["action"] == "reuse"
+    assert {season["report"]["status"] for season in planned["seasons"] if season["in_window"]} == {"fresh"}
 
     again = cli(
         "fetch", "INTC", *WINDOW_ARGS, client=client(edgar()), calls=Provider.client(FakeEarningsCalls())
@@ -698,29 +732,39 @@ def test_the_pipeline_end_to_end_through_the_command_line(cli, layout, clock):
     assert again.json()["transcript_requests"] == 0  # nothing due: the provider is not asked
 
     shown = cli("show", "INTC", now=later).text()
-    assert shown.startswith("Action: fetch (default window 2024-10-08 to 2026-10-08): the 10-K ")
-    assert f"Series: {layout.reports(TICKER) / SERIES} (fresh)." in shown
-    assert "\n\n# INTC · Issuer disclosures · as of 2026-07-24\n" in shown
+    report = rendered["reports"][-1]["path"]
+    # The default window also holds the two seasons fetched as baselines, which have no readings.
+    assert shown.startswith(
+        "INTC: action research: readings missing or failing check: 2024-12-28 (missing), "
+        f"2025-09-27 (missing). Newest report: {report} (fresh).\n\n# INTC · 2026-06-27 · season report\n"
+    )
+    ranking = shown.split("\n## Ranking\n\n")[1].splitlines()
+    assert ranking[2].startswith("| INTC | 2026-06-27 | ")
+    assert ranking[2].endswith(f" | {report} |")
+    assert len(ranking) == 3
 
 
 def test_check_with_problems_exits_0_and_lists_them(cli, layout):
     research(layout)
-    write_report(
-        layout,
-        "ten_k",
-        report_text(DOC_IDS["ten_k"], upstream_shortage=["Not a sentence of the 10-K at all."]),
+    broken = readings_text(
+        Q2,
+        i3_6=Reading(
+            DOC_IDS["ten_q_1"], "yellow", quotes=(("Not a sentence of the 10-Q at all.", QUOTE_FILING[1]),)
+        ),
     )
+    path = write_readings(layout, Q2, broken)
 
-    output = cli("check", "INTC", str(report_file(layout, "ten_k"))).json()
+    output = cli("check", "INTC", str(path)).json()
 
+    line = broken.splitlines().index("> Not a sentence of the 10-Q at all.") + 1
     assert output == {
         "ticker": TICKER,
-        "reports": [
+        "readings": [
             {
-                "path": str(report_file(layout, "ten_k")),
-                "document": DOC_IDS["ten_k"],
+                "path": str(path),
+                "season": "2026-06-27",
                 "valid": False,
-                "problems": [{"line": 5, "message": "quote not found in the document's derived text"}],
+                "problems": [{"line": line, "message": "quote not found in the document's derived text"}],
             }
         ],
     }
@@ -729,35 +773,52 @@ def test_check_with_problems_exits_0_and_lists_them(cli, layout):
 def test_render_refusals_exit_2_with_one_line(cli, layout):
     fetch(layout)
 
+    assert cli("render", "INTC").error() == f"{TICKER}: no season has readings; run plan"
+    write_readings(layout, Q2)
     assert cli("render", "INTC").error() == (
-        f"{TICKER}: no period is complete: every document of a period needs a report that passes check"
+        f"{TICKER}: no report to write: 2026-06-27: 5 text files missing or out of date; run derive"
     )
     research(layout)
-    assert cli("render", "INTC").code == 0
-    assert cli("render", "INTC").error().endswith(f"{SERIES} already exists; refusing to overwrite it")
+    first = cli("render", "INTC").json()
+    assert len(first["reports"]) == 3
+    assert cli("render", "INTC").json() == {
+        "ticker": TICKER,
+        "reports": [],
+        "current": ["2025-12-27", "2026-03-28", "2026-06-27"],
+        "skipped": [],
+    }
 
 
-def test_an_invalid_raw_file_refuses_text_check_and_render(cli, layout):
+def test_an_invalid_raw_file_refuses_derive_check_and_render(cli, layout):
     research(layout)
-    place(calls_directory(layout) / "stray.pdf", b"%PDF-1.6\n")
+    place(layout.raw(TICKER) / "stray.pdf", b"%PDF-1.6\n")
 
-    for command in ("text", "check", "render"):
+    for command in ("derive", "check", "render"):
         message = cli(command, "INTC").error()
         assert message.startswith(f"{TICKER}: 1 file in raw/ failed validation; first: ")
     assert cli("plan", "INTC", *WINDOW_ARGS).json()["tickers"][0]["action"] == "fetch"
-    assert "Invalid file: " in cli("show", "INTC").text()
+    assert "No season report can be rendered now." in cli("show", "INTC").text()
 
 
-def test_json_output_escapes_non_ascii_values(cli, layout, tmp_path):
+def test_json_output_escapes_non_ascii_values(cli, layout):
     research(layout)
-    draft = place(tmp_path / "résumé.md", "# résumé\n")
+    draft = place(readings_file(layout, Q2).parent / "résumé.md", "# résumé\n")
 
     output = cli("check", "INTC", str(draft)).json()
 
-    assert output["reports"][0]["document"] == "résumé"
+    assert output["readings"][0]["path"].endswith("résumé.md")
 
 
-@pytest.mark.parametrize("command", TICKER_COMMANDS)
+def test_a_draft_outside_a_season_folder_is_refused(cli, layout, tmp_path):
+    research(layout)
+    draft = place(tmp_path / "draft.md", "# draft\n")
+
+    assert cli("check", "INTC", str(draft)).error() == (
+        f"{draft}: a readings draft lies in its season's folder, named YYYY-MM-DD"
+    )
+
+
+@pytest.mark.parametrize("command", (*TICKER_COMMANDS, "show"))
 @pytest.mark.parametrize("ticker", ["../INTC", "INTC/x", "ÎNTC"])
 def test_unsafe_tickers_exit_2_before_any_write(cli, layout, command, ticker):
     assert cli(command, ticker).error() == "ticker must be a US symbol without path or query characters"
@@ -818,12 +879,7 @@ def test_module_entry_point_uses_its_own_data_directory_and_watchlist(tmp_path):
     # The subprocess runs on the real clock: the raw files are written just before it, through
     # the public path, so no stored time is later than the real now.
     start = datetime.now(UTC) - timedelta(minutes=10)
-    fetch(
-        data,
-        times=tuple(start + timedelta(seconds=second) for second in range(len(FETCH_TIMES))),
-        calls_times=tuple(start + timedelta(seconds=30 + second) for second in range(len(CALLS_TIMES))),
-        now=start,
-    )
+    fetch(data, start=start, calls_start=start + timedelta(seconds=30), now=start)
     # A watchlist at the repository root is never read: the domain reads its own alone.
     (root / "watchlist.json").write_text('{"stock": ["amd"]}', encoding="utf-8")
     (domain / "watchlist.json").write_text('{"stock": ["intc"]}', encoding="utf-8")
@@ -836,20 +892,25 @@ def test_module_entry_point_uses_its_own_data_directory_and_watchlist(tmp_path):
     assert planned.stdout.isascii()
     assert json.loads(planned.stdout)["watchlist"] == str(domain / "watchlist.json")
     (entry,) = json.loads(planned.stdout)["tickers"]
-    assert (entry["ticker"], entry["action"]) == (TICKER, "text")
-    assert [period["period"] for period in entry["periods"]] == ["2025-12-27", "2026-03-28", "2026-06-27"]
+    assert (entry["ticker"], entry["action"]) == (TICKER, "derive")
+    assert [season["season"] for season in entry["seasons"] if season["in_window"]] == [
+        "2025-12-27",
+        "2026-03-28",
+        "2026-06-27",
+    ]
 
     checked = run_module(root, working, "check", "INTC")
     assert (checked.returncode, checked.stderr, json.loads(checked.stdout)) == (
         0,
         "",
-        {"ticker": TICKER, "reports": []},
+        {"ticker": TICKER, "readings": []},
     )
 
-    refused = run_module(root, working, "check", "INTC", str(tmp_path / "missing.md"))
+    missing = data.reports(TICKER) / "2026-06-27" / "missing.md"
+    refused = run_module(root, working, "check", "INTC", str(missing))
     assert (refused.returncode, refused.stderr) == (0, "")
-    assert json.loads(refused.stdout)["reports"][0]["problems"][0]["message"] == (
-        "the report cannot be read: file not found"
+    assert json.loads(refused.stdout)["readings"][0]["problems"][0]["message"] == (
+        "the readings cannot be read: file not found"
     )
 
     future = run_module(root, working, "plan", "--to", "2999-01-01")

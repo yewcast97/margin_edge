@@ -38,16 +38,16 @@ every value read of its type and grammar, every other key ignored. A calls page 
 ``total_pages``), ``ambiguous`` and ``issuer_count``; a capture is pages 1 to
 ``total_pages`` (page 1 alone when it lists no call) of one ``total``, every call's
 ``stock_symbol`` the ticker's, of one issuer, its ids unique, and not ``ambiguous``. A
-transcript holds ``data.event_type`` ``earnings``, ``data.header`` (``title``,
-``event_date_time``, the instant the capture lists for the call) and ``data.components``
-(the turns: ``order`` from 0 without a gap, ``speaker_name``, ``speaker_type`` one of
-``ROLES``, ``text``). Every problem is one ``ValueError`` line naming the field and the
-rule, never a value read.
+transcript holds ``data.event_type`` ``earnings``, ``data.duration_seconds`` (a whole
+number from 0, null or absent), ``data.header`` (``title``, ``event_date_time``, the instant
+the capture lists for the call) and ``data.components`` (the turns: ``order`` from 0 without
+a gap, ``speaker_name``, ``speaker_type`` one of ``ROLES``, ``text``). Every problem is one
+``ValueError`` line naming the field and the rule, never a value read.
 
 The derived text of a call (``call_text``) is read in block mode: per turn, in order, a
 heading line ``{speaker_name} ({speaker_type})``, then the turn's text, whose ``\\r\\n``
 paragraph breaks become line breaks, normalised as plain text (``text.plain_text``).
-``CallText.turns`` gives each turn's words as offsets into it (``research.Turn``), which
+``CallText.turns`` gives each turn's words as offsets into it (``Turn``), which
 ``check`` holds every call quote to.
 
 The HTTP layer is a ``client.Fetch`` callable, so tests replace it (and ``sleep`` and
@@ -82,7 +82,6 @@ from .client import (
     lower_headers,
     read_body,
 )
-from .research import Turn
 from .text import normalise, plain_text
 
 HOST: Final = "earningscalls.dev"
@@ -470,6 +469,7 @@ class _TranscriptData(BaseModel):
     model_config = _CONFIG
 
     event_type: Literal["earnings"]
+    duration_seconds: Count | None = None
     header: _Header
     components: Annotated[list[_Component], Field(min_length=1)]
 
@@ -626,11 +626,13 @@ class TranscriptTurn:
 
 @dataclass(frozen=True)
 class Transcript:
-    """A call's transcript, read strictly: its title and its turns in order."""
+    """A call's transcript, read strictly: its title, its time, its turns in order and the
+    duration the provider gives (None where it gives none)."""
 
     title: str
     at: datetime
     turns: tuple[TranscriptTurn, ...]
+    duration_seconds: int | None = None
 
 
 def parse_transcript(body: bytes, event: CallEvent) -> Transcript:
@@ -650,12 +652,30 @@ def parse_transcript(body: bytes, event: CallEvent) -> Transcript:
             TranscriptTurn(component.speaker_name, component.speaker_type, component.text)
             for component in data.components
         ),
+        duration_seconds=data.duration_seconds,
     )
 
 
 @dataclass(frozen=True)
+class Turn:
+    """One speaker's turn in a call document's derived text: the offsets of its words (its
+    heading line left out), the speaker's name as the heading writes it and the speaker's
+    role as the transcript provider gives it (``executive``, ``analyst``, ``operator`` ...)."""
+
+    start: int
+    end: int
+    speaker: str
+    role: str
+
+    @property
+    def heading(self) -> str:
+        """The heading line the derived text writes before the turn's words."""
+        return f"{self.speaker} ({self.role})"
+
+
+@dataclass(frozen=True)
 class CallText:
-    """A call's derived text and, per turn, its words' offsets in it (``research.Turn``)."""
+    """A call's derived text and, per turn, its words' offsets in it (``Turn``)."""
 
     text: str
     turns: tuple[Turn, ...]

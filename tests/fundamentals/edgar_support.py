@@ -58,7 +58,9 @@ import html
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
+
+from market_state_research.common.times import to_eastern
 
 TICKER = "INTC"
 CIK = "0000050863"
@@ -192,6 +194,7 @@ class Row:
     period: date | None
     primary_document: str
     items: str = ""
+    accepted: str | None = None  # EDGAR's acceptanceDateTime text; None: 20:05 UTC on ``filed``
 
 
 OLD_TEN_K = Row("10-K", "0000050863-25-000009", date(2025, 1, 31), date(2024, 12, 28), "intc-20241228.htm")
@@ -241,6 +244,18 @@ def tickers_json(entries: Sequence[tuple[int, str, str]] = TICKERS) -> str:
     return json.dumps(body, separators=(",", ":"))
 
 
+def accepted_text(row: Row) -> str:
+    """The row's ``acceptanceDateTime`` as EDGAR writes it: its own, else 20:05 UTC on its filing date."""
+    if row.accepted is not None:
+        return row.accepted
+    return f"{row.filed.isoformat()}T20:05:00.000Z"
+
+
+def accepted_at(row: Row) -> datetime:
+    """The New York time the row's ``acceptanceDateTime`` names."""
+    return to_eastern(datetime.fromisoformat(accepted_text(row)[:-1]).replace(tzinfo=UTC), "accepted")
+
+
 def _recent(rows: Sequence[Row]) -> dict[str, list[object]]:
     """EDGAR's ``filings.recent`` columns, in EDGAR's column order."""
     issuer = [row.form in _ISSUER_FORMS for row in rows]
@@ -248,9 +263,7 @@ def _recent(rows: Sequence[Row]) -> dict[str, list[object]]:
         "accessionNumber": [row.accession for row in rows],
         "filingDate": [row.filed.isoformat() for row in rows],
         "reportDate": [row.period.isoformat() if row.period else "" for row in rows],
-        "acceptanceDateTime": [
-            f"{row.filed.isoformat()}T20:05:{index % 60:02d}.000Z" for index, row in enumerate(rows)
-        ],
+        "acceptanceDateTime": [accepted_text(row) for row in rows],
         "act": ["34" if flag else "" for flag in issuer],
         "form": [row.form for row in rows],
         "fileNumber": ["000-06217" if flag else "" for flag in issuer],
