@@ -131,11 +131,12 @@ three by hand, under that domain's `AGENTS.md`:
 - **`formatted/` is a function of `raw/`.** Its command (`record`, or `derive`) rebuilds it and
   overwrites it; nothing there is the only copy of anything. In `stock_iv_regime` and
   `market_position_regime` a formatted table caches the levels read from `raw/` (an implied
-  volatility, a close, a balance, a position) and nothing derived from them: no percentile,
-  correlation or other indicator, each of which `record` and `show` compute again from those
-  levels for every report. In `posts` it is not: the
-  fact-check of a raw file rests on the evidence found at each check as well, is updated in
-  place with a dated history, cannot be rebuilt, and is kept like `raw/`.
+  volatility, a close, a balance, a position) and nothing derived from them, not even the
+  difference of two levels: no net, spread, percentile, correlation or other indicator, each of
+  which `record` and `show` compute again from those levels for every report, so any value
+  derived later, by a report or a hypothesis, rests on the same levels. In `posts` it is not:
+  the fact-check of a raw file rests on the evidence found at each check as well, is updated
+  in place with a dated history, cannot be rebuilt, and is kept like `raw/`.
 - **`reports/` is never overwritten.** A report name that exists fails the command, and
   older reports stay: no command deletes one, and neither does the bot. The fundamentals
   domain's readings are the bot's: it may rewrite a season's readings until `check` passes

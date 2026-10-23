@@ -34,9 +34,9 @@ the user's.
 Each series is named as `record` and the reports state it. Every value the indicators rest
 on is archived in the tables, and the tables hold nothing derived from those values: the
 month's three balances; each week's long, short and spreading positions of both groups as
-reported, the open interest, the contract's unit and the two nets in E-mini equivalents;
-each session's VIX close and SKEW as Cboe wrote them. Every percentile is computed again
-from them for each report.
+reported, the open interest and the contract's unit and multiplier; each session's VIX close
+and SKEW as Cboe wrote them. Every net and every percentile is computed again from them for
+each report.
 
 ## Method
 
@@ -107,8 +107,8 @@ rounded half-even once at the end; zero is written without a sign (`indicators.p
 
 Three tables in `formatted/market/`, rewritten from `raw/` by `record` and replaced only when
 their bytes would change. They cache the levels the indicators rest on and nothing derived
-from them: no percentile, which `record` and `show` compute again for each report. Python
-compares them by bytes and never parses them.
+from them: no net and no percentile, which `record` and `show` compute again for each report.
+Python compares them by bytes and never parses them.
 
 `margin_debt.csv`: one row per month of the workbook, oldest first. Columns, in order:
 
@@ -130,7 +130,6 @@ compares them by bytes and never parses them.
 | `open_interest` | The open interest, in the report's contracts. |
 | `asset_mgr_long`, `asset_mgr_short`, `asset_mgr_spread` | Asset managers' positions, in the report's contracts. |
 | `lev_money_long`, `lev_money_short`, `lev_money_spread` | Leveraged funds' positions, in the report's contracts. |
-| `asset_mgr_net_emini`, `lev_money_net_short_emini` | The two nets in E-mini equivalents. |
 | `fetched_at` | When the week's answer was fetched, ISO 8601 with its New York offset. |
 | `source` | The raw file name of the week's answer. |
 

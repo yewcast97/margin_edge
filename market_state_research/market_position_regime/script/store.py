@@ -71,8 +71,6 @@ FUTURES_COLUMNS: Final = (
     "lev_money_long",
     "lev_money_short",
     "lev_money_spread",
-    "asset_mgr_net_emini",
-    "lev_money_net_short_emini",
     "fetched_at",
     "source",
 )
@@ -312,8 +310,8 @@ def margin_text(rows: Iterable[MarginRow]) -> str:
 
 
 def futures_text(rows: Iterable[FuturesRow]) -> str:
-    """The index futures table of ``rows`` in the given order: the positions and the two nets,
-    not their percentiles."""
+    """The index futures table of ``rows`` in the given order: the positions as reported, not
+    the two nets or their percentiles."""
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(FUTURES_COLUMNS)
@@ -331,8 +329,6 @@ def futures_text(rows: Iterable[FuturesRow]) -> str:
                 report.lev_money_long,
                 report.lev_money_short,
                 report.lev_money_spread,
-                report.asset_mgr_net,
-                report.lev_money_net_short,
                 et_isoformat(row.stored.fetched_at),
                 row.stored.source,
             ]

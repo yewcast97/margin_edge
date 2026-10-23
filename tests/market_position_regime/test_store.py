@@ -198,12 +198,11 @@ def test_the_tables_hold_every_row_in_date_order(layout):
         == ",".join(FUTURES_COLUMNS)
         == (
             "report_date,contract_units,multiplier,open_interest,asset_mgr_long,asset_mgr_short,asset_mgr_spread,"
-            "lev_money_long,lev_money_short,lev_money_spread,asset_mgr_net_emini,lev_money_net_short_emini,"
-            "fetched_at,source"
+            "lev_money_long,lev_money_short,lev_money_spread,fetched_at,source"
         )
     )
     assert futures[2] == (
-        "2026-10-13,(S&P 500 INDEX X $50.00),50,2000,1800,1000,50,100,500,20,800,400,"
+        "2026-10-13,(S&P 500 INDEX X $50.00),50,2000,1800,1000,50,100,500,20,"
         "2026-10-20T12:00:00-04:00,cftc_tff_2026-10-05_2026-10-18_20261020T120000EDT.json"
     )
     table = indices_text(indices(layout).values()).splitlines()
