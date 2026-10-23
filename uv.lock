@@ -735,7 +735,7 @@ wheels = [
 [[package]]
 name = "seikan"
 version = "4.0.0"
-source = { git = "https://github.com/yewcast97/seikan?branch=main#6e886b84d4732d8a76cfd01c0edb780e40f5ad3a" }
+source = { git = "https://github.com/yewcast97/seikan?branch=main#3ea15cd8eb34f61dc30a9010b7f70c2f184e0763" }
 dependencies = [
     { name = "numba" },
     { name = "numpy" },
