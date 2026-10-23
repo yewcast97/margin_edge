@@ -50,8 +50,8 @@ it nowhere but where it is used.
   When the key is missing or malformed, ask the user to add or correct the line themselves;
   never ask for the key in the conversation or open an account.
 
-**Limits.** An observation: 1 to 600 characters on one line; a quote: 20 to 800 characters
-after normalisation.
+**Limits.** An old or new value: 1 to 600 characters on one line; a quote: 20 to 800
+characters after normalisation.
 
 ## 2. Fetch: write the span's documents into `raw/`
 
@@ -141,8 +141,8 @@ prepared remarks are the turns before the first analyst's, the questions and ans
 turns from it on. A `.txt` document's line is not a statement (AGENTS.md, Quotes): read the
 whole sentence around every line you find.
 
-Read each bot item's rule (AGENTS.md, The catalogue) and compare the season's documents with
-those of the item's baseline:
+Read each bot item's rule (AGENTS.md, The catalogue): it names the value to read, once in the
+documents of the item's baseline (its old value) and once in the season's (its new value):
 
 | Section | Where to read |
 | --- | --- |
@@ -191,24 +191,30 @@ grep -n -i -E "dividend|repurchase|buyback|authoriz|covenant|waiver|refinanc|not
 
 - `baseline:` the `DOC_ID`s of the baseline documents you read for the item, from its baseline
   kind's row of `measures.md`'s `## Baselines`, joined by `; `; `none` for an item whose
-  baseline is `none` and with the statuses `no baseline`, `not applicable` and `unavailable`.
-- `level:` what the item's rule gives: `red`, `yellow` or `grey` where it triggers, `none`
-  where it does not; or the status that applies (AGENTS.md, The items): `not applicable` for
+  baseline is `none` and with the old values `no baseline`, `not applicable` and `unavailable`.
+- `old:` the value the item's rule names as the baseline documents state it, and `new:` the
+  same value as the season's documents state it, each one line of facts: the figures with their
+  units and periods, the names, counts and dates (`old: full-year revenue $61.0 to $65.0
+  billion, midpoint $63.0 billion` and `new: full-year revenue $60.0 to $64.0 billion, midpoint
+  $62.0 billion`), written alike on both lines so that the two read side by side; `none` when
+  the documents state nothing of the kind (no 8-K with Item 4.01, no going concern doubt).
+  State both values whatever the size of the change, and never a judgment, a cause the
+  documents do not state, or valuation, forecast or advice wording. The old value of an item
+  whose baseline is `none` is `—`.
+- Instead of a value, the status that applies (AGENTS.md, The items): `not applicable` for
   every annual item in a 10-Q season and every proxy item in a season without a `DEF 14A`
-  among its filings; `unavailable` for every call item while the call line of `measures.md` is
-  not `transcript`; `no baseline` only while the item's baseline row lists no document;
-  `not disclosed` or `not computable` only for an item the catalogue says may be so.
-- `observation:` one line of facts: the values compared with their units and periods, the
-  names, counts and dates, and which way the rule went (`midpoint $63.0 billion against $61.0
-  billion`, `2 departures: the CFO on 2026-02-09`); never a judgment, a cause the documents do
-  not state, or valuation, forecast or advice wording.
-- Quotes: the statements the observation rests on, each followed by its attribution line,
-  `— DOC_ID` or, for a call, `— DOC_ID, Speaker (role)` as the turn's heading writes it. A
-  `red` level quotes at least one statement of the season's own documents; a quote comes from
-  the season's documents or from those its baseline line names. Which statements to quote,
-  that a quote is a whole statement copied verbatim from the derived text, the whole statements
-  `check` refuses and the cuts it cannot see, and the length limits are the quote rules
-  (AGENTS.md, Quotes).
+  among its filings, and `unavailable` for every call item while the call line of
+  `measures.md` is not `transcript`, each as the new value and, for an item with a baseline, the
+  old one; `no baseline` as the old value only, while the item's baseline row lists no
+  document (for a call item, no call); `not disclosed` or `not computable` only for an item the
+  catalogue says may be so.
+- Quotes: the statements the values rest on, each followed by its attribution line,
+  `— DOC_ID` or, for a call, `— DOC_ID, Speaker (role)` as the turn's heading writes it. An
+  item of `high` importance whose new value is stated, not `none`, quotes at least one
+  statement of the season's own documents; a quote comes from the season's documents or from
+  those its baseline line names. Which statements to quote, that a quote is a whole statement
+  copied verbatim from the derived text, the whole statements `check` refuses and the cuts it
+  cannot see, and the length limits are the quote rules (AGENTS.md, Quotes).
 
 ### 5.3 Check
 
@@ -242,8 +248,7 @@ season whose readings pass and whose newest report is not current, and prints `t
 current) and `skipped[]` (each with `season` and the `reason` its report cannot be rendered).
 `show` writes nothing: per ticker it prints the action `plan` gives over the default window,
 the newest season whose report can be rendered now with its newest report's path and
-freshness, and that report rendered now (or `No season report can be rendered now.`), then the
-`## Ranking` table of the tickers by score.
+freshness, and that report rendered now (or `No season report can be rendered now.`).
 
 The final `plan`, with the tickers and the window of the run's first `plan`, must show `reuse`
 for every supported ticker. A ticker that `fetch` reported `unsupported` (EDGAR does not list
@@ -251,9 +256,9 @@ it, its submissions are refused, or the provider's symbol is ambiguous) stays at
 report it with `fetch`'s reason. One left at `fetch` because `fetch` stopped at the provider's
 request limit: report it with the `stopped` line.
 
-Report for each ticker: its newest season report's path as a link, its score line and its
-triggered `red` items with their quotes and attributions, as the report writes them; the
-ranking; the window, whether it is `truncated`, any `pending_filings`, `skipped_filings` and
+Report for each ticker: its newest season report's path as a link (the report lists every item
+by importance with its old and new values: point to it rather than picking items from it); the
+window, whether it is `truncated`, any `pending_filings`, `skipped_filings` and
 `pending_calls`, each season whose call is `waiting` (with its `reason`) or `unavailable`
 (with its `as_of`) and each whose company facts are `waiting` or `absent`; unsupported tickers
 and calls with their reason, `stopped`, `invalid_files`, `unlisted_files`, the documents
@@ -302,8 +307,8 @@ more:
 | `filing index ACC: …` (`fetch`) | EDGAR changed the index page layout and nothing of the 8-K was written, or, when a `PATH` comes first, an index page in `raw/` no longer parses (do what the line says). Report the line and open an issue with it. |
 | `INTC: no season has readings; run plan` or `INTC: no report to write: PERIOD: REASON` (`render`) | Not an error to report: do what `plan` says; the reason names what the season lacks. |
 | `PATH: a readings draft lies in its season's folder, named YYYY-MM-DD` (`check`) | Move the draft into `data/reports/{T}/{PERIOD}/` and check it there. |
-| `'no baseline' while the baseline is in raw/: DOC_ID; …` | Read those documents and give the item its level. |
+| `'no baseline' while the baseline is in raw/: DOC_ID; …` | Read those documents and give the item its old value. |
 | `DOC_ID is no document of this item's baseline (KIND: SEASONS)` | Name only documents of the seasons `measures.md` lists for the item's baseline. |
 | `a quote must be whole sentences, …` | The quote cuts a statement: quote it from its start to its end (AGENTS.md, Quotes). |
 | `a call's quote names its turn: '— DOC_ID, Speaker (role)', …` or `the quote lies in the turn 'HEADING', not the one its attribution names` | Attribute the quote to the turn its first occurrence lies in, exactly as that turn's heading line writes it. |
-| `an observation states facts only, without valuation, forecast or advice wording; found: …` | Restate the observation as the facts alone, without that word. |
+| `an old or new value states facts only, without valuation, forecast or advice wording; found: …` | Restate the value as the facts alone, without that word. |

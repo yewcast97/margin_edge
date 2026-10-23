@@ -156,7 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
     command(
         "show",
         [listed],
-        "print each ticker's newest season report and the ranking of the tickers by score (read-only)",
+        "print each ticker's newest season report (read-only)",
     )
     return parser
 

@@ -134,7 +134,9 @@ SEASON_OF = {
 CALL_OF_ROLE = {"call_old_q": CALL_OLD_Q, "call_q1": CALL_Q1, "call_q2": CALL_Q2}
 # The bot's call items, which are "unavailable" while the season's call has no transcript.
 UNAVAILABLE = {
-    "i" + item.id.replace(".", "_"): Reading("none", "unavailable", "The season's call has no transcript.")
+    "i" + item.id.replace(".", "_"): Reading(
+        "none", "—" if item.baseline == "none" else "unavailable", "unavailable"
+    )
     for item in BOT_ITEMS
     if item.scope == "call"
 }
@@ -145,10 +147,6 @@ NOT_RAW = (
 FORMER = "the former layout (until 2026-10-23): rename it with .rejected, then run fetch"
 NO_SUBMISSIONS = "no submissions file is in raw/; run fetch"
 NO_REPORT = "No season report can be rendered now."
-RANKING_HEAD = (
-    "| Ticker | Season | Score | red | yellow | grey | Report |\n"
-    "| --- | --- | --- | --- | --- | --- | --- |\n"
-)
 MOVED = (
     "the newest submissions place this filing in the season 2026-03-28, not in this season; rename it with "
     ".rejected and run fetch"
@@ -433,9 +431,7 @@ def test_without_a_listed_season_plan_says_fetch_and_the_offline_commands_refuse
         with pytest.raises(ValueError) as raised:
             command(layout, TICKER, NOW)
         assert str(raised.value) == f"{TICKER}: {reason}"
-    assert workflow.show(layout, [TICKER], NOW) == (
-        f"{TICKER}: action fetch: {reason}.\n\n{NO_REPORT}\n\n## Ranking\n\n{RANKING_HEAD}"
-    )
+    assert workflow.show(layout, [TICKER], NOW) == (f"{TICKER}: action fetch: {reason}.\n\n{NO_REPORT}\n")
 
 
 def test_an_invalid_submissions_file_is_listed_with_why(layout):
@@ -915,8 +911,8 @@ def test_readings_missing_or_failing_plan_research(layout):
 
     write_readings(layout, date(2025, 12, 27))
     write_readings(layout, Q1)
-    two = readings_text(Q2, i3_6=Reading(DOC_IDS["ten_q_1"], "red", "A rule broken twice in one item."))
-    write_readings(layout, Q2, two.replace("observation: A rule", "observation: A buy rule"))
+    two = readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "A rule broken twice in one item."))
+    write_readings(layout, Q2, two.replace("new: A rule", "new: A buy rule"))
 
     planned = entry(layout)
 
@@ -934,7 +930,7 @@ def test_readings_missing_or_failing_plan_research(layout):
 
 def test_a_failing_readings_reason_counts_one_problem_in_the_singular(layout):
     research(layout)
-    write_readings(layout, Q2, readings_text(Q2, i3_6=Reading(DOC_IDS["ten_q_1"], "red", "No quote.")))
+    write_readings(layout, Q2, readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "No quote.")))
 
     planned = entry(layout)
 
@@ -968,7 +964,7 @@ def test_readings_changed_after_the_render_make_the_report_stale(layout):
     write_readings(
         layout,
         Q2,
-        readings_text(Q2, i1_1=Reading(DOC_IDS["exhibit_1"], "none", "The midpoint is unchanged.")),
+        readings_text(Q2, i1_1=Reading(DOC_IDS["exhibit_1"], "not disclosed", "not disclosed")),
     )
 
     planned = entry(layout, LATER)
@@ -1031,11 +1027,16 @@ def test_a_waiting_call_blocks_nothing_and_its_transcript_later_makes_the_report
     lines = path.read_text(encoding="utf-8").split("\n")
     assert lines[4].endswith(" Call: waiting as of the calls list of 2026-07-27.")
     analysts = (
-        "| 8.5 Analysts on the call | unavailable | Python | previous quarter 2026-03-28 (10-Q) | the call "
-        "has no transcript in raw/ (waiting) |"
+        "| low | 8.5 Analysts on the call · distinct analysts asking questions | previous quarter 2026-03-28 "
+        "(10-Q) | unavailable | unavailable | — |"
     )
     assert analysts in lines
-    assert "| 7.1 Opening topics | unavailable | bot | none | The season's call has no transcript. |" in lines
+    assert "note: the call has no transcript in raw/ (waiting)" in lines
+    opening = (
+        "| medium | 7.1 Opening topics | previous quarter 2026-03-28 (10-Q) | unavailable | unavailable | — |"
+    )
+    assert opening in lines
+    assert "| high | 7.4 Statement against the filing | none | — | unavailable | — |" in lines
     assert seasons_of(entry(layout, edt(2026, 7, 27, 8, 0)))["2026-06-27"]["report"]["status"] == "fresh"
 
     # A week later the list is asked for again and holds the call: the report no longer stands.
@@ -1058,7 +1059,8 @@ def test_a_waiting_call_blocks_nothing_and_its_transcript_later_makes_the_report
     )
     workflow.derive(layout, TICKER, after)
     q2 = seasons_of(entry(layout, after))["2026-06-27"]
-    assert q2["readings"] == {"path": str(readings_file(layout, Q2)), "status": "failing", "problems": 8}
+    # Each call item's 'unavailable' is refused: on both lines of the seven with a baseline, on 7.4's new.
+    assert q2["readings"] == {"path": str(readings_file(layout, Q2)), "status": "failing", "problems": 15}
     assert q2["report"]["status"] == "stale"
 
 
@@ -1522,12 +1524,22 @@ def test_render_writes_the_report_of_every_season_whose_readings_pass(layout):
         "Baselines: previous quarter 2026-03-28; same quarter last year none listed; previous 10-K "
         "2025-12-27; previous proxy 2025-12-27.",
         "",
-        # 2.2: the operating margin 11.18% against 5.15% a quarter ago; 2.6: net debt 37.7 against 28.0
-        # billion; 9.4: the call's text over four times the last one's.
-        "Score: 7 (0 red, 2 yellow, 1 grey) over 69 items: 16 read by Python, 51 by the bot, 2 without a "
-        "source; 7 not applicable, 0 not disclosed, 2 not computable, 5 no baseline, 0 unavailable.",
+        "68 items, every one listed by importance (22 high, 37 medium, 9 low): 15 read by Python, 51 by the "
+        "bot, 2 without a source.",
         "",
     ]
+    assert (
+        "| medium | 2.2 Gross and operating margins · operating margin (%) | previous quarter 2026-03-28 "
+        "(10-Q) | 5.15 | 11.18 | +6.03 pp |"
+    ) in lines
+    assert (
+        "| medium | 2.6 Net debt · net debt (USD) | previous quarter 2026-03-28 (10-Q) | 28,000,000,000 | "
+        "37,700,000,000 | +9,700,000,000 (+34.64%) |"
+    ) in lines
+    assert (
+        "| high | 9.5 Call cancelled · the season's call | previous four seasons: 2026-03-28, 2025-12-27, "
+        "2025-09-27, 2024-12-28 | transcript, unavailable, transcript, unavailable | transcript | — |"
+    ) in lines
     ten_k = report_path(layout, "2025-12-27").read_text(encoding="utf-8").split("\n")
     assert ten_k[4].endswith("Call: unavailable as of the calls list of 2026-10-08.")
     assert ten_k[5] == (
@@ -1538,11 +1550,11 @@ def test_render_writes_the_report_of_every_season_whose_readings_pass(layout):
 
 def test_render_skips_a_season_that_cannot_render_and_names_the_current_ones(layout):
     rendered(layout)
-    write_readings(layout, Q1, readings_text(Q1, i3_6=Reading(DOC_IDS["ten_k"], "red", "No quote.")))
+    write_readings(layout, Q1, readings_text(Q1, i3_3=Reading(DOC_IDS["ten_k"], "none", "No quote.")))
     write_readings(
         layout,
         Q2,
-        readings_text(Q2, i1_1=Reading(DOC_IDS["exhibit_1"], "none", "The midpoint is unchanged.")),
+        readings_text(Q2, i1_1=Reading(DOC_IDS["exhibit_1"], "not disclosed", "not disclosed")),
     )
 
     output = workflow.render(layout, TICKER, LATER)
@@ -1570,7 +1582,7 @@ def remove_measures(layout) -> None:
 
 
 def break_readings(layout) -> None:
-    write_readings(layout, Q2, readings_text(Q2, i3_6=Reading(DOC_IDS["ten_q_1"], "red", "No quote.")))
+    write_readings(layout, Q2, readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "No quote.")))
 
 
 def remove_transcript(layout) -> None:
@@ -1645,7 +1657,7 @@ def test_render_never_overwrites_a_report(layout):
     write_readings(
         layout,
         Q2,
-        readings_text(Q2, i1_1=Reading(DOC_IDS["exhibit_1"], "none", "The midpoint is unchanged.")),
+        readings_text(Q2, i1_1=Reading(DOC_IDS["exhibit_1"], "not disclosed", "not disclosed")),
     )
 
     with pytest.raises(FileExists):
@@ -1691,7 +1703,7 @@ def test_names_and_lines_carry_new_york_time(layout):
 # --------------------------------------------------------------------------- show
 
 
-def test_show_prints_each_tickers_newest_report_rendered_now_and_the_ranking(layout):
+def test_show_prints_each_tickers_action_and_newest_report_rendered_now(layout):
     rendered(layout)
 
     shown = workflow.show(layout, [TICKER, "amd"], LATER)
@@ -1704,21 +1716,18 @@ def test_show_prints_each_tickers_newest_report_rendered_now_and_the_ranking(lay
         f"{TICKER}: action research: readings missing or failing check: 2024-12-28 (missing), 2025-09-27 "
         f"(missing). Newest report: {path} (fresh).\n\n"
     )
-    assert shown == (
-        f"{header}{now}\nAMD: action fetch: {NO_SUBMISSIONS}.\n\n{NO_REPORT}\n\n## Ranking\n\n{RANKING_HEAD}"
-        f"| {TICKER} | 2026-06-27 | 7 | 0 | 2 | 1 | {path} |\n"
-    )
+    assert shown == f"{header}{now}\nAMD: action fetch: {NO_SUBMISSIONS}.\n\n{NO_REPORT}\n"
 
 
 def test_show_falls_back_to_the_newest_season_whose_report_renders(layout):
     rendered(layout)
-    write_readings(layout, Q2, readings_text(Q2, i3_6=Reading(DOC_IDS["ten_q_1"], "red", "No quote.")))
+    write_readings(layout, Q2, readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "No quote.")))
 
     shown = workflow.show(layout, [TICKER], LATER)
 
     path = report_path(layout, "2026-03-28")
     assert f" Newest report: {path} (fresh).\n\n# {TICKER} · 2026-03-28 · season report\n" in shown
-    assert shown.endswith(f"| {TICKER} | 2026-03-28 | 4 | 0 | 1 | 1 | {path} |\n")
+    assert "2026-06-27 · season report" not in shown
 
 
 def test_show_names_a_season_never_rendered_without_a_report_file(layout):
@@ -1726,8 +1735,7 @@ def test_show_names_a_season_never_rendered_without_a_report_file(layout):
 
     shown = workflow.show(layout, [TICKER], NOW)
 
-    assert " Newest report: none (missing).\n\n" in shown
-    assert shown.endswith(f"| {TICKER} | 2026-06-27 | 7 | 0 | 2 | 1 | none |\n")
+    assert f" Newest report: none (missing).\n\n# {TICKER} · 2026-06-27 · season report\n" in shown
 
 
 def test_show_renders_no_report_while_a_raw_file_is_invalid(layout):
@@ -1737,7 +1745,7 @@ def test_show_renders_no_report_while_a_raw_file_is_invalid(layout):
     shown = workflow.show(layout, [TICKER], LATER)
 
     assert shown.startswith(f"{TICKER}: action fetch: 1 raw file failed validation (first: {stray}: ")
-    assert shown.endswith(f"\n\n{NO_REPORT}\n\n## Ranking\n\n{RANKING_HEAD}")
+    assert shown.endswith(f"\n\n{NO_REPORT}\n")
 
 
 def test_show_reads_the_watchlist_without_tickers(layout, tmp_path):
@@ -1749,9 +1757,8 @@ def test_show_reads_the_watchlist_without_tickers(layout, tmp_path):
     assert shown.startswith(
         f"AMD: action fetch: {NO_SUBMISSIONS}.\n\n{NO_REPORT}\n\n{TICKER}: action research"
     )
-    assert shown.endswith(
-        f"| {TICKER} | 2026-06-27 | 7 | 0 | 2 | 1 | {report_path(layout, '2026-06-27')} |\n"
-    )
+    assert f" Newest report: {report_path(layout, '2026-06-27')} (fresh).\n\n" in shown
+    assert shown.endswith("\nnote: the old values are newest first\n")
 
 
 def test_show_writes_nothing(layout):

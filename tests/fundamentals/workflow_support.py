@@ -539,25 +539,26 @@ QUOTE_CALL = (CEO_DEMAND, f"{DOC_IDS['call_q2']}, {CEO[0]} ({CEO[1]})")
 
 @dataclass(frozen=True)
 class Reading:
-    """One item's section: its baseline line, level, observation and quotes (text, attribution)."""
+    """One item's section: its baseline line, old and new values and quotes (text, attribution)."""
 
     baseline: str
-    level: str
-    observation: str = "No change from the baseline."
+    old: str
+    new: str = "none"
     quotes: tuple[tuple[str, str], ...] = ()
 
 
 def default_reading(item: Item, facts: SeasonFacts) -> Reading:
     """The reading the rules require of ``item`` in the season, else ``none`` against its baseline."""
+    old = "—" if item.baseline == "none" else None
     if item.scope == "annual" and facts.form == "10-Q" or item.scope == "proxy" and not facts.proxy:
-        return Reading("none", "not applicable", "The item does not apply to this season.")
+        return Reading("none", old or "not applicable", "not applicable")
     if item.scope == "call" and not facts.transcript:
-        return Reading("none", "unavailable", "The season's call has no transcript.")
-    if item.baseline == "none":
-        return Reading("none", "none")
+        return Reading("none", old or "unavailable", "unavailable")
+    if old is not None:
+        return Reading("none", old)
     named = facts.baselines.get(item.baseline)
     if named is None:
-        return Reading("none", "no baseline", "No baseline document is in raw/.")
+        return Reading("none", "no baseline")
     return Reading(named, "none")
 
 
@@ -571,8 +572,8 @@ def readings_text(period: date, **changed: Reading) -> str:
         lines += [
             f"## {item.heading}",
             f"baseline: {reading.baseline}",
-            f"level: {reading.level}",
-            f"observation: {reading.observation}",
+            f"old: {reading.old}",
+            f"new: {reading.new}",
         ]
         for text, attribution in reading.quotes:
             lines += [f"> {text}", f"— {attribution}"]

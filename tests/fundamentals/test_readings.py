@@ -41,6 +41,7 @@ from .support import NOW
 from .workflow_support import DOC_IDS, QUOTE_CALL, QUOTE_FILING, Reading, place, readings_text, research
 
 FY = date(2025, 12, 27)  # the 10-K season: a proxy statement, no call transcript
+Q1 = date(2026, 3, 28)  # a 10-Q season with a transcript whose previous season's call has none
 Q2 = date(2026, 6, 27)  # the 10-Q season most tests read: its call has a transcript
 DEFAULT = readings_text(Q2)  # every bot item at its default reading
 LAST = len(DEFAULT.splitlines())
@@ -60,7 +61,7 @@ BOT_IDS = (
 TITLE = "the first line must be '# INTC · 2026-06-27 · readings'"
 HEADINGS = "the sections must be the bot's items, each once, in catalogue order: '## {id} {title}'"
 OUTSIDE_SECTION = "this line is outside the readings' sections"
-FIRST_LINES = "a section starts with its 'baseline:', 'level:' and 'observation:' lines, in that order"
+FIRST_LINES = "a section starts with its 'baseline:', 'old:' and 'new:' lines, in that order"
 UNEXPECTED_LINE = (
     "a section holds its three lines, then '> TEXT' lines each quote ended by its '— DOC_ID' line"
 )
@@ -68,13 +69,26 @@ EMPTY_QUOTE_LINE = "an empty '>' line; a quote's lines each hold text"
 NO_ATTRIBUTION = "a quote's '>' lines must be followed by its attribution line '— DOC_ID'"
 ATTRIBUTION_WITHOUT_QUOTE = "an attribution line must follow a quote's '>' lines"
 BASELINE_TEXT = "the baseline must be 'none' or DOC_IDs joined by '; '"
-LEVEL_TEXT = (
-    "the level must be one of: red, yellow, grey, none, no baseline, not applicable, not disclosed, "
-    "unavailable, not computable"
-)
-OBSERVATION_TEXT = "the observation must be 1 to 600 printable characters"
+OLD_TEXT = "the old value must be 1 to 600 printable characters"
+NEW_TEXT = "the new value must be 1 to 600 printable characters"
 QUOTE_SOURCE = "a quote comes from a document of the season or one the baseline line names"
-RED_NEEDS_QUOTE = "a red level needs a quote from a document of the season itself"
+HIGH_NEEDS_QUOTE = (
+    "an item of high importance whose new value is stated, not 'none' or a status, needs a quote from a "
+    "document of the season itself"
+)
+NOTHING_NEEDED = "the old value of an item without a baseline is '—'"
+NOTHING_FALSE = "'—' is only the old value of an item without a baseline"
+NO_BASELINE_NEW = "'no baseline' is an old value only; the new value is the season's"
+BASELINE_NEEDED = "an old value names the baseline documents it was read from ({kind})"
+NOT_APPLICABLE_NEEDED = "this item is 'not applicable' in this season ({why})"
+NOT_APPLICABLE_FALSE = (
+    "'not applicable' is only for an annual item in a 10-Q season or a proxy item without a proxy statement"
+)
+UNAVAILABLE_NEEDED = "a call item is 'unavailable' while the season's call has no transcript (unavailable)"
+UNAVAILABLE_FALSE = "'unavailable' is only for a call item while the season's call has no transcript"
+WORDING_FOUND = (
+    "an old or new value states facts only, without valuation, forecast or advice wording; found: {terms}"
+)
 NOT_FOUND = "quote not found in the document's derived text"
 NOT_WHOLE = (
     "a quote must be whole sentences, or whole lines of an HTML, XML or call document: it must start, never "
@@ -104,7 +118,7 @@ def line_of(text: str, start: str) -> int:
 
 
 def lines_of(text: str, item: str) -> tuple[int, int, int]:
-    """The lines of an item's ``baseline:``, ``level:`` and ``observation:`` in ``text``."""
+    """The lines of an item's ``baseline:``, ``old:`` and ``new:`` in ``text``."""
     heading = line_of(text, f"## {item} ")
     return heading + 1, heading + 2, heading + 3
 
@@ -137,11 +151,11 @@ def test_valid_readings_parse_into_their_items_with_every_line():
         Q2,
         i3_6=Reading(
             f"{DOC_IDS['ten_q_1']}; {DOC_IDS['exhibit_1']}",
-            "red",
+            "No change of accounting policy is stated.",
             "The 10-Q adopts a standard the previous one did not name.",
             (QUOTE_FILING, (TEN_Q_SUPPLY[0], DOC_IDS["ten_q_1"])),
         ),
-        i7_4=Reading("none", "yellow", "One figure differs.", (QUOTE_CALL,)),
+        i7_4=Reading("none", "—", "One figure differs.", (QUOTE_CALL,)),
     )
     heading = line_of(text, "## 3.6 ")
     call = line_of(text, "## 7.4 ")
@@ -156,8 +170,8 @@ def test_valid_readings_parse_into_their_items_with_every_line():
         (DOC_IDS["ten_q_1"], DOC_IDS["exhibit_1"]),
         heading + 1,
     )
-    assert (policy.level, policy.level_line) == ("red", heading + 2)
-    assert (policy.observation, policy.observation_line) == (
+    assert (policy.old, policy.old_line) == ("No change of accounting policy is stated.", heading + 2)
+    assert (policy.new, policy.new_line) == (
         "The 10-Q adopts a standard the previous one did not name.",
         heading + 3,
     )
@@ -167,17 +181,17 @@ def test_valid_readings_parse_into_their_items_with_every_line():
     )
     statement = readings.get("7.4")
     assert statement is not None
-    assert (statement.baseline, statement.level) == ((), "yellow")
+    assert (statement.baseline, statement.old, statement.new) == ((), "—", "One figure differs.")
     assert statement.quotes == (
         Quote(call + 4, CEO_DEMAND, DOC_IDS["call_q2"], "Lip-Bu Tan (executive)", call + 5),
     )
     assert readings.get("2.1") is None  # Python's item: never a section of the readings
-    levels = readings.levels()
-    assert (len(levels), levels["3.6"], levels["3.2"], levels["2.7"]) == (
+    values = {reading.item.id: (reading.old, reading.new) for reading in readings.items}
+    assert (len(values), values["3.1"], values["3.2"], values["2.7"]) == (
         51,
-        "red",
-        "not applicable",
-        "no baseline",
+        ("—", "none"),
+        ("not applicable", "not applicable"),
+        ("no baseline", "none"),
     )
 
 
@@ -264,16 +278,14 @@ def test_sections_out_of_order_are_reported_once_and_still_read():
     [
         (
             lambda text: (
-                text
-                + "\n## 1.1 Full-year revenue guidance\nbaseline: none\nlevel: none\nobservation: Again.\n"
+                text + "\n## 1.1 Full-year revenue guidance\nbaseline: none\nold: none\nnew: Again.\n"
             ),
             [(LAST + 2, HEADINGS)],
         ),
         (
             lambda text: text.replace(
                 "## 2.7 ",
-                "## 2.1 Revenue and net income growth\nbaseline: none\nlevel: none\n"
-                "observation: Python's.\n\n## 2.7 ",
+                "## 2.1 Revenue and net income growth\nbaseline: none\nold: none\nnew: Python's.\n\n## 2.7 ",
             ),
             [(line_of(DEFAULT, "## 2.7 "), HEADINGS)],
         ),
@@ -295,21 +307,21 @@ def test_an_unknown_repeated_or_python_section_is_refused_and_its_lines_skipped(
 @pytest.mark.parametrize(
     ("first_lines", "expected"),
     [
-        ("level: none\nobservation: Nothing new.\n", [(1, FIRST_LINES), (2, UNEXPECTED_LINE)]),
+        ("old: none\nnew: Nothing new.\n", [(1, FIRST_LINES), (2, UNEXPECTED_LINE)]),
         (
-            f"level: none\nbaseline: {DOC_IDS['ten_q_1']}\nobservation: Nothing new.\n",
+            f"old: none\nbaseline: {DOC_IDS['ten_q_1']}\nnew: Nothing new.\n",
             [(1, FIRST_LINES), (2, UNEXPECTED_LINE), (3, UNEXPECTED_LINE)],
         ),
-        (f"baseline: {DOC_IDS['ten_q_1']}\nobservation: Nothing new.\n", [(2, FIRST_LINES)]),
+        (f"baseline: {DOC_IDS['ten_q_1']}\nnew: Nothing new.\n", [(2, FIRST_LINES)]),
         ("", [(0, FIRST_LINES)]),
         (
             f"> {TEN_Q_SUPPLY[0]}\n— {DOC_IDS['ten_q_2']}\n",
             [(1, FIRST_LINES)],
         ),
     ],
-    ids=["no-baseline-line", "level-first", "no-level-line", "heading-alone", "quote-first"],
+    ids=["no-baseline-line", "old-first", "no-old-line", "heading-alone", "quote-first"],
 )
-def test_a_section_starts_with_its_baseline_level_and_observation_lines(first_lines, expected):
+def test_a_section_starts_with_its_baseline_old_and_new_lines(first_lines, expected):
     text = DEFAULT.replace(section(DEFAULT, "3.3", "3.4"), f"## 3.3 Going concern\n{first_lines}\n")
     heading = line_of(text, "## 3.3 ")
 
@@ -337,32 +349,38 @@ def test_a_baseline_of_several_doc_ids_is_read_in_its_order():
     assert (found, reading.baseline) == ([], (DOC_IDS["ten_k"], DOC_IDS["ten_q_1"]))
 
 
-@pytest.mark.parametrize("level", ["orange", "Red", "no source", "", "red, yellow"])
-def test_the_level_is_a_level_or_a_status_the_bot_may_give(level):
-    text = readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], level))
-
-    assert parsed(text) == [(lines_of(text, "3.3")[1], LEVEL_TEXT)]
-
-
 @pytest.mark.parametrize(
-    "observation",
+    "value",
     ["", "x" * 601, "Two\tcolumns.", "A zero\u200bwidth space."],
     ids=["empty", "601-characters", "tab", "zero-width-space"],
 )
-def test_the_observation_is_1_to_600_printable_characters(observation):
-    text = readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", observation))
+def test_the_old_and_new_values_are_1_to_600_printable_characters(value):
+    old = readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], value))
+    new = readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", value))
 
-    assert parsed(text) == [(lines_of(text, "3.3")[2], OBSERVATION_TEXT)]
+    assert parsed(old) == [(lines_of(old, "3.3")[1], OLD_TEXT)]
+    assert parsed(new) == [(lines_of(new, "3.3")[2], NEW_TEXT)]
 
 
-def test_an_observation_of_600_characters_passes_without_its_outer_spaces():
-    text = readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "  " + "x" * 600 + "  "))
+def test_values_of_600_characters_pass_without_their_outer_spaces():
+    text = readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "  " + "x" * 600 + "  ", " " + "y" * 600 + " "))
 
     readings, found = parse_readings(text, TICKER, Q2)
 
     reading = readings.get("3.3")
     assert reading is not None
-    assert (found, reading.observation) == ([], "x" * 600)
+    assert (found, reading.old, reading.new) == ([], "x" * 600, "y" * 600)
+
+
+@pytest.mark.parametrize("value", ["orange", "Red", "no source", "—", "none", "not applicable"])
+def test_the_grammar_reads_any_printable_text_as_a_value(value):
+    text = readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], value, value))
+
+    readings, found = parse_readings(text, TICKER, Q2)
+
+    reading = readings.get("3.3")
+    assert reading is not None
+    assert (found, reading.old, reading.new) == ([], value, value)
 
 
 QUOTE = f"> {TEN_Q_SUPPLY[0]}"
@@ -381,7 +399,7 @@ ATTRIBUTION = f"— {DOC_IDS['ten_q_2']}"
         (f"{ATTRIBUTION}\n{QUOTE}\n{ATTRIBUTION}", [(0, ATTRIBUTION_WITHOUT_QUOTE)]),
         ("A note on the reading.", [(0, UNEXPECTED_LINE)]),
         (f"{QUOTE}\nA note on the quote.", [(0, NO_ATTRIBUTION), (1, UNEXPECTED_LINE)]),
-        (f"{QUOTE}\n{ATTRIBUTION}\nlevel: red", [(2, UNEXPECTED_LINE)]),
+        (f"{QUOTE}\n{ATTRIBUTION}\nnew: Again.", [(2, UNEXPECTED_LINE)]),
         ("- a list item", [(0, UNEXPECTED_LINE)]),
     ],
     ids=[
@@ -391,16 +409,14 @@ ATTRIBUTION = f"— {DOC_IDS['ten_q_2']}"
         "attribution-first",
         "free-text",
         "quote-then-text",
-        "second-level",
+        "second-value",
         "list-item",
     ],
 )
 def test_after_its_first_lines_a_section_holds_quotes_each_ended_by_its_attribution(block, expected):
-    text = readings_text(Q2, i3_6=Reading(DOC_IDS["ten_q_1"], "none", "The 3.6 observation."))
-    text = text.replace(
-        "observation: The 3.6 observation.\n", f"observation: The 3.6 observation.\n{block}\n"
-    )
-    start = line_of(text, "observation: The 3.6 observation.") + 1
+    text = readings_text(Q2, i3_6=Reading(DOC_IDS["ten_q_1"], "none", "The 3.6 new value."))
+    text = text.replace("new: The 3.6 new value.\n", f"new: The 3.6 new value.\n{block}\n")
+    start = line_of(text, "new: The 3.6 new value.") + 1
 
     assert parsed(text) == [(start + offset, message) for offset, message in expected]
 
@@ -418,7 +434,7 @@ def test_an_attribution_line_is_a_dash_a_space_and_its_doc_id():
 
 
 def test_problems_come_in_line_order_and_the_sections_read_are_still_returned():
-    text = readings_text(Q2, i3_6=Reading(DOC_IDS["ten_q_1"], "orange", quotes=(QUOTE_FILING,)))
+    text = readings_text(Q2, i3_6=Reading(DOC_IDS["ten_q_1"], "none", "x" * 601, quotes=(QUOTE_FILING,)))
     text = text.replace("# INTC · 2026-06-27 · readings", "# INTC", 1).replace(
         "## 2.7 ", "A stray line.\n## 2.7 "
     )
@@ -428,11 +444,11 @@ def test_problems_come_in_line_order_and_the_sections_read_are_still_returned():
     assert [(problem.line, problem.message) for problem in found] == [
         (1, TITLE),
         (line_of(text, "A stray line."), UNEXPECTED_LINE),
-        (lines_of(text, "3.6")[1], LEVEL_TEXT),
+        (lines_of(text, "3.6")[2], NEW_TEXT),
     ]
     reading = readings.get("3.6")
     assert reading is not None
-    assert (reading.level, [quote.text for quote in reading.quotes]) == ("orange", [TEN_Q_SUPPLY[0]])
+    assert (reading.new, [quote.text for quote in reading.quotes]) == ("x" * 601, [TEN_Q_SUPPLY[0]])
 
 
 # --------------------------------------------------------------------------- the rules, on a real tree
@@ -470,25 +486,31 @@ def test_the_default_readings_of_every_window_season_pass(tree):
     ]
 
 
-def test_readings_with_levels_baselines_statuses_and_quotes_of_any_speaker_pass(tree):
+def test_readings_with_values_baselines_statuses_and_quotes_of_any_speaker_pass(tree):
     text = readings_text(
         Q2,
         i1_1=Reading(
             f"{DOC_IDS['exhibit_1']}; {DOC_IDS['call_q1']}",
-            "yellow",
-            "The revenue guidance midpoint went from $13.1 billion to $13.9 billion, 6.1% higher.",
+            "Quarterly revenue of $12.6 billion to $13.6 billion, midpoint $13.1 billion.",
+            "Quarterly revenue of $13.4 billion to $14.4 billion, midpoint $13.9 billion.",
             ((RELEASE_GUIDANCE[0], DOC_IDS["exhibit_2_1"]), (RELEASE_GUIDANCE[0], DOC_IDS["exhibit_1"])),
         ),
-        i1_2=Reading("none", "not disclosed", "Neither release gives full-year profit guidance."),
-        i1_9=Reading(f"{DOC_IDS['old_ten_k']}; {DOC_IDS['call_old_q']}", "grey", "No result fell short."),
-        i2_9=Reading("none", "not computable", "Net income is below zero."),
-        i3_6=Reading(DOC_IDS["ten_q_1"], "red", "The 10-Q names one more policy change.", (QUOTE_FILING,)),
-        i4_1=Reading(f"{DOC_IDS['ten_q_1']}; {DOC_IDS['ten_k']}", "none", "The risk factors are unchanged."),
-        i6_4=Reading("none", "not computable", "No amount is stated."),
-        i7_4=Reading("none", "red", "The chief executive states demand above supply.", (QUOTE_CALL,)),
+        i1_2=Reading(DOC_IDS["exhibit_1"], "not disclosed", "not disclosed"),
+        i1_9=Reading(
+            f"{DOC_IDS['old_ten_k']}; {DOC_IDS['call_old_q']}",
+            "2 seasons: none below the range.",
+            "Within the range.",
+        ),
+        i2_9=Reading("none", "—", "not computable"),
+        i3_6=Reading(DOC_IDS["ten_q_1"], "none", "The 10-Q names one policy change.", (QUOTE_FILING,)),
+        i4_1=Reading(
+            f"{DOC_IDS['ten_q_1']}; {DOC_IDS['ten_k']}", "12 risk factors.", "The same 12 risk factors."
+        ),
+        i6_4=Reading("none", "—", "An acquisition of Example Corp for $1.2 billion."),
+        i7_4=Reading("none", "—", "The chief executive states demand above supply.", (QUOTE_CALL,)),
         i8_1=Reading(
             DOC_IDS["call_q1"],
-            "yellow",
+            "none",
             "One question on substrates; its answer gives no figure.",
             (
                 (OPERATOR_QUESTION, f"{DOC_IDS['call_q2']}, Operator (operator)"),
@@ -502,7 +524,9 @@ def test_readings_with_levels_baselines_statuses_and_quotes_of_any_speaker_pass(
 
 
 def test_a_byte_order_mark_crlf_line_ends_and_trailing_spaces_are_accepted(tree):
-    text = readings_text(Q2, i3_6=Reading(DOC_IDS["ten_q_1"], "red", quotes=(QUOTE_FILING,)))
+    text = readings_text(
+        Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "The 10-Q states a doubt.", quotes=(QUOTE_FILING,))
+    )
 
     found = draft(tree, b"\xef\xbb\xbf" + text.replace("\n", "  \r\n").encode("utf-8"))
 
@@ -571,8 +595,9 @@ def test_a_document_whose_text_file_is_stale_or_missing_is_refused(layout):
     ]
 
 
-# R2: the baseline names documents of the item's baseline seasons only, at least one for a
-# level of an item with a baseline, and none for an item without one or for a status.
+# R2: the baseline names documents of the item's baseline seasons only, at least one for an
+# old value of facts or none, and none for an item without one or for the old values no
+# baseline, not applicable and unavailable.
 
 
 @pytest.mark.parametrize(
@@ -608,39 +633,53 @@ def test_a_document_whose_text_file_is_stale_or_missing_is_refused(layout):
             Q2,
             {"i3_3": Reading("none", "none")},
             "3.3",
-            ["a level of an item with a baseline names the baseline documents read (previous quarter)"],
+            [BASELINE_NEEDED.format(kind="previous quarter")],
         ),
         (
             Q2,
-            {"i1_1": Reading("none", "red", quotes=((RELEASE_GUIDANCE[0], DOC_IDS["exhibit_2_1"]),))},
+            {
+                "i1_1": Reading(
+                    "none",
+                    "Quarterly revenue midpoint $13.1 billion.",
+                    "Quarterly revenue midpoint $13.9 billion.",
+                    ((RELEASE_GUIDANCE[0], DOC_IDS["exhibit_2_1"]),),
+                )
+            },
             "1.1",
-            ["a level of an item with a baseline names the baseline documents read (previous guidance)"],
+            [BASELINE_NEEDED.format(kind="previous guidance")],
         ),
         (
             Q2,
-            {"i3_1": Reading(DOC_IDS["ten_q_1"], "none")},
+            {"i4_5": Reading("none", "not disclosed", "none")},
+            "4.5",
+            [BASELINE_NEEDED.format(kind="previous quarter")],
+        ),
+        (
+            Q2,
+            {"i3_1": Reading(DOC_IDS["ten_q_1"], "—")},
             "3.1",
             ["the baseline must be 'none' for an item without a baseline"],
         ),
         (
             Q2,
-            {"i3_2": Reading(DOC_IDS["ten_k"], "not applicable")},
+            {"i3_2": Reading(DOC_IDS["ten_k"], "not applicable", "not applicable")},
             "3.2",
-            ["the baseline must be 'none' for the status 'not applicable'"],
+            ["the baseline must be 'none' for the old value 'not applicable'"],
         ),
         (
             FY,
-            {"i7_1": Reading(DOC_IDS["old_ten_q"], "unavailable")},
+            {"i7_1": Reading(DOC_IDS["old_ten_q"], "unavailable", "unavailable")},
             "7.1",
-            ["the baseline must be 'none' for the status 'unavailable'"],
+            ["the baseline must be 'none' for the old value 'unavailable'"],
         ),
     ],
     ids=[
         "older-season",
         "one-of-two",
         "no-season-listed",
-        "level-without-baseline",
-        "red-without-baseline",
+        "none-without-baseline",
+        "facts-without-baseline",
+        "not-disclosed-without-baseline",
         "item-without-baseline",
         "not-applicable-with-baseline",
         "unavailable-with-baseline",
@@ -657,8 +696,11 @@ def test_baselines_of_several_seasons_and_statuses_without_a_baseline_pass(tree)
     text = readings_text(
         Q2,
         i1_9=Reading(f"{DOC_IDS['ten_q_1']}; {DOC_IDS['proxy']}; {DOC_IDS['old_ten_k']}", "none"),
-        i4_3=Reading(f"{DOC_IDS['ten_q_1']}; {DOC_IDS['ten_k']}", "grey", "One risk factor is gone."),
-        i1_6=Reading("none", "not disclosed", "No capital expenditure guidance is given."),
+        i4_3=Reading(
+            f"{DOC_IDS['ten_q_1']}; {DOC_IDS['ten_k']}", "none", "One risk factor is no longer stated."
+        ),
+        i1_6=Reading(DOC_IDS["exhibit_1"], "not disclosed", "not disclosed"),
+        i4_5=Reading(DOC_IDS["ten_q_1"], "not disclosed", "none"),
     )
 
     assert checked(tree, text) == []
@@ -684,31 +726,59 @@ def test_a_quote_comes_from_the_season_or_a_baseline_document_the_reading_names(
     ]
 
 
-# R4: red needs a quote from a document of the season itself.
+# R4: an item of high importance whose new value is facts other than none needs a quote from
+# a document of the season itself.
 
 
 @pytest.mark.parametrize(
-    "quotes",
-    [(), ((TEN_Q_SUPPLY[0], DOC_IDS["ten_q_1"]),)],
-    ids=["no-quote", "a-baseline-quote"],
+    ("item", "reading"),
+    [
+        ("3.3", Reading(DOC_IDS["ten_q_1"], "none", "The 10-Q states a substantial doubt.")),
+        (
+            "3.3",
+            Reading(
+                DOC_IDS["ten_q_1"],
+                "none",
+                "The 10-Q states a substantial doubt.",
+                ((TEN_Q_SUPPLY[0], DOC_IDS["ten_q_1"]),),
+            ),
+        ),
+        ("5.1", Reading("none", "—", "An 8-K reports the departure of the chief financial officer.")),
+    ],
+    ids=["no-quote", "a-baseline-quote", "item-without-baseline"],
 )
-def test_red_needs_a_quote_from_the_seasons_own_documents(tree, quotes):
-    text = readings_text(Q2, i3_6=Reading(DOC_IDS["ten_q_1"], "red", quotes=quotes))
+def test_a_high_items_stated_new_value_needs_a_quote_from_the_seasons_own_documents(tree, item, reading):
+    text = readings_text(Q2, **{"i" + item.replace(".", "_"): reading})
 
-    assert checked(tree, text) == [(lines_of(text, "3.6")[1], RED_NEEDS_QUOTE)]
+    assert checked(tree, text) == [(lines_of(text, item)[2], HIGH_NEEDS_QUOTE)]
 
 
-def test_yellow_and_grey_need_no_quote(tree):
+def test_a_high_items_new_value_none_or_a_status_needs_no_quote_and_a_season_quote_suffices(tree):
     text = readings_text(
         Q2,
-        i3_6=Reading(DOC_IDS["ten_q_1"], "yellow"),
-        i4_3=Reading(DOC_IDS["ten_k"], "grey"),
+        i1_1=Reading(DOC_IDS["exhibit_1"], "not disclosed", "not disclosed"),
+        i3_3=Reading(DOC_IDS["ten_q_1"], "none", "The 10-Q states a doubt.", (QUOTE_FILING,)),
+        i3_5=Reading(DOC_IDS["ten_q_1"], "none", "none"),
+        i5_1=Reading("none", "—", "none"),
     )
 
     assert checked(tree, text) == []
 
 
-# R5: no baseline only while no document of the item's baseline seasons is in raw/.
+def test_medium_and_low_items_need_no_quote(tree):
+    text = readings_text(
+        Q2,
+        i2_8=Reading(
+            DOC_IDS["ten_q_1"], "Segments CCG, DCAI and Foundry.", "Segments CCPG, DCAI and Foundry."
+        ),
+        i4_3=Reading(DOC_IDS["ten_k"], "none", "One risk factor is no longer stated."),
+    )
+
+    assert checked(tree, text) == []
+
+
+# R5: no baseline, an old value only, while no document of the item's baseline seasons is in
+# raw/ (for a call item, no call of those seasons).
 
 
 @pytest.mark.parametrize(
@@ -725,126 +795,170 @@ def test_yellow_and_grey_need_no_quote(tree):
             "1.5",
             f"'no baseline' while the baseline is in raw/: {DOC_IDS['old_ten_q']}, {DOC_IDS['call_old_q']}",
         ),
-        (Q2, "3.1", "this item does not allow 'no baseline'"),
+        (Q2, "8.1", f"'no baseline' while the baseline is in raw/: {DOC_IDS['call_q1']}"),
+        (Q2, "3.1", NOTHING_NEEDED),
     ],
-    ids=["four-documents", "two-documents", "item-without-baseline"],
+    ids=["four-documents", "two-documents", "call-item", "item-without-baseline"],
 )
 def test_no_baseline_only_while_no_baseline_document_is_in_raw(tree, season, item, message):
     key = "i" + item.replace(".", "_")
-    text = readings_text(season, **{key: Reading("none", "no baseline", "No baseline.")})
+    text = readings_text(season, **{key: Reading("none", "no baseline")})
 
     assert checked(tree, text, season) == [(lines_of(text, item)[1], message)]
 
 
-# R6: not applicable exactly for an annual item in a 10-Q season and a proxy item in a
-# season without a proxy statement; R7: unavailable exactly for a call item while the
-# season's call has no transcript.
+def test_a_call_item_has_no_baseline_while_the_previous_seasons_call_has_no_transcript(tree):
+    call = readings_text(Q1, i8_1=Reading("none", "no baseline", "Two questions left unanswered."))
+    filing = readings_text(Q1, i3_3=Reading("none", "no baseline"))
+
+    assert checked(tree, call, Q1) == []
+    assert checked(tree, filing, Q1) == [
+        (
+            lines_of(filing, "3.3")[1],
+            f"'no baseline' while the baseline is in raw/: {DOC_IDS['ten_k']}, {DOC_IDS['eight_k_other']}, "
+            f"{DOC_IDS['proxy']}",
+        )
+    ]
+
+
+def test_no_baseline_is_never_a_new_value(tree):
+    text = readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "no baseline"))
+
+    assert checked(tree, text) == [(lines_of(text, "3.3")[2], NO_BASELINE_NEW)]
 
 
 @pytest.mark.parametrize(
-    ("season", "item", "reading", "message"),
+    ("item", "reading", "offset", "message"),
     [
-        (
-            Q2,
-            "3.2",
-            Reading(DOC_IDS["ten_k"], "none"),
-            "this item is 'not applicable' in this season (an annual item in a 10-Q season)",
-        ),
-        (
-            Q2,
-            "5.5",
-            Reading(DOC_IDS["proxy"], "none"),
-            "this item is 'not applicable' in this season (a proxy item in a season without a proxy "
-            "statement)",
-        ),
+        ("3.1", Reading("none", "none"), 1, NOTHING_NEEDED),
+        ("3.3", Reading(DOC_IDS["ten_q_1"], "—"), 1, NOTHING_FALSE),
+        ("3.3", Reading(DOC_IDS["ten_q_1"], "none", "—"), 2, NOTHING_FALSE),
+        ("5.1", Reading("none", "—", "—"), 2, NOTHING_FALSE),
+    ],
+    ids=["item-without-baseline", "item-with-baseline", "new-value", "new-value-without-baseline"],
+)
+def test_the_old_value_is_a_dash_exactly_for_an_item_without_a_baseline(tree, item, reading, offset, message):
+    text = readings_text(Q2, **{"i" + item.replace(".", "_"): reading})
+
+    assert checked(tree, text) == [(lines_of(text, item)[offset], message)]
+
+
+# R6: not applicable exactly for an annual item in a 10-Q season and a proxy item in a
+# season without a proxy statement; R7: unavailable exactly for a call item while the
+# season's call has no transcript; each as the new value and, for an item with a baseline,
+# the old one.
+
+ANNUAL_IN_10Q = NOT_APPLICABLE_NEEDED.format(why="an annual item in a 10-Q season")
+PROXY_WITHOUT = NOT_APPLICABLE_NEEDED.format(why="a proxy item in a season without a proxy statement")
+
+
+@pytest.mark.parametrize(
+    ("season", "item", "reading", "expected"),
+    [
+        (Q2, "3.2", Reading(DOC_IDS["ten_k"], "none"), [(1, ANNUAL_IN_10Q), (2, ANNUAL_IN_10Q)]),
+        (Q2, "3.2", Reading("none", "not applicable", "none"), [(2, ANNUAL_IN_10Q)]),
+        (Q2, "5.5", Reading(DOC_IDS["proxy"], "none"), [(1, PROXY_WITHOUT), (2, PROXY_WITHOUT)]),
         (
             Q2,
             "3.3",
-            Reading("none", "not applicable", "Not this season."),
-            "'not applicable' is only for an annual item in a 10-Q season or a proxy item without a proxy "
-            "statement",
+            Reading("none", "not applicable", "not applicable"),
+            [(1, NOT_APPLICABLE_FALSE), (2, NOT_APPLICABLE_FALSE)],
         ),
         (
             FY,
             "3.2",
-            Reading("none", "not applicable", "Not this season."),
-            "'not applicable' is only for an annual item in a 10-Q season or a proxy item without a proxy "
-            "statement",
+            Reading("none", "not applicable", "not applicable"),
+            [(1, NOT_APPLICABLE_FALSE), (2, NOT_APPLICABLE_FALSE)],
         ),
         (
             FY,
             "5.6",
-            Reading("none", "not applicable", "Not this season."),
-            "'not applicable' is only for an annual item in a 10-Q season or a proxy item without a proxy "
-            "statement",
+            Reading("none", "not applicable", "not applicable"),
+            [(1, NOT_APPLICABLE_FALSE), (2, NOT_APPLICABLE_FALSE)],
         ),
         (
             FY,
             "7.1",
             Reading(DOC_IDS["old_ten_q"], "none"),
-            "a call item is 'unavailable' while the season's call has no transcript (unavailable)",
+            [(1, UNAVAILABLE_NEEDED), (2, UNAVAILABLE_NEEDED)],
         ),
+        (FY, "7.4", Reading("none", "—", "none"), [(2, UNAVAILABLE_NEEDED)]),
+        (FY, "7.4", Reading("none", "unavailable", "unavailable"), [(1, NOTHING_NEEDED)]),
         (
             Q2,
             "7.1",
-            Reading("none", "unavailable", "No transcript."),
-            "'unavailable' is only for a call item while the season's call has no transcript",
+            Reading("none", "unavailable", "unavailable"),
+            [(1, UNAVAILABLE_FALSE), (2, UNAVAILABLE_FALSE)],
         ),
         (
             Q2,
             "3.3",
-            Reading("none", "unavailable", "No transcript."),
-            "'unavailable' is only for a call item while the season's call has no transcript",
+            Reading("none", "unavailable", "unavailable"),
+            [(1, UNAVAILABLE_FALSE), (2, UNAVAILABLE_FALSE)],
         ),
     ],
     ids=[
         "annual-item-in-10-Q",
+        "annual-item-old-only",
         "proxy-item-without-proxy",
         "season-item",
         "annual-item-in-10-K",
         "proxy-item-with-proxy",
         "call-item-without-transcript",
+        "call-item-without-baseline",
+        "call-item-without-baseline-old-status",
         "call-item-with-transcript",
         "season-item-unavailable",
     ],
 )
 def test_not_applicable_and_unavailable_exactly_where_the_season_requires_them(
-    tree, season, item, reading, message
+    tree, season, item, reading, expected
 ):
     text = readings_text(season, **{"i" + item.replace(".", "_"): reading})
+    lines = lines_of(text, item)
 
-    assert checked(tree, text, season) == [(lines_of(text, item)[1], message)]
+    assert checked(tree, text, season) == [(lines[offset], message) for offset, message in expected]
 
 
 # R8: not disclosed and not computable only where the item allows them.
 
 
 @pytest.mark.parametrize(
-    ("item", "status"),
+    ("item", "reading", "expected"),
     [
-        ("3.3", "not disclosed"),
-        ("1.1", "not computable"),
-        ("5.1", "not disclosed"),
-        ("6.6", "not computable"),
+        ("3.3", Reading(DOC_IDS["ten_q_1"], "not disclosed", "none"), [(1, "not disclosed")]),
+        ("1.1", Reading(DOC_IDS["exhibit_1"], "not disclosed", "not computable"), [(2, "not computable")]),
+        ("5.1", Reading("none", "—", "not disclosed"), [(2, "not disclosed")]),
+        (
+            "6.6",
+            Reading(DOC_IDS["ten_q_1"], "not computable", "not computable"),
+            [(1, "not computable"), (2, "not computable")],
+        ),
+        ("6.4", Reading("none", "—", "not computable"), [(2, "not computable")]),
     ],
+    ids=["old", "new", "item-without-baseline", "both", "no-longer-allowed"],
 )
-def test_not_disclosed_and_not_computable_only_where_the_item_allows_them(tree, item, status):
-    text = readings_text(Q2, **{"i" + item.replace(".", "_"): Reading("none", status, "Not stated.")})
+def test_not_disclosed_and_not_computable_only_where_the_item_allows_them(tree, item, reading, expected):
+    text = readings_text(Q2, **{"i" + item.replace(".", "_"): reading})
+    lines = lines_of(text, item)
 
-    assert checked(tree, text) == [(lines_of(text, item)[1], f"this item does not allow '{status}'")]
+    assert checked(tree, text) == [
+        (lines[offset], f"this item does not allow '{status}'") for offset, status in expected
+    ]
 
 
 @pytest.mark.parametrize(
-    ("item", "status"),
+    ("item", "reading"),
     [
-        ("1.1", "not disclosed"),
-        ("2.9", "not computable"),
-        ("2.9", "not disclosed"),
-        ("6.4", "not computable"),
+        ("1.1", Reading(DOC_IDS["exhibit_1"], "not disclosed", "not disclosed")),
+        ("2.9", Reading("none", "—", "not computable")),
+        ("2.9", Reading("none", "—", "not disclosed")),
+        ("4.5", Reading(DOC_IDS["ten_q_1"], "not disclosed", "Contingent liabilities of $1.2 billion.")),
     ],
+    ids=["both", "not-computable", "not-disclosed", "old-only"],
 )
-def test_an_item_may_take_the_statuses_it_allows(tree, item, status):
-    text = readings_text(Q2, **{"i" + item.replace(".", "_"): Reading("none", status, "Not stated.")})
+def test_an_item_may_take_the_statuses_it_allows(tree, item, reading):
+    text = readings_text(Q2, **{"i" + item.replace(".", "_"): reading})
 
     assert checked(tree, text) == []
 
@@ -940,21 +1054,20 @@ def test_a_speakers_later_turn_is_named_by_the_same_heading(tree):
     assert checked(tree, text) == []
 
 
-# R10: an observation carries no valuation, forecast or advice wording; quotes are the
+# R10: an old or new value carries no valuation, forecast or advice wording; quotes are the
 # issuer's words and never checked against it; no quote is repeated in an item.
 
 
-def test_an_observation_carries_no_valuation_forecast_or_advice_wording(tree):
+def test_old_and_new_values_carry_no_valuation_forecast_or_advice_wording(tree):
     text = readings_text(
-        Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "The upside makes the shares a Buy; buy.")
+        Q2,
+        i2_8=Reading(DOC_IDS["ten_q_1"], "The upside makes the shares a Buy; buy.", "A downside case."),
     )
+    lines = lines_of(text, "2.8")
 
     assert checked(tree, text) == [
-        (
-            lines_of(text, "3.3")[2],
-            "an observation states facts only, without valuation, forecast or advice wording; found: "
-            "upside, buy",
-        )
+        (lines[1], WORDING_FOUND.format(terms="upside, buy")),
+        (lines[2], WORDING_FOUND.format(terms="downside")),
     ]
 
 
@@ -963,7 +1076,7 @@ def test_a_quote_may_carry_such_wording(tree):
     text = readings_text(
         FY,
         i5_3=Reading(
-            "none", "none", "The proxy statement names the director nominees.", ((quote, DOC_IDS["proxy"]),)
+            "none", "—", "The proxy statement names the director nominees.", ((quote, DOC_IDS["proxy"]),)
         ),
     )
 
@@ -978,7 +1091,9 @@ def test_a_quote_may_carry_such_wording(tree):
 def test_a_quote_is_given_once_per_item(tree, again):
     text = readings_text(
         Q2,
-        i3_6=Reading(DOC_IDS["ten_q_1"], "yellow", quotes=(QUOTE_FILING, (again, QUOTE_FILING[1]))),
+        i3_6=Reading(
+            DOC_IDS["ten_q_1"], "none", "A standard is adopted.", (QUOTE_FILING, (again, QUOTE_FILING[1]))
+        ),
     )
     second = lines_of(text, "3.6")[2] + 3
 
@@ -989,9 +1104,12 @@ def test_one_quote_may_serve_several_items_and_documents(tree):
     text = readings_text(
         Q2,
         i3_6=Reading(
-            DOC_IDS["ten_q_1"], "yellow", quotes=(QUOTE_FILING, (TEN_Q_SUPPLY[0], DOC_IDS["ten_q_1"]))
+            DOC_IDS["ten_q_1"],
+            "none",
+            "A standard is adopted.",
+            (QUOTE_FILING, (TEN_Q_SUPPLY[0], DOC_IDS["ten_q_1"])),
         ),
-        i3_7=Reading(DOC_IDS["ten_q_1"], "yellow", quotes=(QUOTE_FILING,)),
+        i3_7=Reading(DOC_IDS["ten_q_1"], "none", "An estimate is changed.", (QUOTE_FILING,)),
     )
 
     assert checked(tree, text) == []
@@ -999,11 +1117,7 @@ def test_one_quote_may_serve_several_items_and_documents(tree):
 
 def test_the_wording_rule_reads_whole_words_and_names_each_term_once():
     assert wording_problems(7, "Shares look undervalued; we Recommend a BUY, then buy more.") == [
-        Problem(
-            7,
-            "an observation states facts only, without valuation, forecast or advice wording; found: "
-            "undervalued, recommend, buy",
-        )
+        Problem(7, WORDING_FOUND.format(terms="undervalued, recommend, buy"))
     ]
     assert wording_problems(7, "Holdings rose; the holder is selling shares and buybacks paused.") == []
     assert WORDING.search("a price target of $40") is not None

@@ -231,7 +231,7 @@ three by hand, under that domain's `AGENTS.md`:
 | --- | --- | --- |
 | [`stock_iv_regime`](stock_iv_regime/AGENTS.md) ([procedure](stock_iv_regime/PROCEDURE.md)) | Per session, the 14-DTE 25Δ skew, the 14-DTE ATM IV and the term structure (the 30-DTE ATM IV minus the 14-DTE) with their 252-session percentiles, and the 15-session correlations of the stock's daily return with the changes of the 14-DTE 25Δ call and put IVs, over a look-back window, in two charts read together. | EODHD options API (`EODHD_API`) and Tiingo daily prices (`TIINGO_API`). |
 | [`market_position_regime`](market_position_regime/AGENTS.md) ([procedure](market_position_regime/PROCEDURE.md)) | For the US equity market over a window of dates, FINRA's margin debt by month, S&P 500 futures positioning by week (asset managers' net long and leveraged funds' net short, each as its percentile over 52 weeks) and the VIX and the SKEW by session (each as a percentile over 252 sessions), in three charts read together. | FINRA's margin statistics workbook, the CFTC's Traders in Financial Futures (Socrata API) and Cboe's daily VIX and SKEW histories, none with a key. |
-| [`fundamentals`](fundamentals/AGENTS.md) ([procedure](fundamentals/PROCEDURE.md)) | Per stock issuer and season (fiscal period), what changed against stated baselines: 69 items in nine sections, 16 computed by Python from EDGAR's XBRL facts, listing and Form 4s and the calls' transcripts, 51 read by the bot from the documents with verbatim quotes, and one report per season with every item's level and a score. | SEC EDGAR (`SEC_USER_AGENT`) and the EarningsCalls.dev transcript API (`EARNINGSCALLS_API`). |
+| [`fundamentals`](fundamentals/AGENTS.md) ([procedure](fundamentals/PROCEDURE.md)) | Per stock issuer and season (fiscal period), what changed against stated baselines: 68 items in nine sections, each stating its old and new value, 15 computed by Python from EDGAR's XBRL facts, listing and Form 4s and the calls' transcripts, 51 read by the bot from the documents with verbatim quotes, and one report per season listing every item by importance, with no threshold and none left out. | SEC EDGAR (`SEC_USER_AGENT`) and the EarningsCalls.dev transcript API (`EARNINGSCALLS_API`). |
 | [`posts`](posts/AGENTS.md) ([procedure](posts/PROCEDURE.md)) | Per nominated poster, every post of the intervals the user asked about, archived verbatim and fact-checked claim by claim against cited evidence (`true`, `unverified` or `fake`); a profile with the poster's background and the count of verdicts so far; a report per request. | The poster's accounts, by the route the bot's host offers (a key only when that route is a platform's API: `{PLATFORM}_API`); evidence from primary sources first. |
 
 ### stock_iv_regime
@@ -287,19 +287,20 @@ Nothing adds a regime label.
 For each stock and each season (a fiscal period, named by its end) ending in a window of
 New York dates (`--from`, `--to`; default the two years ending today), the domain compares the
 season with stated baselines (the previous quarter, the same quarter last year, the previous
-10-K, proxy statement or guidance, the previous four or eight seasons) over 69 items in nine
+10-K, proxy statement or guidance, the previous four or eight seasons) over 68 items in nine
 sections, from guidance and financials to the earnings call and the timing of the filings.
 `fetch` writes, for the window's seasons and the four before them, each season's 10-K or 10-Q,
 8-Ks with their exhibits, proxy statement, beneficial owners' schedules and Form 4s from SEC
 EDGAR to `raw/{TICKER}/{PERIOD}/`, the company's XBRL facts, and the issuer's earnings-call
 list and each call's transcript, with its speakers' names and roles, from EarningsCalls.dev.
 `plan` names the next step; `derive` writes each document's text and each season's
-`measures.md`, the 16 items Python computes; the bot writes each season's
+`measures.md`, the 15 items Python computes; the bot writes each season's
 `reports/{TICKER}/{PERIOD}/readings.md`, the 51 items read from the documents with verbatim
-quotes, which `check` validates; `render` writes the season report
-`report_{TOKEN}.md` beside them, each item's level (`red`, `yellow`, `grey`, `none` or a
-status saying why there is no comparison) with its evidence and a score counting the triggered
-items, and `show` prints the newest report of each ticker and ranks the tickers by score.
+quotes, which `check` validates; `render` writes the season report `report_{TOKEN}.md` beside
+them, one table of every item, the high, then medium, then low importance the catalogue gives
+it, with its old value, its new value and, for a figure, the change (or a status saying why a
+value cannot be stated), then each item's evidence; and `show` prints the newest report of each
+ticker. No threshold decides whether a change counts, and nothing scores or ranks a season.
 Every comparison is mechanical; no valuation, forecast or advice is added.
 
 ### posts

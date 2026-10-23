@@ -1,4 +1,4 @@
-"""A season's report: every item's level, the score, and the triggered items with their evidence.
+"""A season's report: every item's old and new values, listed by importance, with its evidence.
 
 ``render_report`` is a pure function of a season (its files, its Python items in
 ``measures.md`` and the bot's passing readings) and the time it is generated: the same inputs
@@ -8,15 +8,17 @@ is the report rendered now. ``render`` writes it as ``reports/{T}/{PERIOD}/repor
 and never overwrites one.
 
 The report states, under its title, the issuer, the season, its call and the seasons its
-baselines name, then the score: red counts 10, yellow 3, grey 1 (``items.SCORES``), a weighted
-count of the comparisons that triggered against the stated baselines, never a valuation;
-then every triggered item, red first, then yellow, then grey, each with what it compared, its
-values or observation, its rule and its quotes with their documents; then the nine sections
-(``items.SECTIONS``) with every item's level. Its fixed text passes ``readings.WORDING``.
+baselines name, then how many items it lists by importance and by hand; then ``## Items``, one
+table of every item of the catalogue, none left out: the ``high`` items first, then ``medium``,
+then ``low`` (``items.by_importance``), in catalogue order within each, one row per comparison
+(a Python item may have several), each with its importance, item, baseline, old value, new
+value and change; then ``## Evidence``, per item in the same order, its rule and what its
+values rest on: the documents the bot read and its quotes, or Python's note. No threshold
+judges, marks or leaves out a row. Its fixed text passes ``readings.WORDING``.
 """
 
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -26,71 +28,81 @@ from market_state_research.common.layout import listed, name_instant, stamped
 from market_state_research.common.times import TOKEN_PATTERN, et_display, to_eastern
 
 from .documents import SeasonFiles
-from .filings import Seasons
-from .items import ITEMS, SECTIONS, Baseline, Item, score
-from .measures import Measures, Reading, baseline_seasons
-from .readings import ItemReading, Readings
+from .filings import Season, Seasons
+from .items import IMPORTANCE, ITEMS, Baseline, Item, by_importance
+from .measures import NOTHING, Measures, Row, baseline_seasons
+from .readings import Readings
 
 GENERATED: Final = "Generated "
 REPORT_PREFIX: Final = "report"
-NONE_TRIGGERED: Final = "None of the items triggered."
-TRIGGER_ORDER: Final = ("red", "yellow", "grey")
+NO_SOURCE: Final = "no source"
+HANDS: Final = {"python": "Python (measures.md)", "bot": "the bot (readings.md)", "none": "no source"}
 _REPORT_NAME = re.compile(rf"{REPORT_PREFIX}_(?P<token>{TOKEN_PATTERN})\.md", re.ASCII)
 
 
 @dataclass(frozen=True)
 class Entry:
-    """One item of the season as the report states it: its level, who read it, what it compared
-    with, its values or observation, and the quotes (text, attribution) of a bot item."""
+    """One item of the season as the report states it: its rows (one for a bot item or an item
+    without a source), what the bot's baseline line names (``none``), the quotes (text,
+    attribution) of a bot item and Python's note."""
 
     item: Item
-    level: str
-    who: str
-    baseline: str
-    detail: str
+    rows: tuple[Row, ...]
+    documents: str = "none"
     quotes: tuple[tuple[str, str], ...] = ()
+    note: str = ""
 
 
-def entries(measures: Measures, readings: Readings) -> tuple[Entry, ...]:
-    """Every item of the catalogue, in order, from the Python items and the passing readings."""
-    computed: Mapping[str, Reading] = {reading.item.id: reading for reading in measures.readings}
-    read: Mapping[str, ItemReading] = {reading.item.id: reading for reading in readings.items}
+def _seasons(listing: Seasons, season: Season, kind: Baseline) -> str:
+    """The item's baseline as the report's table names it: the kind and its listed seasons."""
+    if kind == "none":
+        return "none"
+    found = baseline_seasons(listing, season, kind)
+    return f"{kind} " + (
+        ", ".join(f"{other.period} ({other.filing.form})" for other in found) or "none listed"
+    )
+
+
+def entries(
+    listing: Seasons, files: SeasonFiles, measures: Measures, readings: Readings
+) -> tuple[Entry, ...]:
+    """Every item of the catalogue, in catalogue order, from the Python items and the passing
+    readings."""
     found: list[Entry] = []
     for item in ITEMS:
+        baseline = _seasons(listing, files.season, item.baseline)
         if item.who == "none":
-            found.append(Entry(item, "no source", "no source", "none", item.rule))
+            found.append(Entry(item, (Row("", baseline, NO_SOURCE, NO_SOURCE, NOTHING),)))
         elif item.who == "python":
-            reading = computed[item.id]
-            found.append(Entry(item, reading.level, "Python", reading.baseline, reading.values))
+            computed = measures.reading(item.id)
+            found.append(Entry(item, computed.rows, note=computed.note))
         else:
-            bot = read[item.id]
-            baseline = "; ".join(bot.baseline or ()) or "none"
+            bot = readings.get(item.id)
+            if bot is None:
+                raise ValueError(f"the readings lack item {item.id}")
             quotes = tuple(
                 (quote.text, quote.doc_id if quote.speaker is None else f"{quote.doc_id}, {quote.speaker}")
                 for quote in bot.quotes
             )
-            found.append(Entry(item, bot.level or "", "bot", baseline, bot.observation or "", quotes))
+            row = Row("", baseline, bot.old or "", bot.new or "", NOTHING)
+            found.append(Entry(item, (row,), "; ".join(bot.baseline or ()) or "none", quotes))
     return tuple(found)
 
 
-def season_score(found: Sequence[Entry]) -> int:
-    return score({entry.item.id: entry.level for entry in found})
+def ordered(found: Sequence[Entry]) -> tuple[Entry, ...]:
+    """``found`` in the report's order (``items.by_importance``)."""
+    by_item = {entry.item: entry for entry in found}
+    return tuple(by_item[item] for item in by_importance(tuple(by_item)))
 
 
-def _counts(found: Sequence[Entry]) -> str:
-    levels = [entry.level for entry in found]
-    statuses = ("not applicable", "not disclosed", "not computable", "no baseline", "unavailable")
-    return ", ".join(f"{levels.count(status)} {status}" for status in statuses)
-
-
-def score_line(found: Sequence[Entry]) -> str:
-    """The report's score line."""
-    levels = [entry.level for entry in found]
+def counts_line(found: Sequence[Entry]) -> str:
+    """The report's line counting its items by importance and by hand."""
+    importance = [entry.item.importance for entry in found]
     who = [entry.item.who for entry in found]
+    levels = ", ".join(f"{importance.count(level)} {level}" for level in IMPORTANCE)
     return (
-        f"Score: {season_score(found)} ({levels.count('red')} red, {levels.count('yellow')} yellow, "
-        f"{levels.count('grey')} grey) over {len(found)} items: {who.count('python')} read by Python, "
-        f"{who.count('bot')} by the bot, {who.count('none')} without a source; {_counts(found)}."
+        f"{len(found)} items, every one listed by importance ({levels}): {who.count('python')} read by "
+        f"Python, {who.count('bot')} by the bot, {who.count('none')} without a source."
     )
 
 
@@ -98,45 +110,39 @@ def _cell(text: str) -> str:
     return text.replace("|", "\\|")
 
 
-def _triggered(found: Sequence[Entry]) -> list[str]:
-    ordered = sorted(
-        (entry for entry in found if entry.level in TRIGGER_ORDER),
-        key=lambda entry: (TRIGGER_ORDER.index(entry.level), ITEMS.index(entry.item)),
-    )
-    if not ordered:
-        return [NONE_TRIGGERED]
+def _table(found: Sequence[Entry]) -> list[str]:
+    lines = [
+        "| Importance | Item | Baseline | Old | New | Change |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for entry in found:
+        for row in entry.rows:
+            item = entry.item.heading + (f" · {row.compared}" if row.compared else "")
+            cells = (entry.item.importance, item, row.baseline, row.old, row.new, row.change)
+            lines.append("| " + " | ".join(_cell(cell) for cell in cells) + " |")
+    return lines
+
+
+def _evidence(found: Sequence[Entry]) -> list[str]:
     lines: list[str] = []
-    for entry in ordered:
-        label = "values" if entry.who == "Python" else "observation"
+    for entry in found:
+        item = entry.item
         lines.extend(
             [
-                f"### {entry.item.heading} · {entry.level}",
+                f"### {item.heading}",
                 "",
-                f"baseline: {entry.baseline}",
-                f"{label}: {entry.detail}",
-                f"rule: {entry.item.rule}",
+                f"importance: {item.importance}; read by {HANDS[item.who]}",
+                f"rule: {item.rule}",
             ]
         )
+        if item.who == "bot":
+            lines.append(f"baseline: {entry.documents}")
+        if entry.note:
+            lines.append(f"note: {entry.note}")
         for text, attribution in entry.quotes:
             lines.extend(["", f"> {text}", f"— {attribution}"])
         lines.append("")
     return lines[:-1]
-
-
-def _section(number: int, found: Sequence[Entry]) -> list[str]:
-    lines = [
-        f"## {number} {SECTIONS[number]}",
-        "",
-        "| Item | Level | Read by | Baseline | Values or observation |",
-        "| --- | --- | --- | --- | --- |",
-    ]
-    for entry in found:
-        if entry.item.section == number:
-            lines.append(
-                f"| {_cell(entry.item.heading)} | {entry.level} | {entry.who} | {_cell(entry.baseline)} | "
-                f"{_cell(entry.detail)} |"
-            )
-    return lines
 
 
 def _baselines_line(listing: Seasons, files: SeasonFiles) -> str:
@@ -165,7 +171,7 @@ def render_report(
 ) -> str:
     """The season's report (module docstring)."""
     own = files.season.filing
-    found = entries(measures, readings)
+    found = ordered(entries(listing, files, measures, readings))
     call = files.call
     as_of = "" if call.as_of is None else f" as of the calls list of {call.as_of}"
     lines = [
@@ -177,14 +183,16 @@ def render_report(
         f"(accession {own.accession}, filed {own.filed}). Call: {call.status}{as_of}.",
         _baselines_line(listing, files),
         "",
-        score_line(found),
+        counts_line(found),
         "",
-        "## Triggered",
+        "## Items",
         "",
-        *_triggered(found),
+        *_table(found),
+        "",
+        "## Evidence",
+        "",
+        *_evidence(found),
     ]
-    for number in SECTIONS:
-        lines.extend(["", *_section(number, found)])
     return "\n".join(lines) + "\n"
 
 
@@ -218,20 +226,3 @@ def _without_generated(text: str) -> list[str]:
 def same_report(held: str, rendered: str) -> bool:
     """Whether two reports are equal apart from their ``Generated`` line."""
     return _without_generated(held) == _without_generated(rendered)
-
-
-def ranking(rows: Iterable[tuple[str, str, Sequence[Entry], str]]) -> list[str]:
-    """The ranking ``show`` prints: per ticker its newest season's score, highest first; ``rows``
-    are (ticker, season, entries, report path)."""
-    ordered = sorted(rows, key=lambda row: (-season_score(row[2]), row[0]))
-    lines = [
-        "| Ticker | Season | Score | red | yellow | grey | Report |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
-    ]
-    for ticker, season, found, path in ordered:
-        levels = [entry.level for entry in found]
-        lines.append(
-            f"| {ticker} | {season} | {season_score(found)} | {levels.count('red')} | "
-            f"{levels.count('yellow')} | {levels.count('grey')} | {path} |"
-        )
-    return lines

@@ -2,11 +2,12 @@
 
 This domain keeps, per stock issuer and per season (one fiscal period, named by its end) in a
 window, the issuer's own documents of the season verbatim with the company's XBRL facts,
-derives their text, compares the season with stated baselines over a catalogue of 69 items,
-and renders one report per season: every item's level, a score, and the evidence of every
-item that triggered. Python computes the 16 items it can read from structured data into the
-season's `measures.md`; the bot reads the documents for 51 others and writes the season's
-readings, which `check` holds to their rules; 2 items have no source. Its default tickers are
+derives their text, compares the season with stated baselines over a catalogue of 68 items,
+and renders one report per season: every item's old and new values side by side, all of them
+listed by importance, and the evidence they rest on. Python computes the 15 items it can read
+from structured data into the season's `measures.md`; the bot reads the documents for 51
+others and writes the season's readings, which `check` holds to their rules; 2 items have no
+source. Its default tickers are
 those of this domain's own watchlist. This file says first what the work aims at, the model
 of seasons, filings and calls, the items, the quote rules, the derived text and measures, the
 readings, the season report and the commands; then the sources and why Python may read them,
@@ -24,15 +25,16 @@ session is not the next day.
 For each issuer, season by season, what changed against explicit baselines (the previous
 quarter, the same quarter a year before, the previous 10-K or proxy statement, the previous
 guidance, the previous four or eight seasons), each comparison made mechanically, at scale and
-without judgment: a fixed rule, applied alike to every issuer and season, sets its level from
-figures the filings report or statements the documents make, and its evidence stays beside it
-(values with their XBRL concepts and accessions, or quotes copied verbatim with their
-documents). Judgment is the user's: a report says what moved and where the words are, never
-what that means. Its score counts the comparisons that triggered, weighted red 10, yellow 3
-and grey 1; it is not a valuation, and `show`'s order of the tickers by score says where more
-comparisons triggered, nothing of a company's worth. Every original document is kept as
-served. No valuation, forecast, rating, recommendation or advice is added by the measures,
-the readings, the reports or the bot.
+without judgment: a fixed rule, applied alike to every issuer and season, states each item's
+value in its baseline (old) and in the season (new), from figures the filings report or
+statements the documents make, and its evidence stays beside it (values with their XBRL
+concepts and accessions, or quotes copied verbatim with their documents). No threshold decides
+whether a change counts, so none is left out: every item is stated whatever the size of its
+change, and the report lists every one, ordered by the importance the catalogue gives it, with
+the old and new values in columns of their own. Judgment is the user's: a report says what each
+value was and is and where the words are, never what that means, and nothing scores, ranks or
+flags a season. Every original document is kept as served. No valuation, forecast, rating,
+recommendation or advice is added by the measures, the readings, the reports or the bot.
 
 ## Seasons, filings and calls
 
@@ -138,10 +140,10 @@ The catalogue below is the whole definition of what a season is read against (`i
 Each item belongs to one of nine sections, is read by one hand and compares the season with
 one baseline:
 
-- Read by `Python`, from structured data into `measures.md` (16 items: the company facts, the
-  listing, the Form 4s, the call transcripts' turns and durations, the derived texts'
-  lengths); by the `bot`, from the documents into the season's readings (51 items); or by no
-  one, `no source`, for the two items the domain has no source for (consensus estimates).
+- Read by `Python`, from structured data into `measures.md` (15 items: the company facts, the
+  listing, the Form 4s, the call transcripts' turns and durations); by the `bot`, from the
+  documents into the season's readings (51 items); or by no one, `no source`, for the two items
+  the domain has no source for (consensus estimates).
 - The baseline names the seasons the item compares with:
 
   | Baseline | Seasons |
@@ -159,126 +161,130 @@ one baseline:
   The 10-K and proxy baselines look back eight seasons. `measures.md` names, per baseline, its
   seasons and their documents in `raw/` with their `DOC_ID`s; since `fetch` keeps the four
   seasons before the window, an eight-season baseline is read from what `raw/` holds.
-- The level is `red`, `yellow` or `grey` where the item's rule triggers and `none` where it
-  does not, or a status saying why there is no comparison:
-  - `no baseline`: none of the baseline seasons' documents is in `raw/` (for a Python item, a
-    season its comparison needs is not listed);
+- An item states two values: the old, its baseline's, and the new, the season's; a Python item
+  may state several pairs, one row each, with the change between them. An item without a
+  baseline states the season's value alone, its old value `—`. A value of a bot item that the
+  documents show to be absent (no going concern doubt stated, no 8-K with Item 4.01) is `none`.
+  A value that cannot be stated is a status saying why:
+  - `no baseline`: none of the baseline seasons' documents is in `raw/` (for a call item, none
+    of their calls; for a Python item, a season its comparison needs is not listed, or its call
+    has no transcript); an old value only;
   - `not applicable`: an annual item (scope `annual`) in a 10-Q season, or a proxy item
-    (`proxy`) in a season without a proxy statement;
-  - `unavailable`: a call item (`call`) while the season's call is not `transcript`;
+    (`proxy`) in a season without a proxy statement; both values;
+  - `unavailable`: a call item (`call`) while the season's call is not `transcript`; both
+    values;
   - `not disclosed`: the documents do not state what a bot item compares, where the item
     allows it;
-  - `not computable`: a figure a Python item needs is missing or ambiguous, or its rule cannot
-    apply (a 10-K season's diluted shares, say); for a bot item, only where the item allows
-    it;
+  - `not computable`: a figure a Python item needs is missing or ambiguous, or the value has no
+    meaning (a 10-K season's quarterly diluted shares, a ratio over a net income of 0 or below);
+    for a bot item, only where the item allows it;
   - `no source`: the items without a source.
-- The score of a season is the sum over its items of 10 per `red`, 3 per `yellow` and 1 per
-  `grey` (`items.SCORES`).
+- The importance of an item, `high`, `medium` or `low`, is the catalogue's, fixed alike for
+  every season and issuer. It orders the report and says nothing of the season: no threshold,
+  level or score is computed, and no item is left out of a report.
 
-The rules, their thresholds included, are code: `items.py` states each, and `measures.py`'s
-constants hold the Python items' thresholds. They are starting points, the same for every
-issuer, changed only there (`git log -p` dates each change). A changed rule or threshold
-changes the measures and the reports rendered after it (`plan` says `derive`, then `render`);
-a reading written under an earlier rule keeps passing `check`: apply a changed bot item's rule
-by reading the affected seasons again and rewriting that item's readings.
+The rules are code: `items.py` states each, the same for every issuer, changed only there
+(`git log -p` dates each change), and none holds a threshold. A changed rule changes the
+measures and the reports rendered after it (`plan` says `derive`, then `render`); a reading
+written under an earlier rule keeps passing `check`: apply a changed bot item's rule by reading
+the affected seasons again and rewriting that item's readings.
 
 ### The catalogue
 
 #### 1 Guidance
 
-- **1.1 Full-year revenue guidance** (bot; baseline: previous guidance; may be `not disclosed`): The midpoint of this season's full-year revenue guidance against the previous guidance's: lowered → red; raised by more than 5% → yellow.
-- **1.2 Full-year profit guidance** (bot; baseline: previous guidance; may be `not disclosed`): The midpoint of this season's full-year guidance of earnings per share, net income, operating income or a margin against the previous guidance's for the same measure: lowered → red.
-- **1.3 Next-quarter guidance against consensus** (no source; baseline: none): No source: the domain reads no consensus.
-- **1.4 Guidance range width** (bot; baseline: previous guidance; may be `not disclosed`): The width (high less low) of a range this season's guidance gives against the previous guidance's for the same measure: wider by more than 50% → yellow.
-- **1.5 Guidance withdrawn** (bot; baseline: previous guidance): A measure the previous guidance gave that this season's guidance no longer gives → red.
-- **1.6 Capital expenditure guidance** (bot; baseline: previous guidance; may be `not disclosed`): The midpoint of this season's capital expenditure guidance against the previous guidance's: a change of more than 20% either way → yellow.
-- **1.7 Results against the previous guidance** (bot; baseline: previous guidance; may be `not disclosed`): This season's revenue, net income or diluted earnings per share (the values measures.md gives) against the previous guidance for this quarter: below the low end → red.
-- **1.8 Results against consensus** (no source; baseline: none): No source: the domain reads no consensus.
-- **1.9 Guidance record** (bot; baseline: previous eight seasons): The previous eight seasons' results against their previous guidance (their readings of 1.7): the count below the low end, a record → grey; this season's 1.7 red after at least six of those eight at or above the low end → red.
-- **1.10 Full-year kept, next quarter lowered** (bot; baseline: previous guidance; may be `not disclosed`): The full-year guidance midpoint kept or raised while the guidance for the next quarter is below the previous guidance for that quarter → yellow.
+- **1.1 Full-year revenue guidance** (bot; high importance; baseline: previous guidance; may be `not disclosed`): The full-year revenue guidance, its range and midpoint: this season's against the previous guidance's.
+- **1.2 Full-year profit guidance** (bot; high importance; baseline: previous guidance; may be `not disclosed`): The full-year guidance of earnings per share, net income, operating income or a margin, each range and midpoint: this season's against the previous guidance's for the same measure.
+- **1.3 Next-quarter guidance against consensus** (no source; high importance; baseline: none): No source: the domain reads no consensus.
+- **1.4 Guidance range width** (bot; medium importance; baseline: previous guidance; may be `not disclosed`): The width (high less low) of each range the guidance gives: this season's against the previous guidance's for the same measure.
+- **1.5 Guidance withdrawn** (bot; high importance; baseline: previous guidance): The measures the guidance gives: this season's against the previous guidance's, those no longer given named.
+- **1.6 Capital expenditure guidance** (bot; medium importance; baseline: previous guidance; may be `not disclosed`): The capital expenditure guidance, its range and midpoint: this season's against the previous guidance's.
+- **1.7 Results against the previous guidance** (bot; high importance; baseline: previous guidance; may be `not disclosed`): This season's revenue, net income and diluted earnings per share (the values measures.md gives) against the previous guidance's range for this quarter.
+- **1.8 Results against consensus** (no source; medium importance; baseline: none): No source: the domain reads no consensus.
+- **1.9 Guidance record** (bot; low importance; baseline: previous eight seasons): The results against the previous guidance (the readings of 1.7): this season's against the previous eight seasons', counted below, within and above the range.
+- **1.10 Full-year kept, next quarter lowered** (bot; medium importance; baseline: previous guidance; may be `not disclosed`): The full-year guidance midpoint and the guidance for the next quarter: this season's against the previous guidance's for the same periods.
 
 #### 2 Financials
 
-- **2.1 Revenue and net income growth** (Python; baseline: previous quarter and same quarter last year): The year-over-year growth of revenue or of net income down by more than 10 percentage points on the previous quarter's year-over-year growth → yellow.
-- **2.2 Gross and operating margins** (Python; baseline: previous quarter and same quarter last year): The gross or operating margin more than 200 basis points from the same quarter last year's or the previous quarter's, either way → yellow.
-- **2.3 Operating cash flow to net income** (Python; baseline: previous quarter and same quarter last year): Operating cash flow ÷ net income below 0.7 after above 1 in the same quarter last year, or below 1 in this season and the previous one while each one's year-ago ratio was 1 or more → red.
-- **2.4 Days of receivables, inventory and payables** (Python; baseline: same quarter last year): Days of sales outstanding (receivables × quarter days ÷ revenue), of inventory and of payables (inventory or payables × quarter days ÷ cost of revenue): any up by more than 15 days on the same quarter last year → yellow.
-- **2.5 Receivables growth against revenue growth** (Python; baseline: same quarter last year): The year-over-year growth of receivables less that of revenue above 20 percentage points → red.
-- **2.6 Net debt** (Python; baseline: previous quarter): Net debt (debt less cash and cash equivalents) more than 25% from the previous quarter's, either way → yellow; not computable when its sign changed or the previous quarter's is under 1% of that quarter's stockholders' equity.
-- **2.7 Segment revenue shares** (bot; baseline: same quarter last year; may be `not disclosed`): A reported segment's share of revenue more than 5 percentage points from the same quarter last year's, either way → grey.
-- **2.8 Segments merged, split or renamed** (bot; baseline: previous quarter; may be `not disclosed`): A reporting segment of the previous quarter merged, split, renamed or dropped → yellow.
-- **2.9 Non-recurring items** (bot; baseline: none; may be `not computable` or `not disclosed`): The items the issuer calls non-recurring, one-time or unusual, summed, above 30% of net income (the value measures.md gives) → yellow; not computable when net income is 0 or below.
-- **2.10 Weighted diluted shares** (Python; baseline: previous quarter): The weighted average diluted shares more than 2% from the previous quarter's, either way → grey; not computable in a 10-K season (the annual filing reports the year's average).
-- **2.11 Goodwill added** (Python; baseline: previous quarter): Goodwill up on the previous quarter by more than 10% of stockholders' equity → yellow.
+- **2.1 Revenue and net income growth** (Python; medium importance; baseline: previous quarter and same quarter last year): The year-over-year growth of revenue and of net income: this season's against the previous quarter's.
+- **2.2 Gross and operating margins** (Python; medium importance; baseline: previous quarter and same quarter last year): The gross and operating margins: this season's against the same quarter last year's and the previous quarter's.
+- **2.3 Operating cash flow to net income** (Python; high importance; baseline: previous quarter and same quarter last year): Operating cash flow ÷ net income: this season's against the same quarter last year's and the previous quarter's; not computable where net income is 0 or below.
+- **2.4 Days of receivables, inventory and payables** (Python; medium importance; baseline: same quarter last year): Days of sales outstanding (receivables × quarter days ÷ revenue), of inventory and of payables (inventory or payables × quarter days ÷ cost of revenue): this season's against the same quarter last year's.
+- **2.5 Receivables growth against revenue growth** (Python; high importance; baseline: same quarter last year): The receivables at the period end and the quarter's revenue: this season's against the same quarter last year's, each change giving its growth.
+- **2.6 Net debt** (Python; medium importance; baseline: previous quarter): Net debt (debt less cash and cash equivalents): this season's against the previous quarter's.
+- **2.7 Segment revenue shares** (bot; low importance; baseline: same quarter last year; may be `not disclosed`): Each reported segment's share of revenue: this season's against the same quarter last year's.
+- **2.8 Segments merged, split or renamed** (bot; medium importance; baseline: previous quarter; may be `not disclosed`): The reporting segments: this season's against the previous quarter's, any merged, split, renamed or dropped named.
+- **2.9 Non-recurring items** (bot; medium importance; baseline: none; may be `not computable` or `not disclosed`): The items the issuer calls non-recurring, one-time or unusual in the season, summed, and their share of net income (the value measures.md gives); not computable when net income is 0 or below.
+- **2.10 Weighted diluted shares** (Python; low importance; baseline: previous quarter): The weighted average diluted shares: this season's against the previous quarter's; not computable in a 10-K season (the annual filing reports the year's average).
+- **2.11 Goodwill added** (Python; medium importance; baseline: previous quarter): Goodwill, and goodwill as a share of stockholders' equity: this season's against the previous quarter's.
 
 #### 3 Accounting and audit
 
-- **3.1 Auditor change** (bot; baseline: none): An 8-K of the season with Item 4.01, a change of the certifying accountant → red.
-- **3.2 Audit opinion** (bot; baseline: previous 10-K; annual item): The auditor's opinion other than unqualified (qualified, adverse, a disclaimer) → red.
-- **3.3 Going concern** (bot; baseline: previous quarter): Substantial doubt about the ability to continue as a going concern, stated now and not in the previous quarter → red.
-- **3.4 Restatement** (bot; baseline: none): An 8-K of the season with Item 4.02 (non-reliance on financial statements issued before), or a restatement the season's filing states → red.
-- **3.5 Material weakness** (bot; baseline: previous quarter): A material weakness in internal control over financial reporting, stated now and not in the previous quarter → red.
-- **3.6 Accounting policy change** (bot; baseline: previous quarter): A change of accounting policy or principle the season's filing states, the adoption of a new standard included → yellow.
-- **3.7 Accounting estimate change** (bot; baseline: previous quarter): A change of an accounting estimate the season's filing states (useful lives, reserves, allowances, assumptions) → yellow.
-- **3.8 New critical audit matter** (bot; baseline: previous 10-K; annual item): A critical audit matter of the auditor's report not in the previous 10-K's → yellow.
-- **3.9 Impairment test assumptions** (bot; baseline: previous 10-K; annual item; may be `not disclosed`): An assumption of an impairment test moved in the issuer's favour from the previous 10-K's (a lower discount rate, a higher growth rate) → yellow.
-- **3.10 Non-GAAP adjustments** (bot; baseline: previous quarter; may be `not disclosed`): A non-GAAP adjustment of the season's earnings release that the previous quarter's did not make, or one more than 50% larger → yellow.
-- **3.11 Revenue recognition wording** (bot; baseline: previous 10-K; annual item): The revenue recognition policy worded otherwise than in the previous 10-K → yellow.
+- **3.1 Auditor change** (bot; high importance; baseline: none): An 8-K of the season with Item 4.01, a change of the certifying accountant: the accountant dismissed and the one engaged.
+- **3.2 Audit opinion** (bot; high importance; baseline: previous 10-K; annual item): The auditor's opinion (unqualified, qualified, adverse or a disclaimer): this season's against the previous 10-K's.
+- **3.3 Going concern** (bot; high importance; baseline: previous quarter): A substantial doubt about the ability to continue as a going concern: as this season's filing states it against the previous quarter's.
+- **3.4 Restatement** (bot; high importance; baseline: none): An 8-K of the season with Item 4.02 (non-reliance on financial statements issued before), or a restatement the season's filing states.
+- **3.5 Material weakness** (bot; high importance; baseline: previous quarter): A material weakness in internal control over financial reporting: as this season's filing states it against the previous quarter's.
+- **3.6 Accounting policy change** (bot; medium importance; baseline: previous quarter): The changes of accounting policy or principle the filing states, the adoption of a new standard included: this season's against the previous quarter's.
+- **3.7 Accounting estimate change** (bot; medium importance; baseline: previous quarter): The changes of accounting estimates the filing states (useful lives, reserves, allowances, assumptions): this season's against the previous quarter's.
+- **3.8 New critical audit matter** (bot; medium importance; baseline: previous 10-K; annual item): The critical audit matters of the auditor's report: this season's against the previous 10-K's.
+- **3.9 Impairment test assumptions** (bot; medium importance; baseline: previous 10-K; annual item; may be `not disclosed`): The assumptions of the impairment tests (discount rates, growth rates): this season's against the previous 10-K's.
+- **3.10 Non-GAAP adjustments** (bot; medium importance; baseline: previous quarter; may be `not disclosed`): The non-GAAP adjustments of the earnings release, each with its amount: this season's against the previous quarter's.
+- **3.11 Revenue recognition wording** (bot; medium importance; baseline: previous 10-K; annual item): The wording of the revenue recognition policy: this season's against the previous 10-K's.
 
 #### 4 Risk, legal and related parties
 
-- **4.1 New risk factor** (bot; baseline: previous filings): A risk factor the previous quarter's filing and the previous 10-K did not have → yellow.
-- **4.2 Risk wording escalated** (bot; baseline: previous filings): A risk factor worded from possibility to fact or to a greater likelihood ('may' to 'has', 'could' to 'will', 'possible' to 'likely') → red.
-- **4.3 Risk factor deleted** (bot; baseline: previous filings): A risk factor of the previous quarter's filing or the previous 10-K no longer stated → grey.
-- **4.4 Litigation and investigations** (bot; baseline: previous quarter): A legal proceeding or government investigation not in the previous quarter's filing, or an amount stated for one above 10% of net income (the value measures.md gives) → red.
-- **4.5 Contingent liabilities** (bot; baseline: previous quarter; may be `not disclosed`): The contingent liabilities the filing quantifies, summed, more than 50% from the previous quarter's, either way → yellow.
-- **4.6 Related-party transactions** (bot; baseline: previous quarter; may be `not disclosed`): A related-party transaction not in the previous quarter's filing, or their total up by more than 50% → yellow.
-- **4.7 Guarantees** (bot; baseline: previous quarter; may be `not disclosed`): A guarantee not in the previous quarter's filing, or guarantees above 20% of stockholders' equity (the value measures.md gives) → yellow.
-- **4.8 Largest customers' shares** (bot; baseline: previous 10-K; annual item; may be `not disclosed`): The share of revenue of a customer the 10-K names more than 5 percentage points from the previous 10-K's, either way → yellow.
+- **4.1 New risk factor** (bot; medium importance; baseline: previous filings): The risk factors: this season's against those of the previous quarter's filing and the previous 10-K, those added named.
+- **4.2 Risk wording escalated** (bot; high importance; baseline: previous filings): The wording of the risk factors: this season's against the previous quarter's filing and the previous 10-K, any worded from possibility to fact or to a greater likelihood ('may' to 'has', 'could' to 'will', 'possible' to 'likely') named.
+- **4.3 Risk factor deleted** (bot; low importance; baseline: previous filings): The risk factors: this season's against those of the previous quarter's filing and the previous 10-K, those no longer stated named.
+- **4.4 Litigation and investigations** (bot; high importance; baseline: previous quarter): The legal proceedings and government investigations, with the amounts stated for them: this season's against the previous quarter's filing; net income (the value measures.md gives) for scale.
+- **4.5 Contingent liabilities** (bot; medium importance; baseline: previous quarter; may be `not disclosed`): The contingent liabilities the filing quantifies, summed: this season's against the previous quarter's.
+- **4.6 Related-party transactions** (bot; medium importance; baseline: previous quarter; may be `not disclosed`): The related-party transactions, their counterparties and total: this season's against the previous quarter's.
+- **4.7 Guarantees** (bot; medium importance; baseline: previous quarter; may be `not disclosed`): The guarantees and their total: this season's against the previous quarter's; stockholders' equity (the value measures.md gives) for scale.
+- **4.8 Largest customers' shares** (bot; medium importance; baseline: previous 10-K; annual item; may be `not disclosed`): The share of revenue of each customer the 10-K names: this season's against the previous 10-K's.
 
 #### 5 Governance and insiders
 
-- **5.1 Chief financial officer departure** (bot; baseline: none): An 8-K of the season with Item 5.02 reporting the departure of the chief financial officer → red.
-- **5.2 Chief executive or chair departure** (bot; baseline: none): An 8-K of the season with Item 5.02 reporting the departure of the chief executive officer or of the chair of the board → red.
-- **5.3 Audit committee chair or director departure** (bot; baseline: none): An 8-K of the season with Item 5.02 reporting the departure of the audit committee's chair, or of an independent director before the end of their term → yellow.
-- **5.4 Major holder selling** (bot; baseline: none): A Schedule 13D or 13G amendment of the season whose subject is the issuer, reporting a holder's stake down by more than 1 percentage point of the class → yellow. The observation names each filing's subject issuer: the issuer may file one as another company's holder.
-- **5.5 Pledged shares** (bot; baseline: previous proxy; proxy item; may be `not disclosed`): Shares pledged by a director or executive officer that the previous proxy statement did not state, or the shares pledged up on the previous proxy statement's → yellow.
-- **5.6 Compensation measures changed** (bot; baseline: previous proxy; proxy item; may be `not disclosed`): A performance measure of the executives' incentive pay added, removed or reweighted from the previous proxy statement's → yellow.
-- **5.7 Officers selling** (Python; baseline: none): Two or more of the issuer's officers reporting in the season's Form 4s a sale (code S) or a disposition to the issuer (code D) → yellow.
+- **5.1 Chief financial officer departure** (bot; high importance; baseline: none): An 8-K of the season with Item 5.02 reporting the departure of the chief financial officer.
+- **5.2 Chief executive or chair departure** (bot; high importance; baseline: none): An 8-K of the season with Item 5.02 reporting the departure of the chief executive officer or of the chair of the board.
+- **5.3 Audit committee chair or director departure** (bot; medium importance; baseline: none): An 8-K of the season with Item 5.02 reporting the departure of the audit committee's chair, or of an independent director before the end of their term.
+- **5.4 Major holder selling** (bot; medium importance; baseline: none): The Schedule 13D and 13G amendments of the season whose subject is the issuer: each holder's percent of the class, as the amendment reports it against its previous schedule. The new value names each filing's subject issuer: the issuer may file one as another company's holder.
+- **5.5 Pledged shares** (bot; medium importance; baseline: previous proxy; proxy item; may be `not disclosed`): The shares pledged by directors and executive officers: this season's proxy statement against the previous one.
+- **5.6 Compensation measures changed** (bot; medium importance; baseline: previous proxy; proxy item; may be `not disclosed`): The performance measures of the executives' incentive pay and their weights: this season's proxy statement against the previous one.
+- **5.7 Officers selling** (Python; medium importance; baseline: none): The issuer's officers reporting in the season's Form 4s a sale (code S) or a disposition to the issuer (code D).
 
 #### 6 Capital allocation and financing
 
-- **6.1 Dividend change** (bot; baseline: previous quarter): A dividend cut, suspended or begun against the previous quarter → yellow.
-- **6.2 Buyback authorised, not executed** (bot; baseline: previous quarter; may be `not disclosed`): A share repurchase authorisation under which no share was repurchased in this season and in the previous one → grey.
-- **6.3 Equity or convertible issuance** (bot; baseline: none): Shares or convertible securities issued, or registered for sale, in the season (the 8-Ks with Items 3.02 or 1.01 and the registrations measures.md lists) → yellow.
-- **6.4 Acquisition or divestiture** (bot; baseline: none; may be `not computable`): An acquisition or divestiture whose stated value would be compared with 5% of the market value: not computable, the domain reads no market value; the observation gives its amount against stockholders' equity and total assets (the values measures.md gives).
-- **6.5 Covenant breached or near its limit** (bot; baseline: previous quarter; may be `not disclosed`): A debt covenant the filing calls breached, waived or close to its limit, not so in the previous quarter → red.
-- **6.6 Refinancing on worse terms** (bot; baseline: previous quarter): Debt refinanced or issued at a higher rate or with tighter terms than the debt it replaces → yellow.
+- **6.1 Dividend change** (bot; medium importance; baseline: previous quarter): The dividend per share and its policy: this season's against the previous quarter's, any cut, suspension or start named.
+- **6.2 Buyback authorised, not executed** (bot; low importance; baseline: previous quarter; may be `not disclosed`): The share repurchase authorisation and the shares repurchased under it: this season's against the previous quarter's.
+- **6.3 Equity or convertible issuance** (bot; medium importance; baseline: none): Shares or convertible securities issued, or registered for sale, in the season (the 8-Ks with Items 3.02 or 1.01 and the registrations measures.md lists).
+- **6.4 Acquisition or divestiture** (bot; medium importance; baseline: none): The acquisitions and divestitures of the season, each with its stated value; stockholders' equity and total assets (the values measures.md gives) for scale.
+- **6.5 Covenant breached or near its limit** (bot; high importance; baseline: previous quarter; may be `not disclosed`): The debt covenants the filing calls breached, waived or close to their limits: this season's against the previous quarter's.
+- **6.6 Refinancing on worse terms** (bot; medium importance; baseline: previous quarter): Debt refinanced or issued in the season: its rate and terms against those of the debt it replaces.
 
 #### 7 Earnings call: statements
 
-- **7.1 Opening topics** (bot; baseline: previous quarter; call item): The first topic of the executives' prepared remarks other than the previous call's → yellow.
-- **7.2 New explanation** (bot; baseline: previous quarter; call item): A cause the executives give for a result that the previous call did not give → yellow.
-- **7.3 Product, customer or market no longer named** (bot; baseline: previous quarter; call item): A product, customer or market the previous call's prepared remarks named and this call's do not → yellow.
-- **7.4 Statement against the filing** (bot; baseline: none; call item): An executive's statement of a figure that the season's filing or the values measures.md gives contradict → red.
+- **7.1 Opening topics** (bot; medium importance; baseline: previous quarter; call item): The first topic of the executives' prepared remarks: this call's against the previous call's.
+- **7.2 New explanation** (bot; medium importance; baseline: previous quarter; call item): The causes the executives give for the results: this call's against the previous call's.
+- **7.3 Product, customer or market no longer named** (bot; medium importance; baseline: previous quarter; call item): The products, customers and markets the executives' prepared remarks name: this call's against the previous call's, those no longer named listed.
+- **7.4 Statement against the filing** (bot; high importance; baseline: none; call item): The figures the executives state on the call against the season's filing and the values measures.md gives, any that they contradict named.
 
 #### 8 Earnings call: questions and answers
 
-- **8.1 Unanswered questions** (bot; baseline: previous quarter; call item): Questions the executives decline or leave unanswered: twice the previous call's count or more, or three or more on one topic → yellow.
-- **8.2 Refusal to quantify** (bot; baseline: previous quarter; call item): An executive declining to give a figure an analyst asks for that the previous call gave → yellow.
-- **8.3 Answer against the previous call's** (bot; baseline: previous quarter; call item): An answer that contradicts what an executive answered on the same topic in the previous call → red.
-- **8.4 New question topics** (bot; baseline: previous quarter; call item): More than 30% of the analysts' questions on topics the previous call's questions did not raise → grey.
-- **8.5 Analysts on the call** (Python; baseline: previous quarter; call item): The distinct analysts asking questions down by more than 30% on the previous call's → grey; the names gone and new are listed.
-- **8.6 Shorter answers** (Python; baseline: previous quarter; call item): The mean words of the executives' turns after the first analyst's turn down by more than 30% on the previous call's → grey.
+- **8.1 Unanswered questions** (bot; medium importance; baseline: previous quarter; call item): The questions the executives decline or leave unanswered, counted and by topic: this call's against the previous call's.
+- **8.2 Refusal to quantify** (bot; medium importance; baseline: previous quarter; call item): The figures the executives decline to give when an analyst asks: this call's against the previous call's, where that call gave them.
+- **8.3 Answer against the previous call's** (bot; high importance; baseline: previous quarter; call item): The executives' answers on the topics the previous call also answered: this call's against the previous call's, any that contradicts it named.
+- **8.4 New question topics** (bot; low importance; baseline: previous quarter; call item): The topics of the analysts' questions: this call's against the previous call's, with the share on topics it did not raise.
+- **8.5 Analysts on the call** (Python; low importance; baseline: previous quarter; call item): The distinct analysts asking questions: this call's against the previous call's, with the names on one of the two calls only.
+- **8.6 Shorter answers** (Python; low importance; baseline: previous quarter; call item): The mean words of the executives' turns after the first analyst's turn: this call's against the previous call's.
 
 #### 9 Disclosure
 
-- **9.1 Filing timing** (Python; baseline: previous four seasons): The days from the period end to the 10-K's or 10-Q's filing above each of the previous four of the same form; or an earnings release accepted after 16:00 on a day whose next XNYS session is not the next day while none of the previous four seasons' releases was; or a late-filing notice (NT 10-K, NT 10-Q) in the season → red.
-- **9.2 Operating metric no longer disclosed** (bot; baseline: previous quarter): An operating metric (units, customers, backlog, another indicator the issuer reports) the previous quarter's release or filing stated and the season's do not → red.
-- **9.3 Questions and answers compressed** (Python; baseline: previous quarter; call item): The call's duration, or the words from the first analyst's turn to the end, down by more than 30% on the previous call's → yellow.
-- **9.4 Text length** (Python; baseline: previous quarter): The derived text of the 10-K or 10-Q against the previous filing of the same form, of the earnings releases' exhibits and of the call against the previous season's: any more than 20% longer or shorter → grey.
-- **9.5 8-K count** (Python; baseline: previous four seasons): The season's 8-Ks more than twice the mean of the previous four seasons' → grey.
-- **9.6 Call cancelled** (Python; baseline: previous four seasons): The season's call unavailable while the provider lists a call in each of the previous four seasons → red.
+- **9.1 Filing timing** (Python; high importance; baseline: previous four seasons): The days from the period end to the 10-K's or 10-Q's filing: this season's against the previous four of the same form; the earnings releases accepted after 16:00 on a day whose next XNYS session is not the next day, and the late-filing notices (NT 10-K, NT 10-Q): this season's against the previous four seasons'.
+- **9.2 Operating metric no longer disclosed** (bot; high importance; baseline: previous quarter): The operating metrics the release and the filing state (units, customers, backlog, other indicators the issuer reports): this season's against the previous quarter's, those no longer stated named.
+- **9.3 Questions and answers compressed** (Python; medium importance; baseline: previous quarter; call item): The call's duration and the words from the first analyst's turn to the end: this call's against the previous call's.
+- **9.4 8-K count** (Python; low importance; baseline: previous four seasons): The 8-Ks placed in the season: this season's count against each of the previous four seasons'.
+- **9.5 Call cancelled** (Python; high importance; baseline: previous four seasons): The state of the season's call (transcript, unavailable, waiting, missing): this season's against each of the previous four seasons'.
 
 ## Quotes
 
@@ -334,14 +340,15 @@ by reading the affected seasons again and rewriting that item's readings.
   turns or in a heading). Any turn may be quoted, an analyst's question included; a sentence a
   question repeats before an executive says it is found first in the question, so it is
   attributed to the question's turn. A quote of a filing or an exhibit names no speaker.
-- An observation states facts only: the figures, names, counts and dates the comparison rests
-  on and the rule's outcome. It carries no valuation, forecast or advice wording
+- An old or new value states facts only: the figures with their units and periods, the names,
+  counts and dates the comparison rests on. It carries no valuation, forecast or advice wording
   (`readings.WORDING`); quotes are the issuer's words and are never checked against that rule.
 
 Applied to every document, these rules follow:
 
-1. **Evidence.** Quote the statements an observation rests on; a `red` level quotes at least
-   one from a document of the season itself.
+1. **Evidence.** Quote the statements the old and new values rest on; an item of `high`
+   importance whose new value is stated, not `none`, quotes at least one from a document of the
+   season itself.
 2. **Whole statements.** Copy every quote from the derived text of its own document; adjacent
    sentences or lines may form one quote. `check` refuses these whole statements rather than
    risk a cut, so quote each with its neighbour, verbatim:
@@ -370,8 +377,8 @@ Applied to every document, these rules follow:
      non-GAAP basis"), which stay inside its quote.
 4. **Length.** Quote a statement shorter than 20 characters (a short table row, say) with the
    line or sentence right before or after it. Leave out a statement that is whole only in more
-   than 800 characters (a long sentence, a lowercase list with its lead-in): the observation
-   names its document and gives its figures. A quote is given once per item.
+   than 800 characters (a long sentence, a lowercase list with its lead-in): the value names
+   its document and gives its figures. A quote is given once per item.
 5. **Turns.** Give a call's quote the turn its first occurrence lies in, as the heading writes
    it.
 
@@ -439,9 +446,10 @@ has neither. Two distinct values of one concept, filing and span make the figure
 has no value, and every figure without one says why. A season's quarter days are the days
 from the previous listed season's end to its own; its year-ago season is the listed season of
 the same form ending 350 to 380 days before. Each value is computed exactly and rounded
-half-even once (percentages and percentage points to two places, days to one; basis points
-from the rounded margins), and each rule compares the rounded values, so the file lets anyone
-redo it.
+half-even once (percentages and ratios to two places, days and mean words to one), and each
+change from the rounded values: percentage points between two percentages, the difference
+between two ratios or two counts of days, and between two amounts or counts the difference
+with, over an old one above 0, the percent change; so the file lets anyone redo it.
 
 **`measures.md`** is the season's mechanical comparison, `formatted/{T}/{PERIOD}/measures.md`,
 a pure function of `raw/` and the code (`measures.py`), with no time of its own: a
@@ -454,7 +462,11 @@ the season`, every filing Rule B places in it with its form, dates, acceptance t
 items and documents (a listed-only form marked so); `## Figures`, every figure of the season
 and of the seasons its Python items compare with: the measure, season, value, unit, concept,
 accession, start, end and formula, or why there is none; `## Python items`, per item its
-`baseline:`, `values:`, `rule:` and `level:` lines; and `## Inputs for the bot's items`: the
+`rule:` line, a table of its rows (what each compares, its baseline season, the old value, the
+new value and the change, `—` where a value is not a number; a status in a cell that holds no
+value; the previous four seasons' values, newest first, where the baseline is those four) and
+a `note:` with what the rows rest on beyond their values (the year-ago seasons, the Form 4s
+read, why a cell holds a status), when there is one; and `## Inputs for the bot's items`: the
 figures items 1.7, 2.9, 4.4, 4.7 and 6.4 compare with, the 8-Ks of the season by the items they
 name (4.01 for 3.1, 4.02 for 3.4, 5.02 for 5.1 to 5.3, 3.02 and 1.01 for 6.3), the beneficial
 owners' schedules with their filer's CIK prefix (5.4), the registrations (6.3) and the
@@ -468,13 +480,14 @@ rewritten until `check` passes them (`readings.py`). Line by line:
 - G1: the first non-blank line is `# {T} · {PERIOD} · readings`;
 - G2: then one section per bot item of the catalogue, each once, in catalogue order, headed
   `## {id} {title}` as the catalogue writes it;
-- G3: a section's first three lines are `baseline:`, `level:` and `observation:`, in that
-  order;
+- G3: a section's first three lines are `baseline:`, `old:` and `new:`, in that order;
 - G4: `baseline:` is `none` or the `DOC_ID`s of the documents read as the baseline, joined by
   `; `;
-- G5: `level:` is `red`, `yellow`, `grey`, `none` or a status (`no baseline`,
-  `not applicable`, `not disclosed`, `unavailable`, `not computable`);
-- G6: `observation:` is 1 to 600 printable characters on its one line;
+- G5: `old:` is the baseline's value and `new:` the season's: a status (`no baseline`, an old
+  value only, `not applicable`, `not disclosed`, `unavailable`, `not computable`), `—` (the old
+  value of an item without a baseline) or the value itself, in facts (`none` when the
+  documents state nothing of the kind);
+- G6: each value is 1 to 600 printable characters on its one line;
 - G7: then zero or more quotes, each a run of `> TEXT` lines, whose texts are joined by one
   space (so wrap a long quote at any space), followed by one attribution line, `— {DOC_ID}`,
   or `— {DOC_ID}, {Speaker} ({role})` for a call's quote; blank lines may separate quotes.
@@ -484,23 +497,26 @@ accepted. `check` then holds each section to these rules:
 
 - R1: every `DOC_ID` named is a document of a listed season in `raw/` whose text file equals
   its derivation;
-- R2: the baseline names documents of the item's baseline seasons only, and at least one for a
-  level of an item that has a baseline; it is `none` for an item without a baseline and for
-  the statuses `no baseline`, `not applicable` and `unavailable`;
+- R2: the baseline names documents of the item's baseline seasons only, and at least one for an
+  old value read from them (facts, `none`, `not disclosed` or `not computable`); it is `none`
+  for an item without a baseline and for the old values `no baseline`, `not applicable` and
+  `unavailable`; the old value is `—` exactly for an item without a baseline;
 - R3: a quote comes from a document of the season or from one its baseline line names;
-- R4: `red` needs a quote from a document of the season itself;
-- R5: `no baseline` only while no document of the item's baseline seasons is in `raw/` (the
-  message names those that are);
+- R4: an item of `high` importance whose new value is stated in facts other than `none` needs a
+  quote from a document of the season itself;
+- R5: `no baseline` only while no document of the item's baseline seasons is in `raw/` (for a
+  call item, no call of those seasons; the message names those that are);
 - R6: `not applicable` exactly for an annual item in a 10-Q season and a proxy item in a season
-  without a proxy statement;
-- R7: `unavailable` exactly for a call item while the season's call is not `transcript`;
+  without a proxy statement: its new value and, when it has a baseline, its old one;
+- R7: `unavailable` exactly for a call item while the season's call is not `transcript`, in the
+  same places;
 - R8: `not disclosed` and `not computable` only where the item allows them;
 - R9: a quote keeps the quote rules (Quotes): 20 to 800 characters once normalised, found
   verbatim and spelt as the derived text writes it, whole sentences or lines at its first
   occurrence; a call's quote names its turn's heading exactly and lies within that turn; a
   quote of another document names no speaker;
-- R10: an observation carries no valuation, forecast or advice wording, and no quote is given
-  twice in one item.
+- R10: an old or new value carries no valuation, forecast or advice wording, and no quote is
+  given twice in one item.
 
 Two sections of Intel's readings of the season ended 2026-06-27, whose 10-Q renames a
 segment the previous quarter's 10-Q lists as `▪Client Computing Group (CCG)`:
@@ -508,15 +524,15 @@ segment the previous quarter's 10-Q lists as `▪Client Computing Group (CCG)`:
 ```markdown
 ## 2.8 Segments merged, split or renamed
 baseline: 10-Q_2026-03-28_0000050863-26-000079_intc-20260328
-level: yellow
-observation: The 10-Q names the Client Computing Group (CCG) of the previous 10-Q the Client Computing and Physical AI Group (CCPG); DCAI, Intel Foundry and All Other keep their names.
+old: Client Computing Group (CCG); DCAI; Intel Foundry; All Other
+new: Client Computing and Physical AI Group (CCPG), formerly CCG; DCAI; Intel Foundry; All Other
 > ▪Client Computing and Physical AI Group (CCPG), formerly the Client Computing Group (CCG)
 — 10-Q_2026-06-27_0000050863-26-000157_intc-20260627
 
 ## 3.3 Going concern
 baseline: 10-Q_2026-03-28_0000050863-26-000079_intc-20260328
-level: none
-observation: Neither 10-Q states a substantial doubt about the ability to continue as a going concern.
+old: none
+new: none
 ```
 
 ## The season report and `show`
@@ -526,23 +542,25 @@ are fresh and whose newest report is not the report rendered now, a new report
 `reports/{T}/{PERIOD}/report_{TOKEN}.md`, and never overwrites one (`report.py`). Under the
 title `# {T} · {PERIOD} · season report` and its `Generated` line, it names the issuer (its
 EDGAR name and CIK), the season (its 10-K or 10-Q, accession and filing date), the call's
-state and the seasons of its main baselines; then the score line, `Score: N (r red, y yellow,
-g grey) over 69 items: 16 read by Python, 51 by the bot, 2 without a source;` with the count
-of each status; then `## Triggered`, every item at `red`, then `yellow`, then `grey`, in
-catalogue order within each level, each with its baseline, its values or observation, its rule
-and its quotes with their attributions (`None of the items triggered.` when none did); then
-the nine sections, each a table of its items with the level, who read it, the baseline and
-the values or observation. A report is a pure function of the season's files, its measures
+state and the seasons of its main baselines; then the count line, `68 items, every one listed
+by importance (22 high, 37 medium, 9 low): 15 read by Python, 51 by the bot, 2 without a
+source.`; then `## Items`, one table of every item of the catalogue, none left out: the `high`
+items first, then the `medium`, then the `low`, in catalogue order within each, one row per
+comparison (one for a bot item or an item without a source, one per row of a Python item),
+with the columns Importance, Item (the heading, and what a Python row compares), Baseline (the
+item's baseline and the seasons it names), Old, New and Change (Python's; `—` for a bot item,
+whose values are its words); then `## Evidence`, per item in the same order, its importance,
+who read it and its rule, then for a bot item the documents its baseline line names and its
+quotes with their attributions, for a Python item its note. A report is a pure function of the
+season's files, its measures
 and its readings, but for its `Generated` line: the newest report is fresh while it equals the
 report rendered now apart from that line (the shared rule), and a new transcript, a changed
 measure or a rewritten reading makes it stale.
 
 `show` prints, per ticker (by default those of the watchlist), the action `plan` gives over
 the default window and the newest season whose report can be rendered now, its newest
-report's path and freshness, and that report rendered now (or why none can be); then
-`## Ranking`, one row per ticker shown: its season, score, red, yellow and grey counts and
-report, the highest score first. The ranking orders counts of triggered comparisons; it ranks
-no company.
+report's path and freshness, and that report rendered now (or why none can be). It orders
+the tickers as given, or as the watchlist lists them, and ranks nothing.
 
 ## Freshness, missing data and what is never added
 
@@ -584,7 +602,7 @@ Run from the repository root as
 | `derive TICKER` | Writes each document's derived text and each season's `measures.md` that is missing, unreadable or differs from its derivation. |
 | `check TICKER [PATH ...]` | Read-only: checks every season's readings (or the drafts named, each in its season's folder) and prints each problem. |
 | `render TICKER` | Writes the report of every season whose readings pass and whose newest report is not current. |
-| `show [TICKER ...] [--watchlist PATH]` | Read-only: per ticker the action, the newest season report rendered now, then the ranking. |
+| `show [TICKER ...] [--watchlist PATH]` | Read-only: per ticker the action and the newest season report rendered now. |
 
 The bot writes only the readings, which it may rewrite until `check` passes them and again
 after a rule changes, and withdraws a raw file with `.rejected`; Python writes everything
@@ -647,7 +665,7 @@ hypothesis script reads this domain's `raw/` ([explore_hypothesis/AGENTS.md](../
 | `AGENTS.md` | This file: the domain's aim, model, items, rules and outputs, then its sources, architecture and formats. |
 | `PROCEDURE.md` | The bot's workflow: settings and parameters, `fetch`, `plan`, `derive` and reading the documents, writing and checking readings, `render`, `show`, failures, the former layout. |
 | `script/__main__.py` | Command line: `fetch`, `plan`, `derive`, `check`, `render`, `show`; `LABEL = "FUNDAMENTALS"`, `FundamentalsParser` and `DATA_DIRECTORY`; `fetch`, `plan` and `show` default to the tickers of this domain's `watchlist.json` (`workflow.WATCHLIST`; `--watchlist PATH`); `fetch` and `plan` print the file they read (`watchlist`) and take `--refresh` and the window (`--from`, `--to`), which `main` resolves from the New York date and checks before the data directory, the settings or any request; builds the EDGAR client from `SEC_USER_AGENT` and the EarningsCalls.dev client from `EARNINGSCALLS_API` (`CALLS_SETTING`) for `fetch` only, before the watchlist is read; ASCII-only JSON output, `show`'s Markdown; exit codes. |
-| `script/workflow.py` | The commands over `raw/`, `formatted/` and `reports/`: `fetch` (the CIK, the submissions JSON, then for each span season, oldest first, its 10-K or 10-Q and each filing Rule B places in it, then the company facts, the calls list when due and the transcripts; `--refresh`; `unsupported`, `truncated`, pending and skipped filings, `stopped`), `plan` (each season's state and the next action), `derive`, `check`, `render` and `show` with its ranking. |
+| `script/workflow.py` | The commands over `raw/`, `formatted/` and `reports/`: `fetch` (the CIK, the submissions JSON, then for each span season, oldest first, its 10-K or 10-Q and each filing Rule B places in it, then the company facts, the calls list when due and the transcripts; `--refresh`; `unsupported`, `truncated`, pending and skipped filings, `stopped`), `plan` (each season's state and the next action), `derive`, `check`, `render` and `show`. |
 | `script/client.py` | EDGAR over HTTPS: URL builders (`submissions_url`, `companyfacts_url`, `archive_url`, `index_url`), `User-Agent` check, pacing, status, encoding and size rules (`JSON_LIMIT`, `COMPANYFACTS_LIMIT`, `DOCUMENT_LIMIT`, `INDEX_LIMIT`), the refusal of a body cut short of its `Content-Length`, no redirect followed, `EdgarError`; `decode_document` (strict UTF-8, else Latin-1); the HTTP reading `earningscalls` shares. |
 | `script/earningscalls.py` | EarningsCalls.dev over HTTPS: the key check (`check_api_key`, `API_KEY_SETTING`), `HOST` only (`allowed_url`), pacing, status, encoding and size rules (`BODY_LIMIT`), no redirect followed, `EarningsCallsError` and `LimitReached` (HTTP 429); `EarningsCallsClient` (`events_page`, `transcript`); the strict reading of a calls page (`parse_events_page`), of a capture (`check_capture`, `check_issuer`, `Ambiguous`) and of a transcript against its listed call (`parse_transcript`, with its optional `duration_seconds`); a call's derived text and turns (`call_text`, `CallText`, `Turn` with its `heading`). |
 | `script/filings.py` | Pure: the strict reading of `company_tickers.json`, of the submissions JSON's `filings.recent` (`RECENT_COLUMNS`, `items` and `acceptanceDateTime` included) and of an 8-K's filing index page (`parse_filing_index`); the forms read (`FETCHED_FORMS`, `LISTED_FORMS`, `NOTICES`, `REGISTRATIONS`, `AMENDMENTS`, `HOLDER_FORMS`, `DATED_BY_REPORT`, `FORM_TOKENS`, `rendered_document`); the window (`Window`, `default_window`); the seasons and their filings by Rule B (`select_seasons` → `Seasons` of `Season` and `Dated`, the pending and `Skipped` filings, `truncated`; `NoPeriodicFilings`), and Rule B for any dated item (`rule_b`, `Seasons.place`, `PENDING`). |
@@ -655,10 +673,10 @@ hypothesis script reads this domain's `raw/` ([explore_hypothesis/AGENTS.md](../
 | `script/form4.py` | Pure: the strict reading of a Form 4's XML (`parse_form4` → `Form4`, `Owner`, `Transaction`) and the issuer's officers selling (`officers_selling`). |
 | `script/documents.py` | One ticker's `raw/` tree read into its listed seasons and their documents (`season_documents` → `RawState` of `SeasonFiles` and `FilingFiles`), every raw file it reads validated and each invalid one, moved one or former-layout folder listed with its reason; the newest company facts (`RawState.facts_status`), the newest calls capture (`Capture`), each call placed by Rule B, each season's call (`CallState`: `transcript`, `missing`, `unavailable`, `waiting`; `due_date`, `CALL_WAIT`), the pending and unlisted calls, and when the list is due again (`RawState.events_due`); the names (`season_folder`, `filing_folder`, `doc_id`, `call_doc_id`, `calls_name`, `transcript_name`, `Document.text_name`), the sentence rule's mode (`layout_mode`) and each document's derived text (`derive_text`, `derive_call`). |
 | `script/text.py` | Pure: derived text of HTML, plain text and XML (a Latin-1 filing or exhibit read as windows-1252; `xml_text`); `normalise` and `locate`; the rule `sentence_bounded` (sentence rule v2: `SENTENCE_ENDS`, `CLOSERS`, `OPENERS`, `BULLETS`; layout or block mode). |
-| `script/items.py` | Pure data: the catalogue (`ITEMS`, `Item`, `BY_ID`, `BOT_ITEMS`, `PYTHON_ITEMS`), the sections (`SECTIONS`), baselines, levels and statuses, the score (`SCORES`, `score`) and `BASELINE_SEASONS`. |
-| `script/measures.py` | Pure: the Python items of a season (`season_measures` → `Measures` of `Reading`; the thresholds as constants), the seasons each baseline names (`baseline_seasons`) and `measures.md` (`render_measures`). |
+| `script/items.py` | Pure data: the catalogue (`ITEMS`, `Item`, `BY_ID`, `BOT_ITEMS`, `PYTHON_ITEMS`), the sections (`SECTIONS`), baselines, the importance and the report's order (`IMPORTANCE`, `by_importance`), the statuses and `BASELINE_SEASONS`. |
+| `script/measures.py` | Pure: the Python items of a season (`season_measures` → `Measures` of `Reading`s, each of `Row`s with the old value, the new value and the change), the seasons each baseline names (`baseline_seasons`) and `measures.md` (`render_measures`). |
 | `script/readings.py` | Pure: the readings grammar (`parse_readings`), the rules each reading keeps (`readings_problems`, R1 to R10, with `Source` and `Season` giving what they need) and the wording rule (`WORDING`). |
-| `script/report.py` | Pure: the season report in Markdown (`render_report`, `entries`, `score_line`), its file names (`report_name`, `report_files`, `newest_report`), its freshness (`same_report`) and `show`'s ranking (`ranking`). |
+| `script/report.py` | Pure: the season report in Markdown (`render_report`, `entries`, `ordered`, `counts_line`), its file names (`report_name`, `report_files`, `newest_report`) and its freshness (`same_report`). |
 | `data/` | Runtime files (below); ignored by Git except `data/.gitignore`. |
 
 ## Runtime files

@@ -2,20 +2,25 @@
 
 ``season_measures`` reads one season of a ticker's ``raw/`` (``documents.RawState``) and
 computes every Python item of the catalogue (``items.PYTHON_ITEMS``) from structured data
-alone: the figures of EDGAR's company facts (``facts``), the listing's filings, the Form 4s,
-the call transcripts' turns and durations and the derived texts' lengths. Each value is
-computed exactly and rounded half-even once: percentages and percentage points to two
-places, days to one, basis points from the rounded margins; each rule compares the rounded
-values, so a reader can redo it from the file. The thresholds are this module's constants,
-starting points changed only here.
+alone: the figures of EDGAR's company facts (``facts``), the listing's filings, the Form 4s
+and the call transcripts' turns and durations. An item is one or more rows, each stating one
+value of a baseline season (old), the same value of the season (new) and the change between
+them; no threshold judges, marks or leaves out a row. Each value is computed exactly and
+rounded half-even once: percentages and ratios to two places, days and mean words to one; each
+change is computed from the rounded values: percentage points between two percentages, the
+difference between two ratios or two counts of days, and between two amounts the difference
+and, over an old amount above 0, the percent change. A cell that cannot hold a value holds a
+status: ``no baseline`` (the season it needs is not listed, or its call has no transcript),
+``not computable`` (a figure is missing or ambiguous) or ``unavailable`` (the season's call
+has no transcript); an old value of an item without a baseline is ``—``.
 
 ``render_measures`` writes the result as ``formatted/{T}/{PERIOD}/measures.md``, a pure
 function of ``raw/`` and this code: the season and its baselines (``baseline_seasons``, the
 seasons each baseline of the catalogue names, with their documents' ``DOC_ID``s), the filings
-of the season, the figures, the Python items (``baseline:``, ``values:``, ``rule:`` and
-``level:`` lines) and the inputs the bot's items name. ``derive`` writes it; it is fresh while
-equal to what it renders now. Its fixed text passes ``readings.WORDING``: it states figures
-and comparisons, never a valuation.
+of the season, the figures, the Python items (each its ``rule:`` line, a table of its rows and,
+where there is one, a ``note:``) and the inputs the bot's items name. ``derive`` writes it; it
+is fresh while equal to what it renders now. Its fixed text passes ``readings.WORDING``: it
+states figures and comparisons, never a valuation.
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -23,41 +28,33 @@ from dataclasses import dataclass
 from datetime import date, time, timedelta
 from decimal import Decimal
 from fractions import Fraction
-from typing import Final
+from typing import Final, Literal
 
 from market_state_research.common.sessions import next_session
 from market_state_research.common.times import et_display
 
-from .documents import Document, RawState, SeasonFiles
+from .documents import RawState, SeasonFiles
 from .earningscalls import Transcript
 from .facts import MEASURES, CompanyFacts, Figure, figure, quarter_days, year_ago
 from .filings import HOLDER_FORMS, NOTICES, REGISTRATIONS, Season, Seasons
 from .form4 import officers_selling
 from .items import BY_ID, ITEMS, PYTHON_ITEMS, Baseline, Item
 
-GROWTH_DROP: Final = Decimal(10)  # 2.1: percentage points
-MARGIN_MOVE: Final = 200  # 2.2: basis points
-CASH_RATIO_LOW: Final = Decimal("0.7")  # 2.3
-CASH_RATIO_ONE: Final = Decimal(1)  # 2.3
-DAYS_RISE: Final = Decimal(15)  # 2.4: days
-RECEIVABLES_GAP: Final = Decimal(20)  # 2.5: percentage points
-NET_DEBT_MOVE: Final = Decimal(25)  # 2.6: percent
-NET_DEBT_FLOOR: Final = Decimal(1)  # 2.6: percent of equity
-SHARES_MOVE: Final = Decimal(2)  # 2.10: percent
-GOODWILL_ADDED: Final = Decimal(10)  # 2.11: percent of equity
-SELLERS: Final = 2  # 5.7: officers
-ANALYSTS_DROP: Final = Decimal(30)  # 8.5: percent
-ANSWERS_DROP: Final = Decimal(30)  # 8.6: percent
-CALL_DROP: Final = Decimal(30)  # 9.3: percent
-LENGTH_MOVE: Final = Decimal(20)  # 9.4: percent
-EIGHT_K_MULTIPLE: Final = 2  # 9.5
 LATE: Final = time(16, 0)  # 9.1: New York time
-RECORD_SEASONS: Final = 4  # 9.1, 9.5, 9.6
+RECORD_SEASONS: Final = 4  # 9.1, 9.4, 9.5
 ANALYST: Final = "analyst"
 EXECUTIVE: Final = "executive"
 NONE: Final = "none"
+NOTHING: Final = "—"  # the old value of an item without a baseline, and a change not stated
+NO_BASELINE: Final = "no baseline"
+NOT_COMPUTABLE: Final = "not computable"
+UNAVAILABLE: Final = "unavailable"
 NO_FACTS: Final = "no company facts are in raw/"
 NOT_TRANSCRIBED: Final = "the call has no transcript in raw/ ({status})"
+# How a row's change is stated: percentage points, a plain difference, or a difference with
+# its percent change.
+Kind = Literal["percent", "difference", "amount"]
+Value = Decimal | int | str  # a str is a status or a text value
 
 
 def _rounded(value: Fraction, places: int) -> Decimal:
@@ -76,7 +73,7 @@ def _change(now: Decimal, before: Decimal) -> Decimal | None:
 
 def _number(value: Decimal | int | None, unit: str = "") -> str:
     if value is None:
-        return "—"
+        return NOTHING
     return f"{value:,} {unit}".rstrip()
 
 
@@ -120,18 +117,49 @@ def baseline_seasons(listing: Seasons, season: Season, kind: Baseline) -> tuple[
 
 
 @dataclass(frozen=True)
+class Row:
+    """One comparison of a Python item: what it compares, the season it compares with, the old
+    value (the baseline's), the new value (the season's) and the change, each as written."""
+
+    compared: str
+    baseline: str
+    old: str
+    new: str
+    change: str
+
+
+@dataclass(frozen=True)
 class Reading:
-    """One Python item of a season: what it compared with, the values, its rule and its level
-    (a level or a status)."""
+    """One Python item of a season: its rows and a note (the facts its rows rest on beyond their
+    values, or why a cell holds a status; empty when there is none)."""
 
     item: Item
-    baseline: str
-    values: str
-    level: str
+    rows: tuple[Row, ...]
+    note: str = ""
 
 
-def _reading(identifier: str, baseline: str, values: str, level: str) -> Reading:
-    return Reading(BY_ID[identifier], baseline, values, level)
+def _cell(value: Value) -> str:
+    return value if isinstance(value, str) else f"{value:,}"
+
+
+def _difference(old: Value, new: Value, kind: Kind) -> str:
+    """The change from ``old`` to ``new``, or ``—`` when either is not a number."""
+    if isinstance(old, str) or isinstance(new, str):
+        return NOTHING
+    moved = new - old
+    if kind == "percent":
+        return f"{moved:+,} pp"
+    if kind == "difference" or old <= 0:
+        return f"{moved:+,}"
+    return f"{moved:+,} ({_rounded(Fraction(new) / Fraction(old) * 100 - 100, 2):+}%)"
+
+
+def _row(compared: str, baseline: str, old: Value, new: Value, kind: Kind) -> Row:
+    return Row(compared, baseline, _cell(old), _cell(new), _difference(old, new, kind))
+
+
+def _reading(identifier: str, rows: Iterable[Row], *notes: str) -> Reading:
+    return Reading(BY_ID[identifier], tuple(rows), "; ".join(note for note in notes if note))
 
 
 @dataclass
@@ -141,7 +169,6 @@ class _Context:
     raw: RawState
     listing: Seasons
     files: SeasonFiles
-    derived: Callable[[Document], str]
     cache: dict[tuple[date, str], Figure]
 
     @property
@@ -151,6 +178,10 @@ class _Context:
     @property
     def facts(self) -> CompanyFacts | None:
         return self.raw.facts
+
+    @property
+    def facts_note(self) -> str:
+        return NO_FACTS if self.facts is None else ""
 
     def previous(self) -> Season | None:
         earlier = self.listing.before(self.season, 1)
@@ -177,83 +208,78 @@ class _Context:
 
 
 def _season_name(season: Season | None) -> str:
-    return "none" if season is None else f"{season.period} ({season.filing.form})"
+    return "none listed" if season is None else f"{season.period} ({season.filing.form})"
 
 
-def _pair(label: str, now: Decimal | None, before: Decimal | None, unit: str) -> str:
-    return f"{label} {_number(now, unit)} against {_number(before, unit)}"
+def _named(kind: str, season: Season | None) -> str:
+    return f"{kind} {_season_name(season)}"
+
+
+def _of(season: Season | None, compute: Callable[[Season], Decimal | None]) -> Value:
+    """``compute`` of ``season``: ``no baseline`` when it is not listed, ``not computable`` when
+    a figure is missing."""
+    if season is None:
+        return NO_BASELINE
+    found = compute(season)
+    return NOT_COMPUTABLE if found is None else found
+
+
+def _growth(context: _Context, season: Season | None, measure: str) -> Value:
+    """The growth of ``measure`` over the season a year before ``season``, in percent."""
+    ago = context.ago(season)
+    if season is None or ago is None:
+        return NO_BASELINE
+    now, before = context.value(season, measure), context.value(ago, measure)
+    found = None if now is None or before is None else _change(now, before)
+    return NOT_COMPUTABLE if found is None else found
 
 
 def _growth_item(context: _Context) -> Reading:
     season, previous = context.season, context.previous()
-    ago, previous_ago = context.ago(season), context.ago(previous)
-    baseline = (
-        f"same quarter last year {_season_name(ago)}; previous quarter {_season_name(previous)} "
-        f"and its year-ago {_season_name(previous_ago)}"
+    baseline = _named("previous quarter", previous)
+    rows = [
+        _row(
+            f"{label} growth on the same quarter a year before (%)",
+            baseline,
+            _growth(context, previous, measure),
+            _growth(context, season, measure),
+            "percent",
+        )
+        for measure, label in (("revenue", "revenue"), ("net_income", "net income"))
+    ]
+    years = (
+        f"the year before this season: {_season_name(context.ago(season))}; the year before the previous "
+        f"quarter: {_season_name(context.ago(previous))}; not computable where a figure is missing or the "
+        f"year-ago figure is 0 or below"
     )
-    if context.facts is None:
-        return _reading("2.1", baseline, NO_FACTS, "not computable")
-    if ago is None or previous is None or previous_ago is None:
-        return _reading("2.1", baseline, "a season the comparison needs is not listed", "no baseline")
-    parts, drops = [], []
-    for measure, label in (("revenue", "revenue"), ("net_income", "net income")):
-        now = _growth(context, season, ago, measure)
-        before = _growth(context, previous, previous_ago, measure)
-        if now is None or before is None:
-            parts.append(f"{label}: not computable (a figure is missing, or a year-ago figure is 0 or below)")
-            continue
-        drops.append(before - now)
-        parts.append(f"{label}: growth {now}% against {before}% a quarter earlier ({now - before:+} pp)")
-    if not drops:
-        return _reading("2.1", baseline, "; ".join(parts), "not computable")
-    level = "yellow" if any(drop > GROWTH_DROP for drop in drops) else NONE
-    return _reading("2.1", baseline, "; ".join(parts), level)
+    return _reading("2.1", rows, context.facts_note, years)
 
 
-def _growth(context: _Context, season: Season, ago: Season, measure: str) -> Decimal | None:
-    now, before = context.value(season, measure), context.value(ago, measure)
-    return None if now is None or before is None else _change(now, before)
+def _margin(context: _Context, measure: str) -> Callable[[Season], Decimal | None]:
+    def margin(season: Season) -> Decimal | None:
+        revenue, part = context.value(season, "revenue"), context.value(season, measure)
+        if revenue is None or part is None or revenue <= 0:
+            return None
+        return _rounded(Fraction(part) / Fraction(revenue) * 100, 2)
 
-
-def _margin(context: _Context, season: Season | None, measure: str) -> Decimal | None:
-    revenue, part = context.value(season, "revenue"), context.value(season, measure)
-    if revenue is None or part is None or revenue <= 0:
-        return None
-    return _rounded(Fraction(part) / Fraction(revenue) * 100, 2)
+    return margin
 
 
 def _margins_item(context: _Context) -> Reading:
     season, previous = context.season, context.previous()
     ago = context.ago(season)
-    baseline = f"same quarter last year {_season_name(ago)}; previous quarter {_season_name(previous)}"
-    if context.facts is None:
-        return _reading("2.2", baseline, NO_FACTS, "not computable")
-    if ago is None and previous is None:
-        return _reading("2.2", baseline, "no baseline season is listed", "no baseline")
-    parts, moves = [], []
-    for measure, label in (("gross_profit", "gross margin"), ("operating_income", "operating margin")):
-        now = _margin(context, season, measure)
-        if now is None:
-            parts.append(f"{label}: not computable")
-            continue
-        compared = False
-        for name, other in (("a year ago", ago), ("a quarter ago", previous)):
-            before = _margin(context, other, measure)
-            if other is None or before is None:
-                continue
-            compared = True
-            move = int((now - before) * 100)
-            moves.append(abs(move))
-            parts.append(f"{label} {now}% against {before}% {name} ({move:+d} bps)")
-        if not compared:
-            parts.append(f"{label} {now}%; no baseline margin is computable")
-    if not moves:
-        return _reading("2.2", baseline, "; ".join(parts), "not computable")
-    level = "yellow" if any(move > MARGIN_MOVE for move in moves) else NONE
-    return _reading("2.2", baseline, "; ".join(parts), level)
+    rows = []
+    for measure, label in (
+        ("gross_profit", "gross margin (%)"),
+        ("operating_income", "operating margin (%)"),
+    ):
+        margin = _margin(context, measure)
+        for kind, other in (("same quarter last year", ago), ("previous quarter", previous)):
+            rows.append(_row(label, _named(kind, other), _of(other, margin), _of(season, margin), "percent"))
+    return _reading("2.2", rows, context.facts_note)
 
 
-def _cash_ratio(context: _Context, season: Season | None) -> Decimal | None:
+def _cash_ratio(context: _Context, season: Season) -> Decimal | None:
     cash, income = context.value(season, "operating_cash_flow"), context.value(season, "net_income")
     if cash is None or income is None or income <= 0:
         return None
@@ -262,160 +288,143 @@ def _cash_ratio(context: _Context, season: Season | None) -> Decimal | None:
 
 def _cash_item(context: _Context) -> Reading:
     season, previous = context.season, context.previous()
-    ago, previous_ago = context.ago(season), context.ago(previous)
-    baseline = (
-        f"same quarter last year {_season_name(ago)}; previous quarter {_season_name(previous)} "
-        f"and its year-ago {_season_name(previous_ago)}"
-    )
-    if context.facts is None:
-        return _reading("2.3", baseline, NO_FACTS, "not computable")
-    if ago is None:
-        return _reading("2.3", baseline, "the same quarter last year is not listed", "no baseline")
-    ratios = {name: _cash_ratio(context, other) for name, other in (("now", season), ("year ago", ago))}
-    ratios |= {
-        "previous": _cash_ratio(context, previous),
-        "previous year ago": _cash_ratio(context, previous_ago),
-    }
-    values = "; ".join(
-        f"{name} {'not computable' if ratio is None else ratio}" for name, ratio in ratios.items()
-    )
-    values = f"operating cash flow ÷ net income (none where net income is 0 or below): {values}"
-    now, ago_ratio = ratios["now"], ratios["year ago"]
-    if now is None or ago_ratio is None:
-        return _reading("2.3", baseline, values, "not computable")
-    fell = ago_ratio > CASH_RATIO_ONE and now < CASH_RATIO_LOW
-    before, before_ago = ratios["previous"], ratios["previous year ago"]
-    twice = (
-        before is not None
-        and before_ago is not None
-        and now < CASH_RATIO_ONE
-        and before < CASH_RATIO_ONE
-        and ago_ratio >= CASH_RATIO_ONE
-        and before_ago >= CASH_RATIO_ONE
-    )
-    return _reading("2.3", baseline, values, "red" if fell or twice else NONE)
+    ago = context.ago(season)
+
+    def ratio(other: Season) -> Decimal | None:
+        return _cash_ratio(context, other)
+
+    rows = [
+        _row(
+            "operating cash flow ÷ net income",
+            _named(kind, other),
+            _of(other, ratio),
+            _of(season, ratio),
+            "difference",
+        )
+        for kind, other in (("same quarter last year", ago), ("previous quarter", previous))
+    ]
+    return _reading("2.3", rows, context.facts_note)
 
 
-def _days(context: _Context, season: Season, balance: str, flow: str) -> Decimal | None:
-    held, moved, days = (
-        context.value(season, balance),
-        context.value(season, flow),
-        quarter_days(context.listing, season),
-    )
-    if held is None or moved is None or days is None or moved <= 0:
-        return None
-    return _rounded(Fraction(held) * days / Fraction(moved), 1)
+def _days(context: _Context, balance: str, flow: str) -> Callable[[Season], Decimal | None]:
+    def days(season: Season) -> Decimal | None:
+        held, moved, length = (
+            context.value(season, balance),
+            context.value(season, flow),
+            quarter_days(context.listing, season),
+        )
+        if held is None or moved is None or length is None or moved <= 0:
+            return None
+        return _rounded(Fraction(held) * length / Fraction(moved), 1)
+
+    return days
 
 
 def _days_item(context: _Context) -> Reading:
     season, ago = context.season, context.ago(context.season)
-    baseline = f"same quarter last year {_season_name(ago)}"
-    if context.facts is None:
-        return _reading("2.4", baseline, NO_FACTS, "not computable")
-    if ago is None:
-        return _reading("2.4", baseline, "the same quarter last year is not listed", "no baseline")
-    parts, rises = [], []
+    baseline = _named("same quarter last year", ago)
+    rows = []
     for name, balance, flow in (
         ("days of sales outstanding", "receivables", "revenue"),
         ("days of inventory", "inventory", "cost_of_revenue"),
         ("days of payables", "payables", "cost_of_revenue"),
     ):
-        now, before = _days(context, season, balance, flow), _days(context, ago, balance, flow)
-        if now is None or before is None:
-            parts.append(f"{name}: not computable")
-            continue
-        rises.append(now - before)
-        parts.append(f"{name} {now} against {before} ({now - before:+} days)")
-    if not rises:
-        return _reading("2.4", baseline, "; ".join(parts), "not computable")
-    return _reading(
-        "2.4", baseline, "; ".join(parts), "yellow" if any(rise > DAYS_RISE for rise in rises) else NONE
-    )
+        days = _days(context, balance, flow)
+        rows.append(_row(name, baseline, _of(ago, days), _of(season, days), "difference"))
+    return _reading("2.4", rows, context.facts_note)
+
+
+def _figure_of(context: _Context, measure: str) -> Callable[[Season], Decimal | None]:
+    return lambda season: context.value(season, measure)
 
 
 def _receivables_item(context: _Context) -> Reading:
     season, ago = context.season, context.ago(context.season)
-    baseline = f"same quarter last year {_season_name(ago)}"
-    if context.facts is None:
-        return _reading("2.5", baseline, NO_FACTS, "not computable")
-    if ago is None:
-        return _reading("2.5", baseline, "the same quarter last year is not listed", "no baseline")
-    receivables, revenue = (
-        _growth(context, season, ago, "receivables"),
-        _growth(context, season, ago, "revenue"),
-    )
-    if receivables is None or revenue is None:
-        return _reading("2.5", baseline, "receivables or revenue growth not computable", "not computable")
-    gap = receivables - revenue
-    values = f"receivables growth {receivables}% less revenue growth {revenue}%: {gap} pp"
-    return _reading("2.5", baseline, values, "red" if gap > RECEIVABLES_GAP else NONE)
+    baseline = _named("same quarter last year", ago)
+    rows = [
+        _row(
+            label,
+            baseline,
+            _of(ago, _figure_of(context, measure)),
+            _of(season, _figure_of(context, measure)),
+            "amount",
+        )
+        for measure, label in (
+            ("receivables", "receivables at the period end (USD)"),
+            ("revenue", "revenue of the quarter (USD)"),
+        )
+    ]
+    return _reading("2.5", rows, context.facts_note)
 
 
-def _net_debt(context: _Context, season: Season | None) -> Decimal | None:
+def _net_debt(context: _Context, season: Season) -> Decimal | None:
     debt, cash = context.value(season, "debt"), context.value(season, "cash")
     return None if debt is None or cash is None else debt - cash
 
 
 def _net_debt_item(context: _Context) -> Reading:
     season, previous = context.season, context.previous()
-    baseline = f"previous quarter {_season_name(previous)}"
-    if context.facts is None:
-        return _reading("2.6", baseline, NO_FACTS, "not computable")
-    if previous is None:
-        return _reading("2.6", baseline, "the previous quarter is not listed", "no baseline")
-    now, before, equity = (
-        _net_debt(context, season),
-        _net_debt(context, previous),
-        context.value(previous, "equity"),
+
+    def net_debt(other: Season) -> Decimal | None:
+        return _net_debt(context, other)
+
+    row = _row(
+        "net debt (USD)",
+        _named("previous quarter", previous),
+        _of(previous, net_debt),
+        _of(season, net_debt),
+        "amount",
     )
-    values = (
-        f"net debt {_number(now, 'USD')} against {_number(before, 'USD')}; previous quarter's equity "
-        f"{_number(equity, 'USD')}"
-    )
-    if now is None or before is None or equity is None or equity <= 0:
-        return _reading("2.6", baseline, values, "not computable")
-    if (now < 0) != (before < 0) or abs(Fraction(before)) < Fraction(equity) * Fraction(NET_DEBT_FLOOR) / 100:
-        return _reading("2.6", baseline, values + " (sign changed, or under 1% of equity)", "not computable")
-    move = _rounded((Fraction(now) / Fraction(before) - 1) * 100, 2)
-    return _reading("2.6", baseline, f"{values}; {move:+}%", "yellow" if abs(move) > NET_DEBT_MOVE else NONE)
+    return _reading("2.6", [row], context.facts_note)
 
 
 def _shares_item(context: _Context) -> Reading:
     season, previous = context.season, context.previous()
-    baseline = f"previous quarter {_season_name(previous)}"
-    if context.facts is None:
-        return _reading("2.10", baseline, NO_FACTS, "not computable")
-    if season.filing.form == "10-K":
-        return _reading("2.10", baseline, "a 10-K reports the year's average", "not computable")
-    if previous is None:
-        return _reading("2.10", baseline, "the previous quarter is not listed", "no baseline")
-    now, before = context.value(season, "diluted_shares"), context.value(previous, "diluted_shares")
-    values = _pair("weighted diluted shares", now, before, "shares")
-    move = None if now is None or before is None else _change(now, before)
-    if move is None:
-        return _reading("2.10", baseline, values, "not computable")
-    return _reading("2.10", baseline, f"{values} ({move:+}%)", "grey" if abs(move) > SHARES_MOVE else NONE)
+
+    def shares(other: Season) -> Decimal | None:  # a 10-K reports the year's average
+        return None if other.filing.form == "10-K" else context.value(other, "diluted_shares")
+
+    row = _row(
+        "weighted average diluted shares",
+        _named("previous quarter", previous),
+        _of(previous, shares),
+        _of(season, shares),
+        "amount",
+    )
+    annual = (
+        "a 10-K reports the year's average, so a 10-K season has no quarter's value"
+        if season.filing.form == "10-K" or (previous is not None and previous.filing.form == "10-K")
+        else ""
+    )
+    return _reading("2.10", [row], context.facts_note, annual)
+
+
+def _goodwill_share(context: _Context, season: Season) -> Decimal | None:
+    goodwill, equity = context.value(season, "goodwill"), context.value(season, "equity")
+    if goodwill is None or equity is None or equity <= 0:
+        return None
+    return _rounded(Fraction(goodwill) / Fraction(equity) * 100, 2)
 
 
 def _goodwill_item(context: _Context) -> Reading:
     season, previous = context.season, context.previous()
-    baseline = f"previous quarter {_season_name(previous)}"
-    if context.facts is None:
-        return _reading("2.11", baseline, NO_FACTS, "not computable")
-    if previous is None:
-        return _reading("2.11", baseline, "the previous quarter is not listed", "no baseline")
-    now, before, equity = (
-        context.value(season, "goodwill"),
-        context.value(previous, "goodwill"),
-        context.value(season, "equity"),
-    )
-    values = f"{_pair('goodwill', now, before, 'USD')}; equity {_number(equity, 'USD')}"
-    if now is None or before is None or equity is None or equity <= 0:
-        return _reading("2.11", baseline, values, "not computable")
-    added = _rounded((Fraction(now) - Fraction(before)) / Fraction(equity) * 100, 2)
-    return _reading(
-        "2.11", baseline, f"{values}; added {added}% of equity", "yellow" if added > GOODWILL_ADDED else NONE
-    )
+    baseline = _named("previous quarter", previous)
+    goodwill = _figure_of(context, "goodwill")
+
+    def share(other: Season) -> Decimal | None:
+        return _goodwill_share(context, other)
+
+    rows = [
+        _row("goodwill (USD)", baseline, _of(previous, goodwill), _of(season, goodwill), "amount"),
+        _row(
+            "goodwill ÷ stockholders' equity (%)",
+            baseline,
+            _of(previous, share),
+            _of(season, share),
+            "percent",
+        ),
+    ]
+    return _reading("2.11", rows, context.facts_note)
 
 
 def _sellers_item(context: _Context) -> Reading:
@@ -426,11 +435,14 @@ def _sellers_item(context: _Context) -> Reading:
     listed = "; ".join(
         f"{seller.name} ({seller.title or 'officer'}, {', '.join(seller.accessions)})" for seller in sellers
     )
-    values = (
-        f"{_count(len(forms), 'Form 4')} read, {others} of another issuer left out; officers selling: "
-        f"{len(sellers)}{': ' + listed if listed else ''}"
+    row = Row(
+        "officers reporting a sale (S) or a disposition to the issuer (D)",
+        NONE,
+        NOTHING,
+        f"{len(sellers)}{': ' + listed if listed else ''}",
+        NOTHING,
     )
-    return _reading("5.7", NONE, values, "yellow" if len(sellers) >= SELLERS else NONE)
+    return _reading("5.7", [row], f"{_count(len(forms), 'Form 4')} read, {others} of another issuer left out")
 
 
 def _turns(transcripts: Sequence[Transcript]) -> list[tuple[str, str, int]]:
@@ -443,20 +455,22 @@ def _turns(transcripts: Sequence[Transcript]) -> list[tuple[str, str, int]]:
 
 
 def _call_pair(
-    context: _Context, identifier: str
-) -> tuple[Sequence[Transcript], Sequence[Transcript], str] | Reading:
-    """The season's and the previous season's transcripts, or the reading that says why not."""
-    previous = context.previous()
-    baseline = f"previous quarter {_season_name(previous)}"
+    context: _Context, identifier: str, compared: Sequence[str]
+) -> tuple[Sequence[Transcript], Sequence[Transcript] | None, str] | Reading:
+    """The season's and the previous season's transcripts (None when it has none), or the reading
+    of a season whose call has no transcript: every cell ``unavailable``."""
+    baseline = _named("previous quarter", context.previous())
     call = context.files.call
     if call.status != "transcript":
-        return _reading(identifier, baseline, NOT_TRANSCRIBED.format(status=call.status), "unavailable")
+        rows = [Row(label, baseline, UNAVAILABLE, UNAVAILABLE, NOTHING) for label in compared]
+        return _reading(identifier, rows, NOT_TRANSCRIBED.format(status=call.status))
+    previous = context.previous()
     before = None if previous is None else context.files_of(previous)
-    if before is None or before.call.status != "transcript":
-        return _reading(
-            identifier, baseline, "the previous season's call has no transcript in raw/", "no baseline"
-        )
-    return call.transcripts, before.call.transcripts, baseline
+    held = None if before is None or before.call.status != "transcript" else before.call.transcripts
+    return call.transcripts, held, baseline
+
+
+_PREVIOUS_CALL: Final = "the previous season's call has no transcript in raw/"
 
 
 def _analysts(transcripts: Sequence[Transcript]) -> list[str]:
@@ -471,21 +485,26 @@ def _analysts(transcripts: Sequence[Transcript]) -> list[str]:
 
 
 def _analysts_item(context: _Context) -> Reading:
-    pair = _call_pair(context, "8.5")
+    compared = ("distinct analysts asking questions", "analysts on one of the two calls only")
+    pair = _call_pair(context, "8.5", compared)
     if isinstance(pair, Reading):
         return pair
     now, before, baseline = pair
-    current, earlier = _analysts(now), _analysts(before)
-    gone = [name for name in earlier if name not in current]
-    new = [name for name in current if name not in earlier]
-    values = (
-        f"{_count(len(current), 'analyst')} against {len(earlier)}; gone: {', '.join(gone) or 'none'}; new: "
-        f"{', '.join(new) or 'none'}"
-    )
-    if not earlier:
-        return _reading("8.5", baseline, values, "not computable")
-    move = _rounded((Fraction(len(current), len(earlier)) - 1) * 100, 2)
-    return _reading("8.5", baseline, f"{values} ({move:+}%)", "grey" if -move > ANALYSTS_DROP else NONE)
+    current = _analysts(now)
+    if before is None:
+        rows = [
+            _row(compared[0], baseline, NO_BASELINE, len(current), "amount"),
+            Row(compared[1], baseline, NO_BASELINE, NO_BASELINE, NOTHING),
+        ]
+        return _reading("8.5", rows, _PREVIOUS_CALL)
+    earlier = _analysts(before)
+    gone = ", ".join(name for name in earlier if name not in current) or NONE
+    new = ", ".join(name for name in current if name not in earlier) or NONE
+    rows = [
+        _row(compared[0], baseline, len(earlier), len(current), "amount"),
+        Row(compared[1], baseline, gone, new, NOTHING),
+    ]
+    return _reading("8.5", rows)
 
 
 def _answers(transcripts: Sequence[Transcript]) -> Decimal | None:
@@ -498,17 +517,19 @@ def _answers(transcripts: Sequence[Transcript]) -> Decimal | None:
     return None if not answers else _rounded(Fraction(sum(answers), len(answers)), 1)
 
 
+def _measured(found: Decimal | int | None) -> Value:
+    return NOT_COMPUTABLE if found is None else found
+
+
 def _answers_item(context: _Context) -> Reading:
-    pair = _call_pair(context, "8.6")
+    compared = ("mean words of an executive's turn after the first analyst's",)
+    pair = _call_pair(context, "8.6", compared)
     if isinstance(pair, Reading):
         return pair
     now, before, baseline = pair
-    current, earlier = _answers(now), _answers(before)
-    values = f"mean words of an executive's answer {_number(current)} against {_number(earlier)}"
-    if current is None or earlier is None or earlier <= 0:
-        return _reading("8.6", baseline, values, "not computable")
-    move = _rounded((Fraction(current) / Fraction(earlier) - 1) * 100, 2)
-    return _reading("8.6", baseline, f"{values} ({move:+}%)", "grey" if -move > ANSWERS_DROP else NONE)
+    old = NO_BASELINE if before is None else _measured(_answers(before))
+    row = _row(compared[0], baseline, old, _measured(_answers(now)), "amount")
+    return _reading("8.6", [row], _PREVIOUS_CALL if before is None else "")
 
 
 def _questions_words(transcripts: Sequence[Transcript]) -> int | None:
@@ -527,26 +548,25 @@ def _duration(transcripts: Sequence[Transcript]) -> int | None:
 
 
 def _call_item(context: _Context) -> Reading:
-    pair = _call_pair(context, "9.3")
+    measured = (
+        ("call duration (seconds)", _duration),
+        ("words from the first analyst's turn to the end", _questions_words),
+    )
+    pair = _call_pair(context, "9.3", [label for label, _ in measured])
     if isinstance(pair, Reading):
         return pair
     now, before, baseline = pair
-    parts, drops = [], []
-    for name, current, earlier in (
-        ("duration (seconds)", _duration(now), _duration(before)),
-        ("words from the first analyst's turn", _questions_words(now), _questions_words(before)),
-    ):
-        if current is None or earlier is None or earlier <= 0:
-            parts.append(f"{name}: not computable")
-            continue
-        move = _rounded((Fraction(current, earlier) - 1) * 100, 2)
-        drops.append(-move)
-        parts.append(f"{name} {current:,} against {earlier:,} ({move:+}%)")
-    if not drops:
-        return _reading("9.3", baseline, "; ".join(parts), "not computable")
-    return _reading(
-        "9.3", baseline, "; ".join(parts), "yellow" if any(drop > CALL_DROP for drop in drops) else NONE
-    )
+    rows = [
+        _row(
+            label,
+            baseline,
+            NO_BASELINE if before is None else _measured(compute(before)),
+            _measured(compute(now)),
+            "amount",
+        )
+        for label, compute in measured
+    ]
+    return _reading("9.3", rows, _PREVIOUS_CALL if before is None else "")
 
 
 def _lag(season: Season) -> int:
@@ -567,120 +587,70 @@ def _late(season: Season) -> list[str]:
     return late
 
 
+def _listed(found: Sequence[str]) -> str:
+    return ", ".join(found) or NONE
+
+
+def _record(record: Sequence[Season]) -> str:
+    return "previous four seasons: " + (", ".join(str(other.period) for other in record) or "none listed")
+
+
 def _timing_item(context: _Context) -> Reading:
     season = context.season
+    form = season.filing.form
     earlier = context.listing.before(season, 16)
-    same = [other for other in earlier if other.filing.form == season.filing.form][:RECORD_SEASONS]
+    same = [other for other in earlier if other.filing.form == form][:RECORD_SEASONS]
     record = list(earlier[:RECORD_SEASONS])
-    baseline = (
-        f"previous four {season.filing.form}s: {', '.join(str(other.period) for other in same) or 'none'}; "
-        f"previous four seasons: {', '.join(str(other.period) for other in record) or 'none'}"
-    )
-    parts, triggers, compared = [], [], False
-    lag = _lag(season)
-    if same:
-        compared = True
-        most = max(_lag(other) for other in same)
-        parts.append(f"filed {lag} days after the period end; the previous four at most {most}")
-        triggers.append(lag > most)
-    else:
-        parts.append(f"filed {lag} days after the period end; no earlier {season.filing.form} is listed")
-    late = _late(season)
-    if record:
-        compared = True
-        before = [item for other in record for item in _late(other)]
-        parts.append(
-            f"releases accepted after 16:00 before a day without a session: {', '.join(late) or 'none'}; "
-            f"in the previous four seasons: {', '.join(before) or 'none'}"
-        )
-        triggers.append(bool(late) and not before)
-    notices = season.of_forms(NOTICES)
-    parts.append(
-        "late-filing notices: " + (", ".join(f"{item.form} {item.accession}" for item in notices) or "none")
-    )
-    triggers.append(bool(notices))
-    if any(triggers):
-        return _reading("9.1", baseline, "; ".join(parts), "red")
-    return _reading("9.1", baseline, "; ".join(parts), NONE if compared else "no baseline")
-
-
-def _lengths(context: _Context, files: SeasonFiles | None) -> dict[str, int | None]:
-    """The derived text lengths of a season's 10-K or 10-Q, its releases' exhibits and its calls."""
-    if files is None:
-        return {"filing": None, "exhibits": None, "call": None}
-    filing = None if files.filing is None else len(context.derived(files.filing))
-    releases = [item for item in files.filings if item.item.release]
-    exhibits = [document for item in releases for document in item.documents if document.kind == "exhibit"]
-    calls = files.call.documents
-    return {
-        "filing": filing,
-        "exhibits": sum(len(context.derived(document)) for document in exhibits) if exhibits else None,
-        "call": sum(len(context.derived(document)) for document in calls) if calls else None,
-    }
-
-
-def _length_item(context: _Context) -> Reading:
-    season, previous = context.season, context.previous()
-    same = next(
-        (other for other in context.listing.before(season, 8) if other.filing.form == season.filing.form),
-        None,
-    )
-    baseline = f"previous {season.filing.form} {_season_name(same)}; previous season {_season_name(previous)}"
-    now = _lengths(context, context.files)
-    before = {
-        "filing": _lengths(context, None if same is None else context.files_of(same))["filing"],
-        **{
-            name: value
-            for name, value in _lengths(
-                context, None if previous is None else context.files_of(previous)
-            ).items()
-            if name != "filing"
-        },
-    }
-    parts, moves = [], []
-    for name, label in (("filing", season.filing.form), ("exhibits", "release exhibits"), ("call", "call")):
-        current, earlier = now[name], before[name]
-        if current is None or earlier is None or earlier <= 0:
-            parts.append(
-                f"{label}: {'not in raw/' if current is None else f'{current:,} characters, no baseline'}"
-            )
-            continue
-        move = _rounded((Fraction(current, earlier) - 1) * 100, 2)
-        moves.append(abs(move))
-        parts.append(f"{label} {current:,} characters against {earlier:,} ({move:+}%)")
-    if not moves:  # no baseline when the season's own texts are there; else they are not computable
-        level = "no baseline" if any(value is not None for value in now.values()) else "not computable"
-        return _reading("9.4", baseline, "; ".join(parts), level)
-    return _reading(
-        "9.4", baseline, "; ".join(parts), "grey" if any(move > LENGTH_MOVE for move in moves) else NONE
-    )
+    lags = ", ".join(str(_lag(other)) for other in same) or NO_BASELINE
+    before = [item for other in record for item in _late(other)]
+    notices = [f"{item.form} {item.accession}" for other in record for item in other.of_forms(NOTICES)]
+    rows = [
+        Row(
+            f"days from the period end to the {form}'s filing",
+            f"previous four {form}s: " + (", ".join(str(other.period) for other in same) or "none listed"),
+            lags,
+            str(_lag(season)),
+            NOTHING,
+        ),
+        Row(
+            "earnings releases accepted after 16:00 on a day whose next XNYS session is not the next day",
+            _record(record),
+            _listed(before) if record else NO_BASELINE,
+            _listed(_late(season)),
+            NOTHING,
+        ),
+        Row(
+            "late-filing notices (NT 10-K, NT 10-Q)",
+            _record(record),
+            _listed(notices) if record else NO_BASELINE,
+            _listed([f"{item.form} {item.accession}" for item in season.of_forms(NOTICES)]),
+            NOTHING,
+        ),
+    ]
+    return _reading("9.1", rows, "the old values are newest first")
 
 
 def _count_item(context: _Context) -> Reading:
     season = context.season
     record = context.listing.before(season, RECORD_SEASONS)
-    baseline = f"previous four seasons: {', '.join(str(other.period) for other in record) or 'none'}"
-    count = len(season.eight_ks)
-    shown = _count(count, "8-K")
-    if not record:
-        return _reading("9.5", baseline, shown, "no baseline")
-    counts = [len(other.eight_ks) for other in record]
-    mean = _rounded(Fraction(sum(counts), len(counts)), 2)
-    values = f"{shown} against a mean of {mean} ({', '.join(map(str, counts))})"
-    return _reading("9.5", baseline, values, "grey" if count > EIGHT_K_MULTIPLE * mean else NONE)
+    counts = ", ".join(str(len(other.eight_ks)) for other in record) or NO_BASELINE
+    row = Row("8-Ks placed in the season", _record(record), counts, str(len(season.eight_ks)), NOTHING)
+    return _reading("9.4", [row], "the old values are newest first")
 
 
 def _cancelled_item(context: _Context) -> Reading:
     record = context.listing.before(context.season, RECORD_SEASONS)
-    baseline = f"previous four seasons: {', '.join(str(other.period) for other in record) or 'none'}"
-    status = context.files.call.status
-    held = [bool(files.call.events) for other in record if (files := context.files_of(other)) is not None]
-    values = f"the season's call: {status}; listed in the previous seasons: {sum(held)} of {len(record)}"
-    if status != "unavailable":
-        return _reading("9.6", baseline, values, NONE)
-    if len(record) < RECORD_SEASONS:
-        return _reading("9.6", baseline, values, "no baseline")
-    return _reading("9.6", baseline, values, "red" if all(held) and len(held) == RECORD_SEASONS else NONE)
+    states = [
+        "not in raw/" if (files := context.files_of(other)) is None else files.call.status for other in record
+    ]
+    row = Row(
+        "the season's call",
+        _record(record),
+        ", ".join(states) or NO_BASELINE,
+        context.files.call.status,
+        NOTHING,
+    )
+    return _reading("9.5", [row], "the old values are newest first")
 
 
 _COMPUTED: Final[Mapping[str, Callable[[_Context], Reading]]] = {
@@ -697,9 +667,8 @@ _COMPUTED: Final[Mapping[str, Callable[[_Context], Reading]]] = {
     "8.6": _answers_item,
     "9.1": _timing_item,
     "9.3": _call_item,
-    "9.4": _length_item,
-    "9.5": _count_item,
-    "9.6": _cancelled_item,
+    "9.4": _count_item,
+    "9.5": _cancelled_item,
 }
 
 
@@ -716,15 +685,15 @@ class Measures:
     figures: tuple[Figure, ...]
     text: str
 
-    def level(self, identifier: str) -> str:
-        return next(reading.level for reading in self.readings if reading.item.id == identifier)
+    def reading(self, identifier: str) -> Reading:
+        return next(reading for reading in self.readings if reading.item.id == identifier)
 
 
-def season_measures(raw: RawState, files: SeasonFiles, derived: Callable[[Document], str]) -> Measures:
+def season_measures(raw: RawState, files: SeasonFiles) -> Measures:
     """Every Python item of ``files``' season and ``measures.md``'s text (module docstring)."""
     if raw.listing is None:
         raise ValueError(f"{raw.ticker}: no season is listed")
-    context = _Context(raw, raw.listing, files, derived, {})
+    context = _Context(raw, raw.listing, files, {})
     readings = tuple(_COMPUTED[item.id](context) for item in PYTHON_ITEMS)
     seasons = [files.season]
     previous = context.previous()
@@ -743,8 +712,15 @@ def season_measures(raw: RawState, files: SeasonFiles, derived: Callable[[Docume
 # --------------------------------------------------------------------------- measures.md
 
 
-def _row(cells: Iterable[object]) -> str:
+def _table_row(cells: Iterable[object]) -> str:
     return "| " + " | ".join(str(cell).replace("|", "\\|") for cell in cells) + " |"
+
+
+def _rows_table(rows: Sequence[Row]) -> list[str]:
+    """A Python item's rows as a table: what each compares, its baseline, old, new and change."""
+    lines = [_table_row(["Compared", "Baseline", "Old", "New", "Change"]), _table_row(["---"] * 5)]
+    lines.extend(_table_row([row.compared, row.baseline, row.old, row.new, row.change]) for row in rows)
+    return lines
 
 
 def _season_line(raw: RawState, files: SeasonFiles) -> str:
@@ -768,7 +744,7 @@ def _baselines(raw: RawState, files: SeasonFiles) -> list[str]:
     if listing is None:
         return []
     kinds = list(dict.fromkeys(item.baseline for item in ITEMS if item.baseline != "none"))
-    lines = [_row(["Baseline", "Seasons", "Documents in raw/ (DOC_ID)"]), _row(["---"] * 3)]
+    lines = [_table_row(["Baseline", "Seasons", "Documents in raw/ (DOC_ID)"]), _table_row(["---"] * 3)]
     for kind in kinds:
         seasons = baseline_seasons(listing, files.season, kind)
         documents = [
@@ -778,7 +754,7 @@ def _baselines(raw: RawState, files: SeasonFiles) -> list[str]:
             for document in held.documents
         ]
         lines.append(
-            _row(
+            _table_row(
                 [
                     kind,
                     ", ".join(f"{other.period} ({other.filing.form})" for other in seasons) or "none listed",
@@ -793,12 +769,12 @@ def _filings(raw: RawState, files: SeasonFiles) -> list[str]:
     own = files.season.filing
     documents = {item.item.accession: item for item in files.filings}
     lines = [
-        _row(["Form", "Dated", "Filed", "Accepted", "Accession", "Items", "Documents (DOC_ID)"]),
-        _row(["---"] * 7),
+        _table_row(["Form", "Dated", "Filed", "Accepted", "Accession", "Items", "Documents (DOC_ID)"]),
+        _table_row(["---"] * 7),
     ]
     own_documents = files.filing.doc_id if files.filing is not None else "not in raw/"
     accepted = "—" if own.accepted is None else et_display(own.accepted)
-    lines.append(_row([own.form, own.period, own.filed, accepted, own.accession, "", own_documents]))
+    lines.append(_table_row([own.form, own.period, own.filed, accepted, own.accession, "", own_documents]))
     for item in files.season.filings:
         held = documents.get(item.accession)
         if not item.fetched:
@@ -808,13 +784,13 @@ def _filings(raw: RawState, files: SeasonFiles) -> list[str]:
         else:
             shown = "; ".join(document.doc_id for document in held.documents)
         when = "—" if item.accepted is None else et_display(item.accepted)
-        lines.append(_row([item.form, item.dated, item.filed, when, item.accession, item.items, shown]))
+        lines.append(_table_row([item.form, item.dated, item.filed, when, item.accession, item.items, shown]))
     return lines
 
 
 def _figures(figures: Sequence[Figure]) -> list[str]:
     lines = [
-        _row(
+        _table_row(
             [
                 "Measure",
                 "Season",
@@ -827,11 +803,11 @@ def _figures(figures: Sequence[Figure]) -> list[str]:
                 "Formula or reason",
             ]
         ),
-        _row(["---"] * 9),
+        _table_row(["---"] * 9),
     ]
     for found in figures:
         lines.append(
-            _row(
+            _table_row(
                 [
                     found.measure,
                     found.season,
@@ -929,16 +905,9 @@ def render_measures(
         "## Python items",
     ]
     for reading in readings:
-        lines.extend(
-            [
-                "",
-                f"### {reading.item.heading}",
-                "",
-                f"baseline: {reading.baseline}",
-                f"values: {reading.values}",
-                f"rule: {reading.item.rule}",
-                f"level: {reading.level}",
-            ]
-        )
+        lines.extend(["", f"### {reading.item.heading}", "", f"rule: {reading.item.rule}", ""])
+        lines.extend(_rows_table(reading.rows))
+        if reading.note:
+            lines.extend(["", f"note: {reading.note}"])
     lines.extend(["", "## Inputs for the bot's items", "", *_inputs(raw, files, figures)])
     return "\n".join(lines) + "\n"

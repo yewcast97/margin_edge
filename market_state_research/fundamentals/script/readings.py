@@ -7,11 +7,13 @@ and those of the seasons each item compares with (``measures.baseline_seasons``)
 
 - G1: the first non-blank line is ``# {T} · {PERIOD} · readings``;
 - G2: then one ``## {id} {title}`` heading per bot item, each once, in catalogue order;
-- G3: a section's first three lines are ``baseline:``, ``level:`` and ``observation:``, in order;
+- G3: a section's first three lines are ``baseline:``, ``old:`` and ``new:``, in order;
 - G4: ``baseline:`` is ``none`` or the ``DOC_ID``s read as the baseline, joined by ``; ``;
-- G5: ``level:`` is ``red``, ``yellow``, ``grey``, ``none`` or a status (``items.STATUSES`` but
-  ``no source``);
-- G6: ``observation:`` is 1 to ``MAX_OBSERVATION`` printable characters on its line;
+- G5: ``old:`` is the baseline's value and ``new:`` the season's: a status (``items.STATUSES``
+  but ``no source``; ``no baseline`` is an old value only), ``—`` (the old value of an item
+  without a baseline) or a value of facts, ``none`` when the documents state nothing of the
+  kind;
+- G6: each value is 1 to ``MAX_VALUE`` printable characters on its line;
 - G7: then zero or more quotes: ``> TEXT`` lines, whose texts are joined by one space, and then
   one attribution line, ``— {DOC_ID}``, or ``— {DOC_ID}, {Speaker} ({role})`` for a call's
   quote; blank lines may separate quotes.
@@ -23,22 +25,28 @@ accepted. Every problem names its line (1 for the first).
 
 - R1: every ``DOC_ID`` named is a document in ``raw/`` whose text file equals its derivation;
 - R2: the baseline names documents of the item's baseline seasons only, and at least one for
-  a level of an item that has a baseline; it is ``none`` for an item without a baseline and
-  for the statuses ``no baseline``, ``not applicable`` and ``unavailable``;
+  an old value read from them (facts, ``none``, ``not disclosed`` or ``not computable``); it is
+  ``none`` for an item without a baseline and for the old values ``no baseline``,
+  ``not applicable`` and ``unavailable``; the old value is ``—`` exactly for an item without a
+  baseline;
 - R3: a quote comes from a document of the season or from one its baseline line names;
-- R4: ``red`` needs a quote from a document of the season itself;
-- R5: ``no baseline`` only while no document of the item's baseline seasons is in ``raw/``;
+- R4: an item of ``high`` importance whose new value is facts other than ``none`` needs a
+  quote from a document of the season itself;
+- R5: ``no baseline`` only while no document of the item's baseline seasons is in ``raw/``
+  (for a call item, no call of those seasons);
 - R6: ``not applicable`` exactly for an annual item in a 10-Q season and a proxy item in a
-  season without a proxy statement;
-- R7: ``unavailable`` exactly for a call item while the season's call has no transcript;
+  season without a proxy statement, as its new value and, when it has a baseline, its old one;
+- R7: ``unavailable`` exactly for a call item while the season's call has no transcript, in
+  the same places;
 - R8: ``not disclosed`` and ``not computable`` only where the item allows them;
 - R9: a quote is 20 to 800 characters once normalised, found verbatim in its document's
   derived text, spelt as it writes it, and whole sentences or lines at its first occurrence
   (``text.sentence_bounded`` in the document's mode); a call's quote names its turn's
   heading, ``{Speaker} ({role})``, exactly, and lies within that turn's words, any role's; a
   quote of another document names no speaker;
-- R10: an observation carries no valuation, forecast or advice wording (``WORDING``; quotes
-  are the issuer's words and never checked against it), and no quote is repeated in an item.
+- R10: an old or new value carries no valuation, forecast or advice wording (``WORDING``;
+  quotes are the issuer's words and never checked against it), and no quote is repeated in an
+  item.
 """
 
 import re
@@ -48,7 +56,7 @@ from datetime import date
 from typing import Final
 
 from .earningscalls import Turn
-from .items import BOT_ITEMS, LEVELS, STATUSES, Item
+from .items import BOT_ITEMS, STATUSES, Item
 from .text import QUOTE_MAX, QUOTE_MIN, locate, normalise, sentence_bounded
 
 # Accounting's "fair value" and a proxy statement's "advisory vote" are facts, not advice.
@@ -58,17 +66,18 @@ WORDING = re.compile(
     r"outperform|underperform)\b",
     re.IGNORECASE,
 )
-MAX_OBSERVATION: Final = 600
+MAX_VALUE: Final = 600
 DASH: Final = "— "
 NONE: Final = "none"
-ALLOWED_LEVELS: Final = (*LEVELS, *(status for status in STATUSES if status != "no source"))
+NOTHING: Final = "—"
+BOT_STATUSES: Final = tuple(status for status in STATUSES if status != "no source")
 WITHOUT_BASELINE: Final = ("no baseline", "not applicable", "unavailable")
 
 TITLE_LINE = "the first line must be '# {title}'"
 HEADINGS = "the sections must be the bot's items, each once, in catalogue order: '## {id} {title}'"
 MISSING_SECTION = "the section '## {heading}' is missing"
 OUTSIDE_SECTION = "this line is outside the readings' sections"
-FIRST_LINES = "a section starts with its 'baseline:', 'level:' and 'observation:' lines, in that order"
+FIRST_LINES = "a section starts with its 'baseline:', 'old:' and 'new:' lines, in that order"
 UNEXPECTED_LINE = (
     "a section holds its three lines, then '> TEXT' lines each quote ended by its '— DOC_ID' line"
 )
@@ -77,15 +86,17 @@ NO_ATTRIBUTION = "a quote's '>' lines must be followed by its attribution line '
 ATTRIBUTION_TEXT = "an attribution line is '— DOC_ID', or '— DOC_ID, Speaker (role)' for a call's quote"
 ATTRIBUTION_WITHOUT_QUOTE = "an attribution line must follow a quote's '>' lines"
 BASELINE_TEXT = "the baseline must be 'none' or DOC_IDs joined by '; '"
-LEVEL_TEXT = "the level must be one of: {levels}"
-OBSERVATION_TEXT = f"the observation must be 1 to {MAX_OBSERVATION} printable characters"
+VALUE_TEXT = f"the {{side}} value must be 1 to {MAX_VALUE} printable characters"
 WORDING_FOUND = (
-    "an observation states facts only, without valuation, forecast or advice wording; found: {terms}"
+    "an old or new value states facts only, without valuation, forecast or advice wording; found: {terms}"
 )
+NOTHING_NEEDED = "the old value of an item without a baseline is '—'"
+NOTHING_FALSE = "'—' is only the old value of an item without a baseline"
+NO_BASELINE_NEW = "'no baseline' is an old value only; the new value is the season's"
 UNKNOWN_DOCUMENT = "{doc_id} is no document in raw/ (a DOC_ID of a text file in formatted/)"
 TEXT_STALE = "the text file of {doc_id} is missing or differs from its derivation; run derive"
 NOT_BASELINE = "{doc_id} is no document of this item's baseline ({kind}: {seasons})"
-BASELINE_NEEDED = "a level of an item with a baseline names the baseline documents read ({kind})"
+BASELINE_NEEDED = "an old value names the baseline documents it was read from ({kind})"
 BASELINE_NONE = "the baseline must be 'none' for {why}"
 NO_BASELINE_FALSE = "'no baseline' while the baseline is in raw/: {documents}"
 NOT_APPLICABLE_NEEDED = "this item is 'not applicable' in this season ({why})"
@@ -96,7 +107,10 @@ UNAVAILABLE_NEEDED = "a call item is 'unavailable' while the season's call has n
 UNAVAILABLE_FALSE = "'unavailable' is only for a call item while the season's call has no transcript"
 STATUS_NOT_ALLOWED = "this item does not allow '{status}'"
 QUOTE_SOURCE = "a quote comes from a document of the season or one the baseline line names"
-RED_NEEDS_QUOTE = "a red level needs a quote from a document of the season itself"
+HIGH_NEEDS_QUOTE = (
+    "an item of high importance whose new value is stated, not 'none' or a status, needs a quote from a "
+    "document of the season itself"
+)
 QUOTE_LENGTH = (
     f"the quote is {{length}} characters long after normalisation; it must be {QUOTE_MIN} to {QUOTE_MAX}"
 )
@@ -140,17 +154,17 @@ class Quote:
 
 @dataclass(frozen=True)
 class ItemReading:
-    """One bot item's section: its baseline (``DOC_ID``s, empty for ``none``), level, observation
+    """One bot item's section: its baseline (``DOC_ID``s, empty for ``none``), old and new values
     and quotes, with each line's number."""
 
     item: Item
     line: int
     baseline: tuple[str, ...] | None = None
     baseline_line: int = 0
-    level: str | None = None
-    level_line: int = 0
-    observation: str | None = None
-    observation_line: int = 0
+    old: str | None = None
+    old_line: int = 0
+    new: str | None = None
+    new_line: int = 0
     quotes: tuple[Quote, ...] = ()
 
 
@@ -164,9 +178,6 @@ class Readings:
     def get(self, identifier: str) -> ItemReading | None:
         return next((reading for reading in self.items if reading.item.id == identifier), None)
 
-    def levels(self) -> dict[str, str]:
-        return {reading.item.id: reading.level for reading in self.items if reading.level is not None}
-
 
 def title(ticker: str, season: date) -> str:
     return f"{ticker} · {season.isoformat()} · readings"
@@ -178,12 +189,12 @@ class _Section:
     line: int
     baseline: tuple[str, ...] | None = None
     baseline_line: int = 0
-    level: str | None = None
-    level_line: int = 0
-    observation: str | None = None
-    observation_line: int = 0
+    old: str | None = None
+    old_line: int = 0
+    new: str | None = None
+    new_line: int = 0
     quotes: list[Quote] = field(default_factory=list)
-    stage: int = 0  # the first lines read: 0 none, 1 baseline, 2 level, 3 observation
+    stage: int = 0  # the first lines read: 0 none, 1 baseline, 2 old, 3 new
 
 
 class _Parser:
@@ -225,7 +236,7 @@ class _Parser:
     def first_line(self, section: _Section, number: int, line: str) -> bool:
         """Read ``line`` as the section's next first line; False when the line is to be read as a
         quote's (a section that skipped its first lines is reported once)."""
-        labels = ("baseline:", "level:", "observation:")
+        labels = ("baseline:", "old:", "new:")
         label = labels[section.stage]
         if not line.startswith(label):
             self.add(number, FIRST_LINES)
@@ -241,16 +252,14 @@ class _Parser:
                 if not value or any(not part or part != part.strip() or " " in part for part in parts):
                     self.add(number, BASELINE_TEXT)
                 section.baseline = tuple(part for part in parts if part)
-        elif section.stage == 1:
-            section.level_line = number
-            section.level = value
-            if value not in ALLOWED_LEVELS:
-                self.add(number, LEVEL_TEXT.format(levels=", ".join(ALLOWED_LEVELS)))
         else:
-            section.observation_line = number
-            section.observation = value
-            if not 0 < len(value) <= MAX_OBSERVATION or not value.isprintable():
-                self.add(number, OBSERVATION_TEXT)
+            side = "old" if section.stage == 1 else "new"
+            if side == "old":
+                section.old, section.old_line = value, number
+            else:
+                section.new, section.new_line = value, number
+            if not 0 < len(value) <= MAX_VALUE or not value.isprintable():
+                self.add(number, VALUE_TEXT.format(side=side))
         section.stage += 1
         return True
 
@@ -325,10 +334,10 @@ class _Parser:
                     section.line,
                     section.baseline,
                     section.baseline_line,
-                    section.level,
-                    section.level_line,
-                    section.observation,
-                    section.observation_line,
+                    section.old,
+                    section.old_line,
+                    section.new,
+                    section.new_line,
                     tuple(section.quotes),
                 )
                 for section in self.sections
@@ -393,42 +402,73 @@ def _required_status(item: Item, season: Season) -> tuple[str | None, str]:
     return None, ""
 
 
-def _status_problems(reading: ItemReading, season: Season) -> list[Problem]:
-    item, level, line = reading.item, reading.level, reading.level_line
-    if level is None or level not in ALLOWED_LEVELS:
-        return []
+def _baseline_documents(item: Item, season: Season) -> tuple[str, ...]:
+    """The documents of the item's baseline seasons in ``raw/``: for a call item, their calls."""
+    documents = season.baselines.get(item.baseline, ((), ()))[1]
+    if item.scope == "call":
+        return tuple(
+            doc_id for doc_id in documents if doc_id in season.sources and season.sources[doc_id].call
+        )
+    return documents
+
+
+def _value_problems(item: Item, side: str, value: str, line: int, season: Season) -> list[Problem]:
+    """The status rules (R5 to R8) on one value; ``—`` is checked by ``_status_problems``."""
     required, why = _required_status(item, season)
-    problems = []
-    if required == "not applicable" and level != required:
-        problems.append(Problem(line, NOT_APPLICABLE_NEEDED.format(why=why)))
-    elif required == "unavailable" and level != required:
-        problems.append(Problem(line, UNAVAILABLE_NEEDED.format(status=why)))
-    elif level == "not applicable" and required != level:
-        problems.append(Problem(line, NOT_APPLICABLE_FALSE))
-    elif level == "unavailable" and required != level:
-        problems.append(Problem(line, UNAVAILABLE_FALSE))
-    elif level in ("not disclosed", "not computable") and level not in item.allows:
-        problems.append(Problem(line, STATUS_NOT_ALLOWED.format(status=level)))
-    elif level == "no baseline":
-        seasons, documents = season.baselines.get(item.baseline, ((), ()))
-        if item.baseline == "none":
-            problems.append(Problem(line, STATUS_NOT_ALLOWED.format(status=level)))
-        elif documents:
+    if required == "not applicable" and value != required:
+        return [Problem(line, NOT_APPLICABLE_NEEDED.format(why=why))]
+    if required == "unavailable" and value != required:
+        return [Problem(line, UNAVAILABLE_NEEDED.format(status=why))]
+    if value == "not applicable" and required != value:
+        return [Problem(line, NOT_APPLICABLE_FALSE)]
+    if value == "unavailable" and required != value:
+        return [Problem(line, UNAVAILABLE_FALSE)]
+    if value in ("not disclosed", "not computable") and value not in item.allows:
+        return [Problem(line, STATUS_NOT_ALLOWED.format(status=value))]
+    if value == "no baseline":
+        if side == "new":
+            return [Problem(line, NO_BASELINE_NEW)]
+        documents = _baseline_documents(item, season)
+        if documents:
             shown = ", ".join(documents[:3]) + (" ..." if len(documents) > 3 else "")
-            problems.append(Problem(line, NO_BASELINE_FALSE.format(documents=shown)))
+            return [Problem(line, NO_BASELINE_FALSE.format(documents=shown))]
+    return []
+
+
+def _status_problems(reading: ItemReading, season: Season) -> list[Problem]:
+    item = reading.item
+    problems = []
+    if reading.old is not None:
+        if item.baseline == "none":
+            if reading.old != NOTHING:
+                problems.append(Problem(reading.old_line, NOTHING_NEEDED))
+        elif reading.old == NOTHING:
+            problems.append(Problem(reading.old_line, NOTHING_FALSE))
+        else:
+            problems.extend(_value_problems(item, "old", reading.old, reading.old_line, season))
+    if reading.new is not None:
+        if reading.new == NOTHING:
+            problems.append(Problem(reading.new_line, NOTHING_FALSE))
+        else:
+            problems.extend(_value_problems(item, "new", reading.new, reading.new_line, season))
     return problems
+
+
+def _stated(value: str | None) -> bool:
+    """Whether ``value`` states facts: neither a status, ``—`` nor ``none``."""
+    return value is not None and value not in (*BOT_STATUSES, NOTHING, NONE)
 
 
 def _baseline_problems(reading: ItemReading, season: Season) -> list[Problem]:
     item, named, line = reading.item, reading.baseline, reading.baseline_line
-    if named is None or reading.level is None:
+    if named is None or reading.old is None:
         return []
     if named and item.baseline == "none":
         return [Problem(line, BASELINE_NONE.format(why="an item without a baseline"))]
-    if named and reading.level in WITHOUT_BASELINE:
-        return [Problem(line, BASELINE_NONE.format(why=f"the status '{reading.level}'"))]
+    if named and reading.old in WITHOUT_BASELINE:
+        return [Problem(line, BASELINE_NONE.format(why=f"the old value '{reading.old}'"))]
     problems = []
-    if not named and item.baseline != "none" and reading.level in LEVELS:
+    if not named and item.baseline != "none" and reading.old not in (*WITHOUT_BASELINE, NOTHING):
         problems.append(Problem(line, BASELINE_NEEDED.format(kind=item.baseline)))
     seasons, allowed = season.baselines.get(item.baseline, ((), ()))
     for doc_id in named:
@@ -502,16 +542,17 @@ def _quotes_problems(reading: ItemReading, season: Season) -> list[Problem]:
         seen.add(key)
         own = own or quote.doc_id in season.documents
         problems.extend(quote_problems(quote, source))
-    if reading.level == "red" and not own:
-        problems.append(Problem(reading.level_line, RED_NEEDS_QUOTE))
+    if reading.item.importance == "high" and _stated(reading.new) and not own:
+        problems.append(Problem(reading.new_line, HIGH_NEEDS_QUOTE))
     return problems
 
 
 def _item_problems(reading: ItemReading, season: Season) -> Iterator[Problem]:
     yield from _status_problems(reading, season)
     yield from _baseline_problems(reading, season)
-    if reading.observation is not None:
-        yield from wording_problems(reading.observation_line, reading.observation)
+    for value, line in ((reading.old, reading.old_line), (reading.new, reading.new_line)):
+        if value is not None:
+            yield from wording_problems(line, value)
     yield from _quotes_problems(reading, season)
 
 

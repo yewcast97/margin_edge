@@ -1,23 +1,22 @@
-"""The items a season is read against: what each compares, with what, and the level it gives.
+"""The items a season is read against: what each compares, with what, and how much it matters.
 
 Pure data. Each item (``ITEMS``, in catalogue order) belongs to one of nine sections
 (``SECTIONS``) and is read by one hand (``Who``): ``python`` computes it from structured data
 into ``measures.md`` (``measures``), ``bot`` reads it from the documents into the season's
 ``readings.md`` (``readings``), and ``none`` has no source the domain reads (it stays
-``no source``). An item compares the season with a ``Baseline`` (or with nothing) and gives
-a level: ``red``, ``yellow`` or ``grey`` where its rule triggers, ``none`` where it does not,
-or a status saying why there is no comparison (``STATUSES``). The rule texts are the item's
-whole definition; the thresholds in them are starting points, changed only here (and in
-``measures`` for the Python items), never per ticker.
+``no source``). An item compares the season with a ``Baseline`` (or with nothing): it states
+the baseline's value (old) and the season's (new), or a status saying why one cannot be stated
+(``STATUSES``). No threshold decides whether a difference counts: every item states both
+values, whatever the change. Its importance (``IMPORTANCE``: ``high``, ``medium`` or ``low``)
+is fixed by the catalogue, the same in every season and for every issuer, and orders the
+report, which lists every item. The rule texts are the item's whole definition, changed only
+here, never per ticker.
 
 Which statuses an item may take: ``no baseline`` when its baseline is not in ``raw/``;
 ``not applicable`` for an annual item (``scope`` ``annual``) in a 10-Q season and a proxy
 item (``proxy``) in a season without a proxy statement; ``unavailable`` for a call item
 (``call``) while the season's call has no transcript; ``not disclosed`` and ``not computable``
 only where the item allows them (``allows``); ``no source`` for the items of ``none``.
-
-The score of a season is ``SCORES`` summed over its items' levels: red 10, yellow 3, grey 1;
-a count of triggered comparisons, not a valuation.
 """
 
 from collections.abc import Mapping
@@ -38,12 +37,12 @@ Baseline = Literal[
     "previous eight seasons",
     "previous four seasons",
 ]
-Level = Literal["red", "yellow", "grey", "none"]
+Importance = Literal["high", "medium", "low"]
 Status = Literal[
     "no baseline", "not applicable", "not disclosed", "unavailable", "not computable", "no source"
 ]
 
-LEVELS: Final[tuple[Level, ...]] = ("red", "yellow", "grey", "none")
+IMPORTANCE: Final[tuple[Importance, ...]] = ("high", "medium", "low")
 STATUSES: Final[tuple[Status, ...]] = (
     "no baseline",
     "not applicable",
@@ -52,7 +51,6 @@ STATUSES: Final[tuple[Status, ...]] = (
     "not computable",
     "no source",
 )
-SCORES: Final[Mapping[str, int]] = {"red": 10, "yellow": 3, "grey": 1}
 SECTIONS: Final[Mapping[int, str]] = {
     1: "Guidance",
     2: "Financials",
@@ -70,13 +68,14 @@ BASELINE_SEASONS: Final = 4
 
 @dataclass(frozen=True)
 class Item:
-    """One item: its id (``1.1``), title, section, who reads it, its baseline, its scope, the
-    statuses it allows beyond those of its baseline and scope, and its rule."""
+    """One item: its id (``1.1``), title, who reads it, its baseline, its importance, its rule,
+    its scope and the statuses it allows beyond those of its baseline and scope."""
 
     id: str
     title: str
     who: Who
     baseline: Baseline
+    importance: Importance
     rule: str
     scope: Scope = "season"
     allows: frozenset[Status] = frozenset()
@@ -101,8 +100,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Full-year revenue guidance",
         "bot",
         "previous guidance",
-        "The midpoint of this season's full-year revenue guidance against the previous guidance's: lowered "
-        "→ red; raised by more than 5% → yellow.",
+        "high",
+        "The full-year revenue guidance, its range and midpoint: this season's against the previous "
+        "guidance's.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -110,8 +110,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Full-year profit guidance",
         "bot",
         "previous guidance",
-        "The midpoint of this season's full-year guidance of earnings per share, net income, operating "
-        "income or a margin against the previous guidance's for the same measure: lowered → red.",
+        "high",
+        "The full-year guidance of earnings per share, net income, operating income or a margin, each "
+        "range and midpoint: this season's against the previous guidance's for the same measure.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -119,6 +120,7 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Next-quarter guidance against consensus",
         "none",
         "none",
+        "high",
         "No source: the domain reads no consensus.",
     ),
     Item(
@@ -126,8 +128,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Guidance range width",
         "bot",
         "previous guidance",
-        "The width (high less low) of a range this season's guidance gives against the previous guidance's "
-        "for the same measure: wider by more than 50% → yellow.",
+        "medium",
+        "The width (high less low) of each range the guidance gives: this season's against the previous "
+        "guidance's for the same measure.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -135,15 +138,18 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Guidance withdrawn",
         "bot",
         "previous guidance",
-        "A measure the previous guidance gave that this season's guidance no longer gives → red.",
+        "high",
+        "The measures the guidance gives: this season's against the previous guidance's, those no longer "
+        "given named.",
     ),
     Item(
         "1.6",
         "Capital expenditure guidance",
         "bot",
         "previous guidance",
-        "The midpoint of this season's capital expenditure guidance against the previous guidance's: a "
-        "change of more than 20% either way → yellow.",
+        "medium",
+        "The capital expenditure guidance, its range and midpoint: this season's against the previous "
+        "guidance's.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -151,27 +157,36 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Results against the previous guidance",
         "bot",
         "previous guidance",
-        "This season's revenue, net income or diluted earnings per share (the values measures.md gives) "
-        "against the previous guidance for this quarter: below the low end → red.",
+        "high",
+        "This season's revenue, net income and diluted earnings per share (the values measures.md gives) "
+        "against the previous guidance's range for this quarter.",
         allows=_DISCLOSED,
     ),
-    Item("1.8", "Results against consensus", "none", "none", "No source: the domain reads no consensus."),
+    Item(
+        "1.8",
+        "Results against consensus",
+        "none",
+        "none",
+        "medium",
+        "No source: the domain reads no consensus.",
+    ),
     Item(
         "1.9",
         "Guidance record",
         "bot",
         "previous eight seasons",
-        "The previous eight seasons' results against their previous guidance (their readings of 1.7): the "
-        "count below the low end, a record → grey; this season's 1.7 red after at least six of those "
-        "eight at or above the low end → red.",
+        "low",
+        "The results against the previous guidance (the readings of 1.7): this season's against the "
+        "previous eight seasons', counted below, within and above the range.",
     ),
     Item(
         "1.10",
         "Full-year kept, next quarter lowered",
         "bot",
         "previous guidance",
-        "The full-year guidance midpoint kept or raised while the guidance for the next quarter is below "
-        "the previous guidance for that quarter → yellow.",
+        "medium",
+        "The full-year guidance midpoint and the guidance for the next quarter: this season's against "
+        "the previous guidance's for the same periods.",
         allows=_DISCLOSED,
     ),
     # 2 Financials
@@ -180,57 +195,62 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Revenue and net income growth",
         "python",
         "previous quarter and same quarter last year",
-        "The year-over-year growth of revenue or of net income down by more than 10 percentage points on "
-        "the previous quarter's year-over-year growth → yellow.",
+        "medium",
+        "The year-over-year growth of revenue and of net income: this season's against the previous "
+        "quarter's.",
     ),
     Item(
         "2.2",
         "Gross and operating margins",
         "python",
         "previous quarter and same quarter last year",
-        "The gross or operating margin more than 200 basis points from the same quarter last year's or "
-        "the previous quarter's, either way → yellow.",
+        "medium",
+        "The gross and operating margins: this season's against the same quarter last year's and the "
+        "previous quarter's.",
     ),
     Item(
         "2.3",
         "Operating cash flow to net income",
         "python",
         "previous quarter and same quarter last year",
-        "Operating cash flow ÷ net income below 0.7 after above 1 in the same quarter last year, or below "
-        "1 in this season and the previous one while each one's year-ago ratio was 1 or more → red.",
+        "high",
+        "Operating cash flow ÷ net income: this season's against the same quarter last year's and the "
+        "previous quarter's; not computable where net income is 0 or below.",
     ),
     Item(
         "2.4",
         "Days of receivables, inventory and payables",
         "python",
         "same quarter last year",
+        "medium",
         "Days of sales outstanding (receivables × quarter days ÷ revenue), of inventory and of payables "
-        "(inventory or payables × quarter days ÷ cost of revenue): any up by more than 15 days on the "
-        "same quarter last year → yellow.",
+        "(inventory or payables × quarter days ÷ cost of revenue): this season's against the same "
+        "quarter last year's.",
     ),
     Item(
         "2.5",
         "Receivables growth against revenue growth",
         "python",
         "same quarter last year",
-        "The year-over-year growth of receivables less that of revenue above 20 percentage points → red.",
+        "high",
+        "The receivables at the period end and the quarter's revenue: this season's against the same "
+        "quarter last year's, each change giving its growth.",
     ),
     Item(
         "2.6",
         "Net debt",
         "python",
         "previous quarter",
-        "Net debt (debt less cash and cash equivalents) more than 25% from the previous quarter's, either "
-        "way → yellow; not computable when its sign changed or the previous quarter's is under 1% of "
-        "that quarter's stockholders' equity.",
+        "medium",
+        "Net debt (debt less cash and cash equivalents): this season's against the previous quarter's.",
     ),
     Item(
         "2.7",
         "Segment revenue shares",
         "bot",
         "same quarter last year",
-        "A reported segment's share of revenue more than 5 percentage points from the same quarter last "
-        "year's, either way → grey.",
+        "low",
+        "Each reported segment's share of revenue: this season's against the same quarter last year's.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -238,7 +258,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Segments merged, split or renamed",
         "bot",
         "previous quarter",
-        "A reporting segment of the previous quarter merged, split, renamed or dropped → yellow.",
+        "medium",
+        "The reporting segments: this season's against the previous quarter's, any merged, split, renamed "
+        "or dropped named.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -246,8 +268,10 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Non-recurring items",
         "bot",
         "none",
-        "The items the issuer calls non-recurring, one-time or unusual, summed, above 30% of net income "
-        "(the value measures.md gives) → yellow; not computable when net income is 0 or below.",
+        "medium",
+        "The items the issuer calls non-recurring, one-time or unusual in the season, summed, and their "
+        "share of net income (the value measures.md gives); not computable when net income is 0 or "
+        "below.",
         allows=_DISCLOSED | _COMPUTABLE,
     ),
     Item(
@@ -255,15 +279,18 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Weighted diluted shares",
         "python",
         "previous quarter",
-        "The weighted average diluted shares more than 2% from the previous quarter's, either way → grey; "
-        "not computable in a 10-K season (the annual filing reports the year's average).",
+        "low",
+        "The weighted average diluted shares: this season's against the previous quarter's; not "
+        "computable in a 10-K season (the annual filing reports the year's average).",
     ),
     Item(
         "2.11",
         "Goodwill added",
         "python",
         "previous quarter",
-        "Goodwill up on the previous quarter by more than 10% of stockholders' equity → yellow.",
+        "medium",
+        "Goodwill, and goodwill as a share of stockholders' equity: this season's against the previous "
+        "quarter's.",
     ),
     # 3 Accounting and audit
     Item(
@@ -271,14 +298,18 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Auditor change",
         "bot",
         "none",
-        "An 8-K of the season with Item 4.01, a change of the certifying accountant → red.",
+        "high",
+        "An 8-K of the season with Item 4.01, a change of the certifying accountant: the accountant "
+        "dismissed and the one engaged.",
     ),
     Item(
         "3.2",
         "Audit opinion",
         "bot",
         "previous 10-K",
-        "The auditor's opinion other than unqualified (qualified, adverse, a disclaimer) → red.",
+        "high",
+        "The auditor's opinion (unqualified, qualified, adverse or a disclaimer): this season's against "
+        "the previous 10-K's.",
         scope="annual",
     ),
     Item(
@@ -286,47 +317,53 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Going concern",
         "bot",
         "previous quarter",
-        "Substantial doubt about the ability to continue as a going concern, stated now and not in the "
-        "previous quarter → red.",
+        "high",
+        "A substantial doubt about the ability to continue as a going concern: as this season's filing "
+        "states it against the previous quarter's.",
     ),
     Item(
         "3.4",
         "Restatement",
         "bot",
         "none",
+        "high",
         "An 8-K of the season with Item 4.02 (non-reliance on financial statements issued before), or a "
-        "restatement the season's filing states → red.",
+        "restatement the season's filing states.",
     ),
     Item(
         "3.5",
         "Material weakness",
         "bot",
         "previous quarter",
-        "A material weakness in internal control over financial reporting, stated now and not in the "
-        "previous quarter → red.",
+        "high",
+        "A material weakness in internal control over financial reporting: as this season's filing states "
+        "it against the previous quarter's.",
     ),
     Item(
         "3.6",
         "Accounting policy change",
         "bot",
         "previous quarter",
-        "A change of accounting policy or principle the season's filing states, the adoption of a new "
-        "standard included → yellow.",
+        "medium",
+        "The changes of accounting policy or principle the filing states, the adoption of a new standard "
+        "included: this season's against the previous quarter's.",
     ),
     Item(
         "3.7",
         "Accounting estimate change",
         "bot",
         "previous quarter",
-        "A change of an accounting estimate the season's filing states (useful lives, reserves, "
-        "allowances, assumptions) → yellow.",
+        "medium",
+        "The changes of accounting estimates the filing states (useful lives, reserves, allowances, "
+        "assumptions): this season's against the previous quarter's.",
     ),
     Item(
         "3.8",
         "New critical audit matter",
         "bot",
         "previous 10-K",
-        "A critical audit matter of the auditor's report not in the previous 10-K's → yellow.",
+        "medium",
+        "The critical audit matters of the auditor's report: this season's against the previous 10-K's.",
         scope="annual",
     ),
     Item(
@@ -334,8 +371,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Impairment test assumptions",
         "bot",
         "previous 10-K",
-        "An assumption of an impairment test moved in the issuer's favour from the previous 10-K's (a "
-        "lower discount rate, a higher growth rate) → yellow.",
+        "medium",
+        "The assumptions of the impairment tests (discount rates, growth rates): this season's against "
+        "the previous 10-K's.",
         scope="annual",
         allows=_DISCLOSED,
     ),
@@ -344,8 +382,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Non-GAAP adjustments",
         "bot",
         "previous quarter",
-        "A non-GAAP adjustment of the season's earnings release that the previous quarter's did not make, "
-        "or one more than 50% larger → yellow.",
+        "medium",
+        "The non-GAAP adjustments of the earnings release, each with its amount: this season's against "
+        "the previous quarter's.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -353,7 +392,8 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Revenue recognition wording",
         "bot",
         "previous 10-K",
-        "The revenue recognition policy worded otherwise than in the previous 10-K → yellow.",
+        "medium",
+        "The wording of the revenue recognition policy: this season's against the previous 10-K's.",
         scope="annual",
     ),
     # 4 Risk, legal and related parties
@@ -362,38 +402,47 @@ ITEMS: Final[tuple[Item, ...]] = (
         "New risk factor",
         "bot",
         "previous filings",
-        "A risk factor the previous quarter's filing and the previous 10-K did not have → yellow.",
+        "medium",
+        "The risk factors: this season's against those of the previous quarter's filing and the previous "
+        "10-K, those added named.",
     ),
     Item(
         "4.2",
         "Risk wording escalated",
         "bot",
         "previous filings",
-        "A risk factor worded from possibility to fact or to a greater likelihood ('may' to 'has', "
-        "'could' to 'will', 'possible' to 'likely') → red.",
+        "high",
+        "The wording of the risk factors: this season's against the previous quarter's filing and the "
+        "previous 10-K, any worded from possibility to fact or to a greater likelihood ('may' to 'has', "
+        "'could' to 'will', 'possible' to 'likely') named.",
     ),
     Item(
         "4.3",
         "Risk factor deleted",
         "bot",
         "previous filings",
-        "A risk factor of the previous quarter's filing or the previous 10-K no longer stated → grey.",
+        "low",
+        "The risk factors: this season's against those of the previous quarter's filing and the previous "
+        "10-K, those no longer stated named.",
     ),
     Item(
         "4.4",
         "Litigation and investigations",
         "bot",
         "previous quarter",
-        "A legal proceeding or government investigation not in the previous quarter's filing, or an "
-        "amount stated for one above 10% of net income (the value measures.md gives) → red.",
+        "high",
+        "The legal proceedings and government investigations, with the amounts stated for them: this "
+        "season's against the previous quarter's filing; net income (the value measures.md gives) for "
+        "scale.",
     ),
     Item(
         "4.5",
         "Contingent liabilities",
         "bot",
         "previous quarter",
-        "The contingent liabilities the filing quantifies, summed, more than 50% from the previous "
-        "quarter's, either way → yellow.",
+        "medium",
+        "The contingent liabilities the filing quantifies, summed: this season's against the previous "
+        "quarter's.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -401,8 +450,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Related-party transactions",
         "bot",
         "previous quarter",
-        "A related-party transaction not in the previous quarter's filing, or their total up by more "
-        "than 50% → yellow.",
+        "medium",
+        "The related-party transactions, their counterparties and total: this season's against the "
+        "previous quarter's.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -410,8 +460,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Guarantees",
         "bot",
         "previous quarter",
-        "A guarantee not in the previous quarter's filing, or guarantees above 20% of stockholders' equity "
-        "(the value measures.md gives) → yellow.",
+        "medium",
+        "The guarantees and their total: this season's against the previous quarter's; stockholders' "
+        "equity (the value measures.md gives) for scale.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -419,8 +470,8 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Largest customers' shares",
         "bot",
         "previous 10-K",
-        "The share of revenue of a customer the 10-K names more than 5 percentage points from the previous "
-        "10-K's, either way → yellow.",
+        "medium",
+        "The share of revenue of each customer the 10-K names: this season's against the previous 10-K's.",
         scope="annual",
         allows=_DISCLOSED,
     ),
@@ -430,40 +481,45 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Chief financial officer departure",
         "bot",
         "none",
-        "An 8-K of the season with Item 5.02 reporting the departure of the chief financial officer → red.",
+        "high",
+        "An 8-K of the season with Item 5.02 reporting the departure of the chief financial officer.",
     ),
     Item(
         "5.2",
         "Chief executive or chair departure",
         "bot",
         "none",
+        "high",
         "An 8-K of the season with Item 5.02 reporting the departure of the chief executive officer or of "
-        "the chair of the board → red.",
+        "the chair of the board.",
     ),
     Item(
         "5.3",
         "Audit committee chair or director departure",
         "bot",
         "none",
+        "medium",
         "An 8-K of the season with Item 5.02 reporting the departure of the audit committee's chair, or of "
-        "an independent director before the end of their term → yellow.",
+        "an independent director before the end of their term.",
     ),
     Item(
         "5.4",
         "Major holder selling",
         "bot",
         "none",
-        "A Schedule 13D or 13G amendment of the season whose subject is the issuer, reporting a holder's "
-        "stake down by more than 1 percentage point of the class → yellow. The observation names each "
-        "filing's subject issuer: the issuer may file one as another company's holder.",
+        "medium",
+        "The Schedule 13D and 13G amendments of the season whose subject is the issuer: each holder's "
+        "percent of the class, as the amendment reports it against its previous schedule. The new value "
+        "names each filing's subject issuer: the issuer may file one as another company's holder.",
     ),
     Item(
         "5.5",
         "Pledged shares",
         "bot",
         "previous proxy",
-        "Shares pledged by a director or executive officer that the previous proxy statement did not "
-        "state, or the shares pledged up on the previous proxy statement's → yellow.",
+        "medium",
+        "The shares pledged by directors and executive officers: this season's proxy statement against "
+        "the previous one.",
         scope="proxy",
         allows=_DISCLOSED,
     ),
@@ -472,8 +528,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Compensation measures changed",
         "bot",
         "previous proxy",
-        "A performance measure of the executives' incentive pay added, removed or reweighted from the "
-        "previous proxy statement's → yellow.",
+        "medium",
+        "The performance measures of the executives' incentive pay and their weights: this season's proxy "
+        "statement against the previous one.",
         scope="proxy",
         allows=_DISCLOSED,
     ),
@@ -482,8 +539,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Officers selling",
         "python",
         "none",
-        "Two or more of the issuer's officers reporting in the season's Form 4s a sale (code S) or a "
-        "disposition to the issuer (code D) → yellow.",
+        "medium",
+        "The issuer's officers reporting in the season's Form 4s a sale (code S) or a disposition to the "
+        "issuer (code D).",
     ),
     # 6 Capital allocation and financing
     Item(
@@ -491,15 +549,18 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Dividend change",
         "bot",
         "previous quarter",
-        "A dividend cut, suspended or begun against the previous quarter → yellow.",
+        "medium",
+        "The dividend per share and its policy: this season's against the previous quarter's, any cut, "
+        "suspension or start named.",
     ),
     Item(
         "6.2",
         "Buyback authorised, not executed",
         "bot",
         "previous quarter",
-        "A share repurchase authorisation under which no share was repurchased in this season and in the "
-        "previous one → grey.",
+        "low",
+        "The share repurchase authorisation and the shares repurchased under it: this season's against "
+        "the previous quarter's.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -507,26 +568,27 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Equity or convertible issuance",
         "bot",
         "none",
+        "medium",
         "Shares or convertible securities issued, or registered for sale, in the season (the 8-Ks with "
-        "Items 3.02 or 1.01 and the registrations measures.md lists) → yellow.",
+        "Items 3.02 or 1.01 and the registrations measures.md lists).",
     ),
     Item(
         "6.4",
         "Acquisition or divestiture",
         "bot",
         "none",
-        "An acquisition or divestiture whose stated value would be compared with 5% of the market "
-        "value: not computable, the domain reads no market value; the observation gives its amount "
-        "against stockholders' equity and total assets (the values measures.md gives).",
-        allows=_COMPUTABLE,
+        "medium",
+        "The acquisitions and divestitures of the season, each with its stated value; stockholders' "
+        "equity and total assets (the values measures.md gives) for scale.",
     ),
     Item(
         "6.5",
         "Covenant breached or near its limit",
         "bot",
         "previous quarter",
-        "A debt covenant the filing calls breached, waived or close to its limit, not so in the previous "
-        "quarter → red.",
+        "high",
+        "The debt covenants the filing calls breached, waived or close to their limits: this season's "
+        "against the previous quarter's.",
         allows=_DISCLOSED,
     ),
     Item(
@@ -534,8 +596,8 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Refinancing on worse terms",
         "bot",
         "previous quarter",
-        "Debt refinanced or issued at a higher rate or with tighter terms than the debt it replaces → "
-        "yellow.",
+        "medium",
+        "Debt refinanced or issued in the season: its rate and terms against those of the debt it replaces.",
     ),
     # 7 Earnings call: statements
     Item(
@@ -543,7 +605,8 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Opening topics",
         "bot",
         "previous quarter",
-        "The first topic of the executives' prepared remarks other than the previous call's → yellow.",
+        "medium",
+        "The first topic of the executives' prepared remarks: this call's against the previous call's.",
         scope="call",
     ),
     Item(
@@ -551,7 +614,8 @@ ITEMS: Final[tuple[Item, ...]] = (
         "New explanation",
         "bot",
         "previous quarter",
-        "A cause the executives give for a result that the previous call did not give → yellow.",
+        "medium",
+        "The causes the executives give for the results: this call's against the previous call's.",
         scope="call",
     ),
     Item(
@@ -559,8 +623,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Product, customer or market no longer named",
         "bot",
         "previous quarter",
-        "A product, customer or market the previous call's prepared remarks named and this call's do not → "
-        "yellow.",
+        "medium",
+        "The products, customers and markets the executives' prepared remarks name: this call's against "
+        "the previous call's, those no longer named listed.",
         scope="call",
     ),
     Item(
@@ -568,8 +633,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Statement against the filing",
         "bot",
         "none",
-        "An executive's statement of a figure that the season's filing or the values measures.md gives "
-        "contradict → red.",
+        "high",
+        "The figures the executives state on the call against the season's filing and the values "
+        "measures.md gives, any that they contradict named.",
         scope="call",
     ),
     # 8 Earnings call: questions and answers
@@ -578,8 +644,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Unanswered questions",
         "bot",
         "previous quarter",
-        "Questions the executives decline or leave unanswered: twice the previous call's count or more, "
-        "or three or more on one topic → yellow.",
+        "medium",
+        "The questions the executives decline or leave unanswered, counted and by topic: this call's "
+        "against the previous call's.",
         scope="call",
     ),
     Item(
@@ -587,7 +654,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Refusal to quantify",
         "bot",
         "previous quarter",
-        "An executive declining to give a figure an analyst asks for that the previous call gave → yellow.",
+        "medium",
+        "The figures the executives decline to give when an analyst asks: this call's against the "
+        "previous call's, where that call gave them.",
         scope="call",
     ),
     Item(
@@ -595,7 +664,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Answer against the previous call's",
         "bot",
         "previous quarter",
-        "An answer that contradicts what an executive answered on the same topic in the previous call → red.",
+        "high",
+        "The executives' answers on the topics the previous call also answered: this call's against the "
+        "previous call's, any that contradicts it named.",
         scope="call",
     ),
     Item(
@@ -603,8 +674,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "New question topics",
         "bot",
         "previous quarter",
-        "More than 30% of the analysts' questions on topics the previous call's questions did not raise → "
-        "grey.",
+        "low",
+        "The topics of the analysts' questions: this call's against the previous call's, with the share "
+        "on topics it did not raise.",
         scope="call",
     ),
     Item(
@@ -612,8 +684,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Analysts on the call",
         "python",
         "previous quarter",
-        "The distinct analysts asking questions down by more than 30% on the previous call's → grey; the "
-        "names gone and new are listed.",
+        "low",
+        "The distinct analysts asking questions: this call's against the previous call's, with the names "
+        "on one of the two calls only.",
         scope="call",
     ),
     Item(
@@ -621,8 +694,9 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Shorter answers",
         "python",
         "previous quarter",
-        "The mean words of the executives' turns after the first analyst's turn down by more than 30% on "
-        "the previous call's → grey.",
+        "low",
+        "The mean words of the executives' turns after the first analyst's turn: this call's against the "
+        "previous call's.",
         scope="call",
     ),
     # 9 Disclosure
@@ -631,51 +705,48 @@ ITEMS: Final[tuple[Item, ...]] = (
         "Filing timing",
         "python",
         "previous four seasons",
-        "The days from the period end to the 10-K's or 10-Q's filing above each of the previous four of "
-        "the same form; or an earnings release accepted after 16:00 on a day whose next XNYS session is "
-        "not the next day while none of the previous four seasons' releases was; or a late-filing notice "
-        "(NT 10-K, NT 10-Q) in the season → red.",
+        "high",
+        "The days from the period end to the 10-K's or 10-Q's filing: this season's against the previous "
+        "four of the same form; the earnings releases accepted after 16:00 on a day whose next XNYS "
+        "session is not the next day, and the late-filing notices (NT 10-K, NT 10-Q): this season's "
+        "against the previous four seasons'.",
     ),
     Item(
         "9.2",
         "Operating metric no longer disclosed",
         "bot",
         "previous quarter",
-        "An operating metric (units, customers, backlog, another indicator the issuer reports) the "
-        "previous quarter's release or filing stated and the season's do not → red.",
+        "high",
+        "The operating metrics the release and the filing state (units, customers, backlog, other "
+        "indicators the issuer reports): this season's against the previous quarter's, those no longer "
+        "stated named.",
     ),
     Item(
         "9.3",
         "Questions and answers compressed",
         "python",
         "previous quarter",
-        "The call's duration, or the words from the first analyst's turn to the end, down by more than 30% "
-        "on the previous call's → yellow.",
+        "medium",
+        "The call's duration and the words from the first analyst's turn to the end: this call's against "
+        "the previous call's.",
         scope="call",
     ),
     Item(
         "9.4",
-        "Text length",
-        "python",
-        "previous quarter",
-        "The derived text of the 10-K or 10-Q against the previous filing of the same form, of the "
-        "earnings releases' exhibits and of the call against the previous season's: any more than 20% "
-        "longer or shorter → grey.",
-    ),
-    Item(
-        "9.5",
         "8-K count",
         "python",
         "previous four seasons",
-        "The season's 8-Ks more than twice the mean of the previous four seasons' → grey.",
+        "low",
+        "The 8-Ks placed in the season: this season's count against each of the previous four seasons'.",
     ),
     Item(
-        "9.6",
+        "9.5",
         "Call cancelled",
         "python",
         "previous four seasons",
-        "The season's call unavailable while the provider lists a call in each of the previous four "
-        "seasons → red.",
+        "high",
+        "The state of the season's call (transcript, unavailable, waiting, missing): this season's against "
+        "each of the previous four seasons'.",
     ),
 )
 BY_ID: Final[Mapping[str, Item]] = {item.id: item for item in ITEMS}
@@ -683,6 +754,7 @@ BOT_ITEMS: Final[tuple[Item, ...]] = tuple(item for item in ITEMS if item.who ==
 PYTHON_ITEMS: Final[tuple[Item, ...]] = tuple(item for item in ITEMS if item.who == "python")
 
 
-def score(levels: Mapping[str, str]) -> int:
-    """The score of a season's levels, by item id: red 10, yellow 3, grey 1."""
-    return sum(SCORES.get(level, 0) for level in levels.values())
+def by_importance(items: tuple[Item, ...] = ITEMS) -> tuple[Item, ...]:
+    """``items`` in the report's order: high importance first, then medium, then low, each in
+    catalogue order."""
+    return tuple(sorted(items, key=lambda item: (IMPORTANCE.index(item.importance), ITEMS.index(item))))

@@ -51,7 +51,7 @@ due (with ``refresh``, whenever the window holds a listed season); ``derive`` wh
 document's text or a window season's measures differ from their derivation; ``research`` while
 a window season's readings are missing or fail ``check``; ``render`` while a window season's
 newest report is not the report rendered now; else ``reuse``. ``show`` prints the newest
-report of each ticker and their ranking by score.
+report of each ticker.
 
 Messages never repeat captured or private input, and the ``User-Agent`` and the
 EarningsCalls.dev key reach this module only inside their clients. Every time is New York time.
@@ -132,7 +132,7 @@ from .items import BASELINE_SEASONS, ITEMS
 from .measures import Measures, baseline_seasons, season_measures
 from .readings import Problem, Readings, Source, parse_readings, readings_problems
 from .readings import Season as RulesSeason
-from .report import entries, newest_report, ranking, render_report, report_name, same_report
+from .report import newest_report, render_report, report_name, same_report
 
 WATCHLIST = domain_watchlist(Path(__file__).resolve().parent.parent)  # plan's, fetch's and show's default
 MAX_READINGS_BYTES = 4 * 1024 * 1024
@@ -728,7 +728,7 @@ class _State:
 
     def measures(self, files: SeasonFiles) -> Measures:
         if files.day not in self.measures_cache:
-            self.measures_cache[files.day] = season_measures(self.raw, files, self.texts.derived)
+            self.measures_cache[files.day] = season_measures(self.raw, files)
         return self.measures_cache[files.day]
 
     def measures_path(self, files: SeasonFiles) -> Path:
@@ -1207,14 +1207,13 @@ def render(layout: DataLayout, ticker: str, now: datetime) -> dict[str, Any]:
 
 
 def show(layout: DataLayout, tickers: Sequence[str], now: datetime, *, watchlist: Path = WATCHLIST) -> str:
-    """Per ticker, the newest season report rendered now (or why there is none), then the ranking of
-    the tickers' newest seasons by score."""
+    """Per ticker, the action ``plan`` gives and the newest season report rendered now (or why there
+    is none)."""
     tickers = tickers or stock_tickers(watchlist)
     symbols = list(dict.fromkeys(ticker_symbol(ticker) for ticker in tickers))
     moment = to_eastern(now, "now")
     window = default_window(moment.date())
     parts: list[str] = []
-    rows = []
     for symbol in symbols:
         state = resolve(layout, symbol, moment)
         action, reason = state.action(window)
@@ -1231,8 +1230,4 @@ def show(layout: DataLayout, tickers: Sequence[str], now: datetime, *, watchlist
         status, path = state.report_status(newest)
         shown = "none" if path is None else str(path)
         parts.append(f"{header} Newest report: {printable(shown)} ({status}).\n\n{text}")
-        readings = state.check(newest).readings
-        if readings is not None:
-            rows.append((symbol, newest.day.isoformat(), entries(state.measures(newest), readings), shown))
-    ranked = "\n".join(ranking(rows)) + "\n"
-    return "\n".join(parts) + "\n## Ranking\n\n" + ranked
+    return "\n".join(parts)

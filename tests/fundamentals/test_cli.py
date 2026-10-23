@@ -333,7 +333,7 @@ def test_main_reads_the_real_settings_by_default():
         (["render", "--help"], ["write the report of every season whose readings pass"]),
         (
             ["show", "--help"],
-            ["print each ticker's newest season report and the ranking", "--watchlist PATH"],
+            ["print each ticker's newest season report", "--watchlist PATH"],
         ),
     ],
 )
@@ -738,10 +738,8 @@ def test_the_pipeline_end_to_end_through_the_command_line(cli, layout, clock):
         "INTC: action research: readings missing or failing check: 2024-12-28 (missing), "
         f"2025-09-27 (missing). Newest report: {report} (fresh).\n\n# INTC · 2026-06-27 · season report\n"
     )
-    ranking = shown.split("\n## Ranking\n\n")[1].splitlines()
-    assert ranking[2].startswith("| INTC | 2026-06-27 | ")
-    assert ranking[2].endswith(f" | {report} |")
-    assert len(ranking) == 3
+    assert "\n## Items\n" in shown and "\n## Evidence\n" in shown
+    assert "## Ranking" not in shown
 
 
 def test_check_with_problems_exits_0_and_lists_them(cli, layout):
