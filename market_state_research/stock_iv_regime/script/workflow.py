@@ -484,16 +484,17 @@ def _decimal(value: Decimal | None) -> str | None:
 
 
 def _session(row: Row) -> dict[str, Any]:
-    item = row.surface
     return {
         "date": row.date.isoformat(),
         "fetched_at": et_isoformat(row.fetched_at),
         "source": row.source,
-        "method": item.method,
-        "expiries": [expiry.isoformat() for expiry in item.expiries],
+        "method_14d": row.near.method,
+        "expiries_14d": [expiry.isoformat() for expiry in row.near.expiries],
+        "method_30d": row.far.method,
+        "expiries_30d": [expiry.isoformat() for expiry in row.far.expiries],
         **{series: _decimal(VALUES[series](row)) for series in SERIES},
-        "call25_iv_14d_pct": _decimal(item.call25.value),
-        "put25_iv_14d_pct": _decimal(item.put25.value),
+        "call25_iv_14d_pct": _decimal(row.near.level("call25").value),
+        "put25_iv_14d_pct": _decimal(row.near.level("put25").value),
         "daily_return_pct": _decimal(row.daily_return.value),
     }
 

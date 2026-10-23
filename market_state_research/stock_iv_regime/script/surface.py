@@ -1,4 +1,4 @@
-"""A session's 14-DTE values from its own chain.
+"""A session's levels at 14 and 30 days to expiry from its own chain.
 
 At one expiry, the implied volatility at a target delta is read from the usable contracts
 of one type (``volatility`` above 0, ``delta`` given, ``ask`` above 0), ordered from in
@@ -7,20 +7,24 @@ IV of the first contract whose delta equals the target, or else the IV interpola
 linearly in delta between the first adjacent pair whose deltas lie on either side of it.
 Nothing is extrapolated: without such a contract or pair there is no reading.
 
-- The 25Δ skew at an expiry is the put IV at delta -0.25 minus the call IV at +0.25, in
-  percentage points; the ATM IV is the mean of the call IV at +0.50 and the put IV at
-  -0.50, in percent; the 25Δ call IV and put IV are the IVs at +0.25 and -0.25, in percent.
-- The 14-DTE value is read at two bracket expiries that give all four readings: E1, the
-  last such expiry 1 to ``HORIZON`` calendar days out, and E2, the first such expiry
-  ``HORIZON`` or more days out. An expiry nearer to ``HORIZON`` that lacks a reading (a
-  stray listing of one strike, a side without usable quotes) is passed over and named,
-  with why (``skipped``). An expiry exactly ``HORIZON`` days out gives its own values
-  (``exact``); otherwise each value is interpolated linearly in calendar days between
-  E1's and E2's (``interpolated``). A session without E1 or E2 has no value (``none``),
-  with the reason; a session with both has all four.
+- A horizon's levels are the IVs, in percent, at its target deltas (``REQUIRED``): at
+  ``HORIZON`` (14 days) the call at +0.25 and +0.50 and the put at -0.25 and -0.50; at
+  ``TERM_HORIZON`` (30 days) the call at +0.50 and the put at -0.50.
+- They are read at two bracket expiries that give every reading of the horizon: E1, the
+  last such expiry 1 to H calendar days out, and E2, the first such expiry H or more days
+  out (within ``chain.WINDOW_DAYS``). An expiry nearer to H that lacks a reading (a stray
+  listing of one strike, a side without usable quotes) is passed over and named, with why
+  (``skipped``). An expiry exactly H days out gives its own levels (``exact``); otherwise
+  each level is interpolated linearly in calendar days between E1's and E2's
+  (``interpolated``). A session without E1 or E2 has no level at H (``none``), with the
+  reason; a session with both has every level of H.
+- At one expiry, for the readings a report shows, the 25Δ skew is the put IV at -0.25
+  minus the call IV at +0.25, in percentage points, and the ATM IV the mean of the call IV
+  at +0.50 and the put IV at -0.50, in percent. The indicators of a session are computed
+  from its rounded levels (``indicators``), never from these.
 
-Every value is computed exactly with fractions and rounded half-even once, to
-``PLACES`` decimal places; zero is written without a sign. Every function here is pure.
+Every level is computed exactly with fractions and rounded half-even once, to ``PLACES``
+decimal places; zero is written without a sign. Every function here is pure.
 """
 
 import datetime as dt
@@ -33,10 +37,11 @@ from typing import Final, Literal
 from .api import Record
 from .chain import WINDOW_DAYS
 
-HORIZON: Final = 14  # calendar days
+HORIZON: Final = 14  # calendar days: the skew, the 25Δ IVs and the nearer ATM IV
+TERM_HORIZON: Final = 30  # calendar days: the farther ATM IV of the term structure
+HORIZONS: Final = (HORIZON, TERM_HORIZON)
 PLACES: Final = 2
 Method = Literal["exact", "interpolated", "none"]
-Indicator = Literal["skew", "atm", "call25", "put25"]
 Right = Literal["call", "put"]
 Target = Literal["call25", "put25", "call50", "put50"]
 TARGETS: Final[Mapping[Target, tuple[Right, Fraction]]] = {
@@ -45,6 +50,12 @@ TARGETS: Final[Mapping[Target, tuple[Right, Fraction]]] = {
     "call50": ("call", Fraction(1, 2)),
     "put50": ("put", Fraction(-1, 2)),
 }
+# The levels of each horizon, which its bracket expiries must give.
+REQUIRED: Final[Mapping[int, tuple[Target, ...]]] = {
+    HORIZON: ("call25", "put25", "call50", "put50"),
+    TERM_HORIZON: ("call50", "put50"),
+}
+_READINGS: Final[Mapping[int, str]] = {HORIZON: "all four readings", TERM_HORIZON: "both 50Δ readings"}
 _HUNDRED: Final = Fraction(100)
 
 
@@ -121,7 +132,8 @@ def iv_at(rows: Sequence[Record], right: Right, target: Fraction) -> Point:
 
 @dataclass(frozen=True)
 class ExpiryReading:
-    """The four IV points of one expiry and the values they give there."""
+    """The four IV points of one expiry and the values they give there, for the readings a
+    report shows."""
 
     expiry: dt.date
     days: int
@@ -139,34 +151,9 @@ class ExpiryReading:
         call, put = self.points["call50"].iv, self.points["put50"].iv
         return None if call is None or put is None else (call + put) / 2 * _HUNDRED
 
-    @property
-    def call25(self) -> Fraction | None:
-        """The call IV at +0.25, in percent."""
-        iv = self.points["call25"].iv
-        return None if iv is None else iv * _HUNDRED
-
-    @property
-    def put25(self) -> Fraction | None:
-        """The put IV at -0.25, in percent."""
-        iv = self.points["put25"].iv
-        return None if iv is None else iv * _HUNDRED
-
-    def value(self, which: Indicator) -> Fraction | None:
-        """The value ``which`` at this expiry."""
-        match which:
-            case "skew":
-                return self.skew
-            case "atm":
-                return self.atm
-            case "call25":
-                return self.call25
-            case "put25":
-                return self.put25
-
-    @property
-    def complete(self) -> bool:
-        """Whether every target has a reading, so that the expiry can be a bracket."""
-        return all(point.iv is not None for point in self.points.values())
+    def gives(self, targets: Sequence[Target]) -> bool:
+        """Whether each of ``targets`` has a reading, so that the expiry can be a bracket."""
+        return all(self.points[target].iv is not None for target in targets)
 
     def missing(self, targets: Sequence[Target] = tuple(TARGETS)) -> str:
         """Why ``targets`` (default: every target) have no reading at this expiry."""
@@ -189,39 +176,41 @@ def read_expiry(rows: Sequence[Record], expiry: dt.date, session: dt.date) -> Ex
 
 
 def _candidates(
-    expiries: Sequence[dt.date], session: dt.date
+    expiries: Sequence[dt.date], session: dt.date, horizon: int
 ) -> tuple[tuple[dt.date, ...], tuple[dt.date, ...]]:
-    """The expiries E1 is sought among, 1 to ``HORIZON`` days out and latest first, and those E2
-    is sought among, ``HORIZON`` or more days out and earliest first.
+    """The expiries E1 is sought among, 1 to ``horizon`` days out and latest first, and those E2
+    is sought among, ``horizon`` or more days out and earliest first.
 
-    An expiry exactly ``HORIZON`` days out is in both. The session's own expiry (0 days out)
+    An expiry exactly ``horizon`` days out is in both. The session's own expiry (0 days out)
     is in neither.
     """
     days = {expiry: (expiry - session).days for expiry in expiries}
-    lower = sorted((expiry for expiry, dte in days.items() if 1 <= dte <= HORIZON), reverse=True)
-    upper = sorted(expiry for expiry, dte in days.items() if dte >= HORIZON)
+    lower = sorted((expiry for expiry, dte in days.items() if 1 <= dte <= horizon), reverse=True)
+    upper = sorted(expiry for expiry, dte in days.items() if dte >= horizon)
     return tuple(lower), tuple(upper)
 
 
 def _search(
-    candidates: Sequence[dt.date], read: Callable[[dt.date], ExpiryReading]
+    candidates: Sequence[dt.date], read: Callable[[dt.date], ExpiryReading], targets: Sequence[Target]
 ) -> tuple[ExpiryReading | None, tuple[ExpiryReading, ...]]:
-    """The first of ``candidates`` whose reading is complete, or None, and the readings passed
-    over before it."""
+    """The first of ``candidates`` whose reading gives ``targets``, or None, and the readings
+    passed over before it."""
     passed: list[ExpiryReading] = []
     for expiry in candidates:
         reading = read(expiry)
-        if reading.complete:
+        if reading.gives(targets):
             return reading, tuple(passed)
         passed.append(reading)
     return None, tuple(passed)
 
 
-def interpolate(lower: Fraction, lower_days: int, upper: Fraction, upper_days: int) -> Fraction:
-    """The value at ``HORIZON`` days, linear in calendar days between two expiries' values; exact."""
-    if not lower_days < HORIZON < upper_days:
-        raise ValueError(f"interpolate: the expiries must lie on either side of {HORIZON} days")
-    return lower + (upper - lower) * Fraction(HORIZON - lower_days, upper_days - lower_days)
+def interpolate(
+    lower: Fraction, lower_days: int, upper: Fraction, upper_days: int, horizon: int = HORIZON
+) -> Fraction:
+    """The value at ``horizon`` days, linear in calendar days between two expiries' values; exact."""
+    if not lower_days < horizon < upper_days:
+        raise ValueError(f"interpolate: the expiries must lie on either side of {horizon} days")
+    return lower + (upper - lower) * Fraction(horizon - lower_days, upper_days - lower_days)
 
 
 @dataclass(frozen=True)
@@ -234,8 +223,8 @@ class Value:
 
 @dataclass(frozen=True)
 class Surface:
-    """A session's brackets, their readings and its four 14-DTE values: the 25Δ skew, the ATM
-    IV and the 25Δ call and put IVs.
+    """A session's brackets at one horizon, their readings and its levels there: the IVs at the
+    horizon's target deltas (``REQUIRED``), in percent.
 
     ``readings`` holds E1's reading, then E2's when it differs (one reading for ``exact``,
     none for ``none``). ``skipped`` holds the readings of the expiries passed over because
@@ -243,14 +232,21 @@ class Surface:
     """
 
     session: dt.date
+    horizon: int
     method: Method
     readings: tuple[ExpiryReading, ...]
-    skew: Value
-    atm: Value
-    call25: Value
-    put25: Value
+    levels: Mapping[Target, Value]
     skipped: tuple[ExpiryReading, ...] = ()
     reason: str | None = None
+
+    @property
+    def targets(self) -> tuple[Target, ...]:
+        """The targets whose levels the horizon gives."""
+        return REQUIRED[self.horizon]
+
+    def level(self, target: Target) -> Value:
+        """The level at ``target``: rounded, or None and why."""
+        return self.levels[target]
 
     @property
     def expiries(self) -> tuple[dt.date, ...]:
@@ -259,48 +255,58 @@ class Surface:
 
     @property
     def read(self) -> tuple[dt.date, ...]:
-        """Every expiry whose rows the values rest on: the brackets and the expiries skipped."""
+        """Every expiry whose rows the levels rest on: the brackets and the expiries skipped."""
         return tuple(sorted({*self.expiries, *(reading.expiry for reading in self.skipped)}))
 
     def detail(self) -> str:
-        """One line for people: the method, its expiries and those skipped, or why there is no value."""
+        """One line for people: the horizon and the method with its expiries and those skipped, or
+        why there is no level."""
         if self.method == "none":
-            return f"no {HORIZON}-DTE value · {self.reason}"
-        line = f"{self.method} · " + " → ".join(reading.label() for reading in self.readings)
+            return f"{self.horizon}-DTE: none · {self.reason}"
+        line = f"{self.horizon}-DTE: {self.method} · " + " → ".join(
+            reading.label() for reading in self.readings
+        )
         if self.skipped:
             line += " · skipped " + ", ".join(reading.label() for reading in self.skipped)
         return line
 
 
-def _indicator(readings: Sequence[ExpiryReading], which: Indicator) -> Value:
-    """``which`` at ``HORIZON`` days from the bracket readings, each of which gives every target."""
-    values = [reading.value(which) for reading in readings]
-    known = [value for value in values if value is not None]
-    if len(known) != len(values):
-        raise ValueError(f"a bracket expiry gives no {which} reading")
+def _level(readings: Sequence[ExpiryReading], target: Target, horizon: int) -> Value:
+    """The level at ``target`` and ``horizon`` days from the bracket readings, each of which
+    gives it."""
+    ivs = [reading.points[target].iv for reading in readings]
+    known = [iv for iv in ivs if iv is not None]
+    if len(known) != len(ivs):
+        raise ValueError(f"a bracket expiry gives no {target} reading")
     if len(known) == 1:
-        return Value(rounded(known[0]))
+        return Value(rounded(known[0] * _HUNDRED))
     (first, second), (lower, upper) = readings, known
-    return Value(rounded(interpolate(lower, first.days, upper, second.days)))
+    return Value(rounded(interpolate(lower, first.days, upper, second.days, horizon) * _HUNDRED))
 
 
-def _no_bracket(where: str, passed: Sequence[ExpiryReading]) -> str:
+def _no_bracket(where: str, passed: Sequence[ExpiryReading], horizon: int) -> str:
     if not passed:
         return f"no expiry is listed {where}"
-    return f"no expiry listed {where} gives all four readings: " + "; ".join(
-        reading.missing() for reading in passed
+    return f"no expiry listed {where} gives {_READINGS[horizon]}: " + "; ".join(
+        reading.missing(REQUIRED[horizon]) for reading in passed
     )
 
 
 def _skipped(*passed: Sequence[ExpiryReading]) -> tuple[ExpiryReading, ...]:
-    """The readings passed over, once each (an expiry ``HORIZON`` days out is sought twice), ascending."""
+    """The readings passed over, once each (an expiry exactly at the horizon is sought twice),
+    ascending."""
     by_expiry = {reading.expiry: reading for group in passed for reading in group}
     return tuple(by_expiry[expiry] for expiry in sorted(by_expiry))
 
 
-def surface(session: dt.date, expiries: Sequence[dt.date], rows: Sequence[Record]) -> Surface:
-    """The session's values from the expiries it lists and the rows of (at least) the expiries
-    it reads (``Surface.read``)."""
+def surface(
+    session: dt.date, expiries: Sequence[dt.date], rows: Sequence[Record], horizon: int = HORIZON
+) -> Surface:
+    """The session's levels at ``horizon`` days (one of ``HORIZONS``) from the expiries it lists
+    and the rows of (at least) the expiries it reads (``Surface.read``)."""
+    if horizon not in REQUIRED:
+        raise ValueError(f"the horizon must be one of {', '.join(map(str, HORIZONS))} days")
+    targets = REQUIRED[horizon]
     by_expiry: dict[dt.date, list[Record]] = {}
     for row in rows:
         by_expiry.setdefault(row.expiry, []).append(row)
@@ -311,30 +317,23 @@ def surface(session: dt.date, expiries: Sequence[dt.date], rows: Sequence[Record
             cache[expiry] = read_expiry(by_expiry.get(expiry, ()), expiry, session)
         return cache[expiry]
 
-    lower_candidates, upper_candidates = _candidates(expiries, session)
-    horizon = session + dt.timedelta(days=HORIZON)
-    lower, passed_lower = _search(lower_candidates, read)
-    upper, passed_upper = (None, ()) if lower is None else _search(upper_candidates, read)
+    lower_candidates, upper_candidates = _candidates(expiries, session, horizon)
+    at = session + dt.timedelta(days=horizon)
+    lower, passed_lower = _search(lower_candidates, read, targets)
+    upper, passed_upper = (None, ()) if lower is None else _search(upper_candidates, read, targets)
     skipped = _skipped(passed_lower, passed_upper)
     if lower is None or upper is None:
         if lower is None:
-            reason = _no_bracket(
-                f"1 to {HORIZON} days out ({session + dt.timedelta(days=1)} to {horizon})", passed_lower
-            )
+            where = f"1 to {horizon} days out ({session + dt.timedelta(days=1)} to {at})"
+            reason = _no_bracket(where, passed_lower, horizon)
         else:
             last = session + dt.timedelta(days=WINDOW_DAYS)
-            reason = _no_bracket(f"{HORIZON} to {WINDOW_DAYS} days out ({horizon} to {last})", passed_upper)
+            reason = _no_bracket(
+                f"{horizon} to {WINDOW_DAYS} days out ({at} to {last})", passed_upper, horizon
+            )
         blank = Value(None, reason)
-        return Surface(session, "none", (), blank, blank, blank, blank, skipped, reason)
+        return Surface(session, horizon, "none", (), {target: blank for target in targets}, skipped, reason)
     readings = tuple({reading.expiry: reading for reading in (lower, upper)}.values())
     method: Method = "exact" if lower.expiry == upper.expiry else "interpolated"
-    return Surface(
-        session,
-        method,
-        readings,
-        _indicator(readings, "skew"),
-        _indicator(readings, "atm"),
-        _indicator(readings, "call25"),
-        _indicator(readings, "put25"),
-        skipped,
-    )
+    levels = {target: _level(readings, target, horizon) for target in targets}
+    return Surface(session, horizon, method, readings, levels, skipped)

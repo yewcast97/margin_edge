@@ -18,9 +18,9 @@ bytes) of one JSON object:
 - ``traded`` (``contracts`` only): the ``eod`` records dated the session of the contracts
   traded on it, within the same expiries.
 
-Every expiry within the window is kept, so the horizon the values are read at
-(``surface.HORIZON``) is a rule of the derivation, not of the file: it can move without a
-new fetch. The cost is size and time: MU's chain of 2026-10-16 (Monday, Wednesday and
+Every expiry within the window is kept, so the horizons the levels are read at
+(``surface.HORIZONS``, 14 and 30 days) are rules of the derivation, not of the file: they
+can move without a new fetch. The cost is size and time: MU's chain of 2026-10-16 (Monday, Wednesday and
 Friday expiries) held 11 expiries, 4,696 contracts and 2,485 traded records, 0.2 MB gzipped
 and 0.07 s to validate. A file of another window is refused, so changing the window means
 fetching again. Files cut by the former rule (a 30-day horizon, the two bracket expiries
@@ -51,8 +51,8 @@ from .api import DAY_PATTERN, FIELDS, Record, check_item, is_number, parse_day, 
 from .client import allowed_url
 
 # A session's expiries are kept up to WINDOW_DAYS calendar days out: E1 lies at most
-# surface.HORIZON (14) days out and the next monthly expiry at most 35 days after it, so E2
-# is found for monthly-only names; 65 also lets a horizon up to 30 days be read from the same files.
+# surface.TERM_HORIZON (30) days out and the next monthly expiry at most 35 days after it, so E2
+# is found at both horizons for monthly-only names.
 WINDOW_DAYS: Final = 65
 MAX_UNCOMPRESSED: Final = 64 * 1024 * 1024
 FORMER_HORIZON: Final = (

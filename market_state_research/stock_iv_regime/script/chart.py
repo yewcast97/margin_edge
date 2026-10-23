@@ -6,11 +6,11 @@ inputs always produce the same text. The pinned library (``common.chart``) is in
 chart opens offline and from ``file://`` indefinitely. The time series is embedded as JSON,
 which the page's own script draws (nothing reads it back), and repeated as a static data
 table. Everything the page shows beyond plotting is computed
-here: each session's readout line (its method and bracket expiries, or why it has no value),
-the readings at each bracket expiry and the strikes they were read at, the 14-DTE call and put
-IVs, the daily return and the adjusted close, and the table's header, so the page only plots
+here: each session's readout line (each horizon's method and bracket expiries, or why it has
+no level), the readings at each bracket expiry and the strikes they were read at, the 14-DTE
+call and put IVs, the daily return and the adjusted close, and the table's header, so the page only plots
 numbers and text that Python produced and tests checked. The page draws two charts on one
-time axis, always together, each over the adjusted close: the two percentiles (``CHARTED``)
+time axis, always together, each over the adjusted close: the three percentiles (``CHARTED``)
 and the two correlations. ``render_markdown`` writes the same window, coverage and gaps as
 Markdown. Times are New York time: ISO text with its EDT/EST offset in the data, and the
 generation time to the second with its zone in the headers.
@@ -39,8 +39,8 @@ from .chain import WINDOW_DAYS
 from .correlation import WINDOW as CORRELATION_WINDOW
 from .percentile import WINDOW
 from .prices import RETURN_PLACES
-from .store import LABELS, REASONS, SERIES, VALUES, Row, Series
-from .surface import HORIZON, ExpiryReading, Target, rounded
+from .store import LABELS, PERCENTILES, REASONS, SERIES, VALUES, Row, Series
+from .surface import HORIZON, TERM_HORIZON, ExpiryReading, Surface, Target, rounded
 
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "chart.html"
 SOURCE_DESCRIPTION = (
@@ -51,15 +51,18 @@ METHOD = (
     "At each expiry, the implied volatility at a target delta is read from the usable contracts of one "
     "type (IV above 0, a delta, an ask above 0), from in the money to out of the money: the IV of the "
     "first contract at that delta, or else interpolated linearly in delta between the first adjacent pair "
-    "on either side of it; nothing is extrapolated. The 25Δ skew is the put IV at −0.25Δ minus the call "
-    "IV at +0.25Δ (pp); the ATM IV is the mean of the call IV at +0.50Δ and the put IV at −0.50Δ (%); the "
-    "25Δ call and put IVs are those at +0.25Δ and −0.25Δ (%). The "
-    f"{HORIZON}-DTE value is read at the last listed expiry 1 to {HORIZON} calendar days out and the first "
-    f"one {HORIZON} or more days out (within {WINDOW_DAYS}) that give all four readings, an expiry without "
-    "them being skipped and named, interpolated linearly in calendar days between the two, or at an expiry "
-    f"exactly {HORIZON} days out (exact); a session without both has none. Values "
-    "are computed exactly and rounded half-even once to two decimal places. A percentile is 100 times the "
-    f"share of the other {WINDOW - 1} sessions of the {WINDOW} XNYS sessions ending with the session whose "
+    f"on either side of it; nothing is extrapolated. The levels at {HORIZON} days are the call IVs at "
+    f"+0.25Δ and +0.50Δ and the put IVs at −0.25Δ and −0.50Δ, and those at {TERM_HORIZON} days the call "
+    "IV at +0.50Δ and the put IV at −0.50Δ (%). A horizon's levels are read at the last listed expiry 1 to "
+    f"H calendar days out and the first one H or more days out (within {WINDOW_DAYS}) that give every "
+    "reading of the horizon, an expiry without them being skipped and named, interpolated linearly in "
+    "calendar days between the two, or at an expiry exactly H days out (exact); a session without both "
+    "has none. Each level is computed exactly and rounded half-even once to two decimal places, and the "
+    "indicators are computed exactly from the rounded levels and rounded half-even once to two decimal "
+    f"places: the {HORIZON}-DTE 25Δ skew is the put IV at −0.25Δ minus the call IV at +0.25Δ (pp); an "
+    "ATM IV is the mean of the call IV at +0.50Δ and the put IV at −0.50Δ (%); the term structure is the "
+    f"{TERM_HORIZON}-DTE ATM IV minus the {HORIZON}-DTE ATM IV (pp). A percentile is 100 times the share "
+    f"of the other {WINDOW - 1} sessions of the {WINDOW} XNYS sessions ending with the session whose "
     "value is strictly below the session's, among those with a value (n), rounded half-even to one "
     f"decimal place; it needs every one of the {WINDOW} sessions fetched. The daily return is (the adjusted "
     "close ÷ the previous XNYS session's adjusted close − 1) × 100, both from the newest prices file "
@@ -73,8 +76,11 @@ TABLE_COLUMNS = (
     "Session",
     "Skew percentile (n)",
     "ATM IV percentile (n)",
+    "Term structure percentile (n)",
     f"{HORIZON}-DTE 25Δ skew (pp, put − call)",
     f"{HORIZON}-DTE ATM IV (%)",
+    f"{TERM_HORIZON}-DTE ATM IV (%)",
+    f"Term structure (pp, {TERM_HORIZON}-DTE − {HORIZON}-DTE ATM IV)",
     f"Return–Δ call IV correlation ({CORRELATION_WINDOW}s)",
     f"Return–Δ put IV correlation ({CORRELATION_WINDOW}s)",
     f"{HORIZON}-DTE 25Δ call IV (%)",
@@ -86,21 +92,23 @@ TABLE_COLUMNS = (
     "Source",
 )
 READINGS_NOTE = (
-    "The bracket readings name the method, then each bracket expiry as expiry (calendar days out) with "
-    "its 25Δ skew (pp) and ATM IV (%) and the strikes each IV was read at: c25 and p25 at the call's "
-    "+0.25Δ and the put's −0.25Δ, c50 and p50 at +0.50Δ and −0.50Δ; one strike where a contract has the "
-    "target delta, two where the IV is interpolated between them. An expiry nearer to the horizon that "
-    "lacks a reading is skipped as a bracket, and named after the brackets with why."
+    "The bracket readings name, for each horizon, the method, then each bracket expiry as expiry "
+    f"(calendar days out) with its values and the strikes each IV was read at: at {HORIZON} days its 25Δ "
+    "skew (pp) and ATM IV (%), with c25 and p25 at the call's +0.25Δ and the put's −0.25Δ and c50 and p50 "
+    f"at +0.50Δ and −0.50Δ; at {TERM_HORIZON} days its ATM IV, with c50 and p50. One strike where a "
+    "contract has the target delta, two where the IV is interpolated between them. An expiry nearer to the "
+    "horizon that lacks a reading of it is skipped as a bracket, and named after the brackets with why."
 )
 GAPS_NOTE = "Fetched window sessions without a value, a percentile or a correlation, per series, and why."
 NO_GAPS = "None: every fetched window session has every value, percentile and correlation."
 NO_VALUE = "—"
 POINT_NAMES: Final[Mapping[Target, str]] = {"call25": "c25", "put25": "p25", "call50": "c50", "put50": "p50"}
 # The series the two charts draw, in the readout's order: the percentiles, then the correlations.
-# The skew and the ATM IV the percentiles rank are in the data table only.
+# The indicators the percentiles rank are in the data table only.
 CHARTED: Final[tuple[Series, ...]] = (
     "skew_14d_percentile",
     "atm_iv_14d_percentile",
+    "term_structure_percentile",
     "call25_corr_15s",
     "put25_corr_15s",
 )
@@ -168,34 +176,42 @@ def _decimal(value: Decimal | None) -> str | None:
     return None if value is None else str(value)
 
 
-def _reading_text(reading: ExpiryReading) -> str:
-    skew, atm = reading.skew, reading.atm
+def _reading_text(reading: ExpiryReading, targets: tuple[Target, ...]) -> str:
     strikes = ", ".join(
-        f"{POINT_NAMES[target]} {reading.points[target].describe() or NO_VALUE}" for target in POINT_NAMES
+        f"{POINT_NAMES[target]} {reading.points[target].describe() or NO_VALUE}" for target in targets
     )
-    return (
-        f"{reading.label()}: skew {NO_VALUE if skew is None else rounded(skew)}, "
-        f"ATM {NO_VALUE if atm is None else rounded(atm)} ({strikes})"
-    )
+    skew, atm = reading.skew, reading.atm
+    values = f"ATM {NO_VALUE if atm is None else rounded(atm)}"
+    if "put25" in targets:
+        values = f"skew {NO_VALUE if skew is None else rounded(skew)}, {values}"
+    return f"{reading.label()}: {values} ({strikes})"
 
 
-def readings_text(row: Row) -> str:
-    """The method and the bracket readings, for a table cell."""
-    item = row.surface
+def _horizon_text(item: Surface) -> str:
+    label = f"{item.horizon}-DTE"
     if item.method == "none":
-        return f"none · {item.reason}"
-    text = f"{item.method} · " + " → ".join(_reading_text(reading) for reading in item.readings)
+        return f"{label}: none · {item.reason}"
+    text = f"{label}: {item.method} · " + " → ".join(
+        _reading_text(reading, item.targets) for reading in item.readings
+    )
     if item.skipped:
-        text += " · skipped " + "; ".join(reading.missing() for reading in item.skipped)
+        text += " · skipped " + "; ".join(reading.missing(item.targets) for reading in item.skipped)
     return text
 
 
+def readings_text(row: Row) -> str:
+    """Each horizon's method and bracket readings, for a table cell."""
+    return f"{_horizon_text(row.near)}; {_horizon_text(row.far)}"
+
+
 def _percentile_text(row: Row, series: Series) -> str:
-    value = VALUES[series](row)
-    if value is None:
-        return NO_VALUE
-    found = row.skew_percentile if series == "skew_14d_percentile" else row.atm_percentile
-    return f"{value} (n {found.n})"
+    found = PERCENTILES[series](row)
+    return NO_VALUE if found.value is None else f"{found.value} (n {found.n})"
+
+
+def _n(row: Row, series: Series) -> int | None:
+    found = PERCENTILES[series](row)
+    return None if found.value is None else found.n
 
 
 def payload(spec: ChartSpec, library_version: str = LIBRARY_VERSION) -> dict[str, Any]:
@@ -219,14 +235,16 @@ def payload(spec: ChartSpec, library_version: str = LIBRARY_VERSION) -> dict[str
             {
                 "date": row.date.isoformat(),
                 **{series: _decimal(VALUES[series](row)) for series in SERIES},
-                "skew_window_n": row.skew_percentile.n if row.skew_percentile.value is not None else None,
-                "atm_window_n": row.atm_percentile.n if row.atm_percentile.value is not None else None,
-                "call25_iv_14d_pct": _decimal(row.surface.call25.value),
-                "put25_iv_14d_pct": _decimal(row.surface.put25.value),
+                "skew_window_n": _n(row, "skew_14d_percentile"),
+                "atm_window_n": _n(row, "atm_iv_14d_percentile"),
+                "term_window_n": _n(row, "term_structure_percentile"),
+                "call25_iv_14d_pct": _decimal(row.near.level("call25").value),
+                "put25_iv_14d_pct": _decimal(row.near.level("put25").value),
                 "daily_return_pct": _decimal(row.daily_return.value),
                 "adj_close": None if row.bar is None else row.bar.values["adjClose"],
-                "method": row.surface.method,
-                "detail": row.surface.detail(),
+                "method_14d": row.near.method,
+                "method_30d": row.far.method,
+                "detail": row.detail,
                 "readings": readings_text(row),
                 "fetched_at": et_isoformat(row.fetched_at),
                 "source": row.source,
@@ -238,7 +256,7 @@ def payload(spec: ChartSpec, library_version: str = LIBRARY_VERSION) -> dict[str
 
 
 def _value(row: Row, series: Series) -> str:
-    if series in ("skew_14d_percentile", "atm_iv_14d_percentile"):
+    if series in PERCENTILES:
         return _percentile_text(row, series)
     value = VALUES[series](row)
     return NO_VALUE if value is None else str(value)
@@ -257,8 +275,8 @@ def _cells(row: Row) -> list[str]:
     """The cells of a row from each series to the adjusted close."""
     return [
         *(_value(row, series) for series in SERIES),
-        _text(row.surface.call25.value),
-        _text(row.surface.put25.value),
+        _text(row.near.level("call25").value),
+        _text(row.near.level("put25").value),
         _text(row.daily_return.value),
         _close(row),
     ]
@@ -353,7 +371,7 @@ def _coverage(spec: ChartSpec) -> str:
 
 
 def _title(spec: ChartSpec) -> str:
-    return f"{spec.ticker} · {HORIZON}-DTE implied volatility · {spec.lookback} sessions"
+    return f"{spec.ticker} · implied volatility, {HORIZON} and {TERM_HORIZON} DTE · {spec.lookback} sessions"
 
 
 def render_html(spec: ChartSpec, library: Library) -> str:
@@ -376,7 +394,7 @@ def render_html(spec: ChartSpec, library: Library) -> str:
         "NOTICE": escape(library.notice),
         "BANNERS": _banners(spec),
         "LATEST_DATE": escape(latest.date.isoformat()),
-        "LATEST_DETAIL": escape(latest.surface.detail()),
+        "LATEST_DETAIL": escape(latest.detail),
         "COVERAGE": escape(_coverage(spec)),
         "TABLE_HEAD": _table_head(),
         "TABLE_ROWS": _table_rows(spec),

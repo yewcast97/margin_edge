@@ -20,6 +20,7 @@
   --series-2: #eb6834;
   --series-3: #7b4fd1;
   --series-4: #c93f7c;
+  --series-5: #1baf7a;
   --price: #898781;
   --warning: #fab219;
   --focus: #2a78d6;
@@ -39,6 +40,7 @@
     --series-2: #d95926;
     --series-3: #9670e0;
     --series-4: #d9558f;
+    --series-5: #199e70;
     --price: #898781;
     --focus: #3987e5;
   }
@@ -57,6 +59,7 @@
   --series-2: #d95926;
   --series-3: #9670e0;
   --series-4: #d9558f;
+  --series-5: #199e70;
   --price: #898781;
   --focus: #3987e5;
 }
@@ -125,8 +128,8 @@ footer a { color: var(--text-secondary); }
 <body>
 <main>
 <header>
-<h1>{{TICKER}} · 14-DTE implied volatility</h1>
-<p class="subtitle">Two charts over the adjusted close, read together: the 252-session percentiles of the 14-DTE 25Δ skew and ATM IV, and the 15-session correlations of the daily return with the changes of the 14-DTE 25Δ call and put IVs · {{LOOKBACK}} trading sessions · {{WINDOW_START}} → {{AS_OF}}</p>
+<h1>{{TICKER}} · implied volatility, 14 and 30 DTE</h1>
+<p class="subtitle">Two charts over the adjusted close, read together: the 252-session percentiles of the 14-DTE 25Δ skew, the 14-DTE ATM IV and the term structure (the 30-DTE ATM IV minus the 14-DTE), and the 15-session correlations of the daily return with the changes of the 14-DTE 25Δ call and put IVs · {{LOOKBACK}} trading sessions · {{WINDOW_START}} → {{AS_OF}}</p>
 <dl class="meta">
 <div><dt>As of</dt><dd>{{AS_OF}}</dd></div>
 <div><dt>Coverage</dt><dd>{{COVERAGE}} sessions</dd></div>
@@ -143,10 +146,11 @@ footer a { color: var(--text-secondary); }
 <span class="when"><span id="readout-date">{{LATEST_DATE}}</span> <span class="label" id="readout-detail">{{LATEST_DETAIL}}</span></span>
 <span class="item"><span class="key" style="background: var(--series-1)"></span><span class="value" id="readout-value-0">{{LATEST_VALUE_0}}</span><span class="label">Skew percentile</span></span>
 <span class="item"><span class="key" style="background: var(--series-2)"></span><span class="value" id="readout-value-1">{{LATEST_VALUE_1}}</span><span class="label">ATM IV percentile</span></span>
-<span class="item"><span class="key" style="background: var(--series-3)"></span><span class="value" id="readout-value-2">{{LATEST_VALUE_2}}</span><span class="label">Return–Δ call IV correlation, 15s</span></span>
-<span class="item"><span class="key" style="background: var(--series-4)"></span><span class="value" id="readout-value-3">{{LATEST_VALUE_3}}</span><span class="label">Return–Δ put IV correlation, 15s</span></span>
-<span class="item"><span class="key dotted"></span><span class="value" id="readout-value-4">{{LATEST_VALUE_4}}</span><span class="label">Adjusted close</span></span>
-<span class="item"><span class="value" id="readout-value-5">{{LATEST_VALUE_5}}</span><span class="label">Daily return, %</span></span>
+<span class="item"><span class="key" style="background: var(--series-5)"></span><span class="value" id="readout-value-2">{{LATEST_VALUE_2}}</span><span class="label">Term structure percentile</span></span>
+<span class="item"><span class="key" style="background: var(--series-3)"></span><span class="value" id="readout-value-3">{{LATEST_VALUE_3}}</span><span class="label">Return–Δ call IV correlation, 15s</span></span>
+<span class="item"><span class="key" style="background: var(--series-4)"></span><span class="value" id="readout-value-4">{{LATEST_VALUE_4}}</span><span class="label">Return–Δ put IV correlation, 15s</span></span>
+<span class="item"><span class="key dotted"></span><span class="value" id="readout-value-5">{{LATEST_VALUE_5}}</span><span class="label">Adjusted close</span></span>
+<span class="item"><span class="value" id="readout-value-6">{{LATEST_VALUE_6}}</span><span class="label">Daily return, %</span></span>
 </div>
 <div class="controls">
 <button type="button" id="fit">Fit all</button>
@@ -156,8 +160,8 @@ footer a { color: var(--text-secondary); }
 <span class="item"><span class="key solid"></span><span class="label">A percentile over 252 sessions (0–100) or a correlation over 15 sessions (−1 to 1), on the right scale</span></span>
 <span class="item"><span class="key dotted"></span><span class="label">The adjusted close, on the left scale of each chart</span></span>
 </div>
-<div id="chart" tabindex="0" role="group" aria-describedby="chart-hint" aria-label="{{TICKER}} by session, two charts over the adjusted close: the 14-day 25-delta skew and ATM implied volatility percentiles, and the correlations of the daily return with the changes of the 25-delta call and put implied volatilities"></div>
-<p class="hint" id="chart-hint">Drag to pan, scroll or pinch to zoom; drag the line between the two charts to share the height differently. With the chart focused, left and right arrow keys step through sessions. A line breaks where a session has no value: a missing session, or a fetched session without the percentile, the correlation or the close. The readout names how the values of the session under the cursor were read (the bracket expiries and the method), or why there are none, and the count n of other sessions each percentile rests on; the data table lists every value, the 14-DTE skew and ATM IV that the percentiles rank among them, with the bracket readings.</p>
+<div id="chart" tabindex="0" role="group" aria-describedby="chart-hint" aria-label="{{TICKER}} by session, two charts over the adjusted close: the percentiles of the 14-day 25-delta skew, the 14-day ATM implied volatility and the term structure from 14 to 30 days, and the correlations of the daily return with the changes of the 25-delta call and put implied volatilities"></div>
+<p class="hint" id="chart-hint">Drag to pan, scroll or pinch to zoom; drag the line between the two charts to share the height differently. With the chart focused, left and right arrow keys step through sessions. A line breaks where a session has no value: a missing session, or a fetched session without the percentile, the correlation or the close. The readout names how the levels of the session under the cursor were read at 14 and at 30 days (the method and the bracket expiries), or why there are none, and the count n of other sessions each percentile rests on; the data table lists every value, the skew, the ATM IVs and the term structure that the percentiles rank among them, with the bracket readings.</p>
 <noscript><p class="hint">JavaScript is required for the interactive chart; the data table lists every value.</p></noscript>
 </section>
 <details>
@@ -195,17 +199,18 @@ footer a { color: var(--text-secondary); }
     return;
   }
   const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-  // Two charts, one per pane, on one time axis. Each draws its two series on a right scale
+  // Two charts, one per pane, on one time axis. Each draws its series on a right scale
   // fixed to `range`, over the adjusted close (PRICE) on a left scale of its own.
   // `n`: the series is a percentile, shown with the count of sessions it rests on.
   // `reference` draws a line at that value.
   const PANES = [
     {
-      title: "14-DTE 25Δ skew and ATM IV · percentiles over 252 sessions (0–100)",
+      title: "14-DTE 25Δ skew and ATM IV, 30 − 14-DTE term structure · percentiles over 252 sessions (0–100)",
       range: [0, 100],
       series: [
         { key: "skew_14d_percentile", color: "--series-1", n: "skew_window_n" },
         { key: "atm_iv_14d_percentile", color: "--series-2", n: "atm_window_n" },
+        { key: "term_structure_percentile", color: "--series-5", n: "term_window_n" },
       ],
     },
     {
@@ -221,7 +226,7 @@ footer a { color: var(--text-secondary); }
   // `precision` fixes the decimals of the close's scale; the readout shows the close as written.
   const PRICE = { key: "adj_close", color: "--price", precision: 2 };
   const PRICE_NOTE = "Dotted: the adjusted close, on the left scale";
-  // The readout's values, in its order: the four series, the adjusted close, the daily return.
+  // The readout's values, in its order: the five series, the adjusted close, the daily return.
   const READOUT = [...PANES.flatMap((pane) => pane.series), PRICE, { key: "daily_return_pct" }];
   // A pane's series: solid, on the right scale. The close: dotted, on the pane's left scale.
   const SOLID = { scale: "right", width: 2, lineStyle: LWC.LineStyle.Solid, marker: 4, dot: 3 };
@@ -311,7 +316,7 @@ footer a { color: var(--text-secondary); }
       vertLine: { ...base.crosshair.vertLine, width: 1 },
       horzLine: { ...base.crosshair.horzLine, width: 1 },
     },
-    // A later series is drawn over an earlier one, so each pane's two lines lie over the close;
+    // A later series is drawn over an earlier one, so each pane's lines lie over the close;
     // the library would otherwise draw the series under the pointer over every other one.
     hoveredSeriesOnTop: false,
     localization: { locale: "en-US", dateFormat: "yyyy-MM-dd" },
@@ -381,7 +386,7 @@ footer a { color: var(--text-secondary); }
     return line;
   };
   // Panes are created in order: the pane index is clamped to the pane count. The close is drawn
-  // first, under the pane's two series.
+  // first, under the pane's series.
   const drawn = PANES.map((spec, pane) => {
     const price = draw(PRICE, pane, DOTTED);
     const series = spec.series.map((item) => draw(item, pane, SOLID, spec.range));

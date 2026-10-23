@@ -87,15 +87,26 @@ def attributes(
     return {name: values[name] for name in FIELDS}
 
 
-def quotes(ticker: str, expiry: date, bump: str = "0", **extra: str | None) -> list[dict[str, str | None]]:
-    """The hand-worked quotes at ``expiry``, every put IV raised by ``bump``: the skew is
-    7.25 + 100 x bump pp and the ATM IV 31.75 + 50 x bump %."""
+def quotes(
+    ticker: str, expiry: date, bump: str = "0", level: str = "0", **extra: str | None
+) -> list[dict[str, str | None]]:
+    """The hand-worked quotes at ``expiry``, every IV raised by ``level`` and every put IV by
+    ``bump`` besides: the skew is 7.25 + 100 x bump pp and the ATM IV 31.75 + 100 x level +
+    50 x bump %."""
     rows = [
-        attributes(ticker, expiry, "call", strike, delta=delta, iv=iv, **extra)  # type: ignore[arg-type]
+        attributes(ticker, expiry, "call", strike, delta=delta, iv=str(Decimal(iv) + Decimal(level)), **extra)  # type: ignore[arg-type]
         for strike, delta, iv in CALLS
     ]
     rows += [
-        attributes(ticker, expiry, "put", strike, delta=delta, iv=str(Decimal(iv) + Decimal(bump)), **extra)  # type: ignore[arg-type]
+        attributes(
+            ticker,
+            expiry,
+            "put",
+            strike,
+            delta=delta,
+            iv=str(Decimal(iv) + Decimal(level) + Decimal(bump)),
+            **extra,  # type: ignore[arg-type]
+        )
         for strike, delta, iv in PUTS
     ]
     return rows
@@ -134,15 +145,22 @@ def chain(
     return Chain(session, ticker, fetched_at, source, requests, expiries, rows, held)  # type: ignore[arg-type]
 
 
-def standard(session: date, bump: str = "0", ticker: str = TICKER, **options: object) -> Chain:
+def standard(
+    session: date, bump: str = "0", ticker: str = TICKER, far: str = "0.021", **options: object
+) -> Chain:
     """A session listing expiries 9, 19 and 40 days out with the hand-worked quotes, every put IV
-    raised by ``bump``: E1 is 9 days out and E2 19, so the 14-DTE value is their mean. Its
-    14-DTE skew is 7.25 + 100 x bump, its ATM IV 31.75 + 50 x bump, its 25-delta call IV 27.25
-    and its put IV 34.50 + 100 x bump."""
+    raised by ``bump``, and every IV of the expiry 40 days out by ``far`` besides.
+
+    At 14 days E1 is 9 days out and E2 19, with equal quotes: the 14-DTE levels are the call IVs
+    27.25 (+0.25) and 29.00 (+0.50) and the put IVs 34.50 + 100 x bump (-0.25 and -0.50), so the
+    skew is 7.25 + 100 x bump and the ATM IV 31.75 + 50 x bump. At 30 days E1 is 19 days out and
+    E2 40, 11/21 of the way: the 30-DTE 50Δ levels are those at 14 days + 100 x far x 11/21,
+    so with the default far (0.021) 1.10 higher, the 30-DTE ATM IV 32.85 + 50 x bump and the
+    term structure 1.10."""
     expiries = [session + timedelta(days=days) for days in (9, 19, 40)]
-    return chain(
-        session, {expiry: quotes(ticker, expiry, bump) for expiry in expiries}, ticker=ticker, **options
-    )  # type: ignore[arg-type]
+    by_expiry = {expiry: quotes(ticker, expiry, bump) for expiry in expiries[:2]}
+    by_expiry[expiries[2]] = quotes(ticker, expiries[2], bump, level=far)
+    return chain(session, by_expiry, ticker=ticker, **options)  # type: ignore[arg-type]
 
 
 def save(layout: DataLayout, item: Chain) -> str:

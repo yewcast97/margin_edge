@@ -1,9 +1,10 @@
 """Command line for the stock IV regime pipeline; see the domain's PROCEDURE.md.
 
 Per ticker and XNYS session, from EODHD's end-of-day option chains and Tiingo's daily
-prices: the 14-DTE 25-delta skew (put IV minus call IV) and the 14-DTE ATM IV, with each
-one's percentile over the 252 sessions ending at it, and the 15-session correlations of the
-stock's daily return with the changes of the 14-DTE 25-delta call and put IVs. fetch is the
+prices: the 14-DTE 25-delta skew (put IV minus call IV), the 14-DTE ATM IV and the term
+structure (the 30-DTE ATM IV minus the 14-DTE), with each one's percentile over the 252
+sessions ending at it, and the 15-session correlations of the stock's daily return with the
+changes of the 14-DTE 25-delta call and put IVs. fetch is the
 one command that uses the network: it reads Tiingo's daily prices under TIINGO_API and
 EODHD's options API under EODHD_API (from the environment or the ignored repository-root
 .env), both checked before it reads the watchlist or sends any request and never printed,

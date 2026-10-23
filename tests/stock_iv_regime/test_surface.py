@@ -1,4 +1,4 @@
-"""The 14-DTE values from a session's own chain, worked by hand."""
+"""The levels at 14 and 30 days from a session's own chain, worked by hand."""
 
 from datetime import date, timedelta
 from decimal import Decimal
@@ -7,6 +7,9 @@ from fractions import Fraction
 import pytest
 
 from market_state_research.stock_iv_regime.script.surface import (
+    REQUIRED,
+    TERM_HORIZON,
+    Value,
     difference,
     interpolate,
     iv_at,
@@ -35,12 +38,21 @@ def one_strike(expiry: date):
     ]
 
 
-def unread(expiry: date, days: int) -> str:
-    """Why an expiry of ``one_strike`` gives no reading."""
+def unread(
+    expiry: date, days: int, deltas=(("call", "+0.25"), ("put", "-0.25"), ("call", "+0.50"), ("put", "-0.50"))
+) -> str:
+    """Why an expiry of ``one_strike`` gives no reading at ``deltas``."""
     return f"at {expiry} ({days}d) " + "; ".join(
         f"{right} {delta}: no usable {right} has delta {delta} and no two adjacent ones bracket it"
-        for right, delta in (("call", "+0.25"), ("put", "-0.25"), ("call", "+0.50"), ("put", "-0.50"))
+        for right, delta in deltas
     )
+
+
+def levels(item):
+    """The levels of ``item`` as text, by target, None where blank."""
+    return {
+        target: None if value.value is None else str(value.value) for target, value in item.levels.items()
+    }
 
 
 def test_iv_at_interpolates_in_delta_from_the_money_side():
@@ -102,7 +114,8 @@ def test_unusable_contracts_are_skipped():
 def test_expiry_reading_gives_each_value():
     reading = read_expiry(rows(E1), E1, SESSION)
     assert (reading.days, reading.skew, reading.atm) == (9, Fraction("7.25"), Fraction("31.75"))
-    assert (reading.call25, reading.put25) == (Fraction("27.25"), Fraction("34.5"))
+    assert reading.gives(REQUIRED[14]) and reading.gives(REQUIRED[30])
+    assert not read_expiry(one_strike(E1), E1, SESSION).gives(REQUIRED[30])
 
 
 def test_the_brackets_are_the_nearest_expiries_on_either_side_of_14_days():
@@ -119,8 +132,11 @@ def test_interpolated_value_is_rounded_once_half_even():
     assert rounded(interpolate(Fraction("1.00"), 13, Fraction("1.01"), 15)) == Decimal("1.00")
     assert rounded(interpolate(Fraction("1.01"), 13, Fraction("1.02"), 15)) == Decimal("1.02")
     assert str(rounded(Fraction(-1, 1000))) == "0.00"
+    assert interpolate(Fraction(29), 19, Fraction(31), 40, TERM_HORIZON) == Fraction(29) + Fraction(22, 21)
     with pytest.raises(ValueError, match="either side of 14 days"):
         interpolate(Fraction(1), 15, Fraction(2), 40)
+    with pytest.raises(ValueError, match="either side of 30 days"):
+        interpolate(Fraction(1), 9, Fraction(2), 19, TERM_HORIZON)
 
 
 def test_difference_is_exact_and_zero_has_no_sign():
@@ -131,31 +147,28 @@ def test_difference_is_exact_and_zero_has_no_sign():
 
 def test_surface_interpolates_between_the_brackets():
     item = surface(SESSION, [E1, E2], rows(E1) + rows(E2, "0.014"))
-    assert item.method == "interpolated"
-    # 7.25 at 9 days, 8.65 at 19: 7.25 + 1.4 x 5/10 = 7.95; ATM 31.75 and 32.45: 32.10; the
-    # call IV 27.25 at both; the put IV 34.50 and 35.90: 35.20.
-    assert (item.skew.value, item.atm.value) == (Decimal("7.95"), Decimal("32.10"))
-    assert (item.call25.value, item.put25.value) == (Decimal("27.25"), Decimal("35.20"))
-    assert item.detail() == "interpolated · 2026-10-25 (9d) → 2026-11-04 (19d)"
+    assert (item.horizon, item.method, item.targets) == (14, "interpolated", REQUIRED[14])
+    # The call IVs are equal at both; the put IVs 34.50 at 9 days and 35.90 at 19: 35.20.
+    assert levels(item) == {"call25": "27.25", "put25": "35.20", "call50": "29.00", "put50": "35.20"}
+    assert item.level("put25") == Value(Decimal("35.20"))
+    assert item.detail() == "14-DTE: interpolated · 2026-10-25 (9d) → 2026-11-04 (19d)"
 
 
 def test_surface_reads_an_expiry_exactly_14_days_out():
     exact = SESSION + timedelta(days=14)
     item = surface(SESSION, [E1, exact, E2], rows(exact))
-    assert (item.method, item.skew.value, item.atm.value) == ("exact", Decimal("7.25"), Decimal("31.75"))
-    assert (item.call25.value, item.put25.value) == (Decimal("27.25"), Decimal("34.50"))
-    assert item.detail() == "exact · 2026-10-30 (14d)"
+    assert item.method == "exact"
+    assert levels(item) == {"call25": "27.25", "put25": "34.50", "call50": "29.00", "put50": "34.50"}
+    assert item.detail() == "14-DTE: exact · 2026-10-30 (14d)"
 
 
 def test_surface_without_brackets_has_no_value():
     item = surface(SESSION, [E2], rows(E2))
-    assert (item.method, item.skew.value, item.atm.value) == ("none", None, None)
-    assert (item.call25.value, item.put25.value) == (None, None)
+    assert item.method == "none"
+    assert levels(item) == dict.fromkeys(REQUIRED[14])
     assert item.reason == "no expiry is listed 1 to 14 days out (2026-10-17 to 2026-10-30)"
-    assert item.call25.reason == item.reason
-    assert (
-        item.detail() == "no 14-DTE value · no expiry is listed 1 to 14 days out (2026-10-17 to 2026-10-30)"
-    )
+    assert item.level("call25").reason == item.reason
+    assert item.detail() == "14-DTE: none · no expiry is listed 1 to 14 days out (2026-10-17 to 2026-10-30)"
     late = surface(SESSION, [E1], rows(E1))
     assert late.reason == "no expiry is listed 14 to 65 days out (2026-10-30 to 2026-12-20)"
 
@@ -165,8 +178,11 @@ def test_an_expiry_without_every_reading_is_skipped_and_named():
     item = surface(SESSION, [E1, stray, E2], rows(E1) + one_strike(stray) + rows(E2))
     assert (item.method, item.expiries) == ("interpolated", (E1, E2))
     assert ([reading.expiry for reading in item.skipped], item.read) == ([stray], (E1, stray, E2))
-    assert (item.skew.value, item.atm.value) == (Decimal("7.25"), Decimal("31.75"))
-    assert item.detail() == "interpolated · 2026-10-25 (9d) → 2026-11-04 (19d) · skipped 2026-10-28 (12d)"
+    assert levels(item)["put25"] == "34.50"
+    assert (
+        item.detail()
+        == "14-DTE: interpolated · 2026-10-25 (9d) → 2026-11-04 (19d) · skipped 2026-10-28 (12d)"
+    )
     assert item.skipped[0].missing() == unread(stray, 12)
 
 
@@ -180,20 +196,20 @@ def test_a_stray_expiry_14_days_out_is_skipped_on_both_sides():
 def test_without_a_readable_expiry_on_a_side_there_is_no_value():
     stray = SESSION + timedelta(days=12)
     item = surface(SESSION, [stray, E2], one_strike(stray) + rows(E2))
-    assert (item.method, item.skew.value, item.put25.value) == ("none", None, None)
+    assert (item.method, levels(item)["put25"]) == ("none", None)
     assert item.reason == (
         "no expiry listed 1 to 14 days out (2026-10-17 to 2026-10-30) gives all four readings: "
         + unread(stray, 12)
     )
     assert item.read == (stray,)  # E2 is sought only once E1 is found
-    assert item.detail() == f"no 14-DTE value · {item.reason}"
+    assert item.detail() == f"14-DTE: none · {item.reason}"
 
 
 def test_an_expiry_lacking_one_reading_is_skipped_too():
     # E2 lists no put out of the money beyond -0.45: nothing brackets -0.25 there.
     partial = [row for row in rows(E2) if row.right == "call" or row.strike >= 150]
     item = surface(SESSION, [E1, E2], rows(E1) + partial)
-    assert (item.method, item.atm.value, item.call25.value) == ("none", None, None)
+    assert (item.method, levels(item)["call50"]) == ("none", None)
     assert item.reason == (
         "no expiry listed 14 to 65 days out (2026-10-30 to 2026-12-20) gives all four readings: at "
         "2026-11-04 (19d) put -0.25: no usable put has delta -0.25 and no two adjacent ones bracket it"
@@ -201,4 +217,39 @@ def test_an_expiry_lacking_one_reading_is_skipped_too():
     later = SESSION + timedelta(days=40)
     found = surface(SESSION, [E1, E2, later], rows(E1) + partial + rows(later))
     assert found.expiries == (E1, later) and [reading.expiry for reading in found.skipped] == [E2]
-    assert found.skew.value == Decimal("7.25")
+    assert levels(found)["put25"] == "34.50"
+
+
+def test_at_30_days_an_expiry_needs_only_the_two_50_delta_readings():
+    # E2 lacks the put at -0.25 but gives both 50-delta readings: a 30-DTE bracket, not a 14-DTE one.
+    partial = [row for row in rows(E2) if row.right == "call" or row.strike >= 150]
+    later = SESSION + timedelta(days=40)
+    item = surface(SESSION, [E1, E2, later], rows(E1) + partial + rows(later, level="0.021"), TERM_HORIZON)
+    assert (item.horizon, item.method, item.expiries, item.skipped) == (30, "interpolated", (E2, later), ())
+    assert item.targets == ("call50", "put50")
+    # 29.00 and 31.10 at 19 and 40 days: 29.00 + 2.10 x 11/21 = 30.10; the put 34.50 and 36.60: 35.60.
+    assert levels(item) == {"call50": "30.10", "put50": "35.60"}
+    assert item.detail() == "30-DTE: interpolated · 2026-11-04 (19d) → 2026-11-25 (40d)"
+    exact = SESSION + timedelta(days=30)
+    assert surface(SESSION, [E2, exact, later], rows(exact), TERM_HORIZON).method == "exact"
+
+
+def test_at_30_days_a_stray_expiry_is_skipped_for_its_50_delta_readings_alone():
+    stray = SESSION + timedelta(days=26)
+    later = SESSION + timedelta(days=40)
+    item = surface(SESSION, [E2, stray, later], rows(E2) + one_strike(stray) + rows(later), TERM_HORIZON)
+    assert (item.expiries, [reading.expiry for reading in item.skipped]) == ((E2, later), [stray])
+    assert item.skipped[0].missing(item.targets) == unread(stray, 26, (("call", "+0.50"), ("put", "-0.50")))
+    alone = surface(SESSION, [stray, later], one_strike(stray) + rows(later), TERM_HORIZON)
+    assert alone.reason == (
+        "no expiry listed 1 to 30 days out (2026-10-17 to 2026-11-15) gives both 50Δ readings: "
+        + unread(stray, 26, (("call", "+0.50"), ("put", "-0.50")))
+    )
+    none = surface(SESSION, [E1, E2], rows(E1) + rows(E2), TERM_HORIZON)
+    assert none.reason == "no expiry is listed 30 to 65 days out (2026-11-15 to 2026-12-20)"
+    assert levels(none) == {"call50": None, "put50": None}
+
+
+def test_a_horizon_is_14_or_30_days():
+    with pytest.raises(ValueError, match="the horizon must be one of 14, 30 days"):
+        surface(SESSION, [E1, E2], rows(E1) + rows(E2), 21)

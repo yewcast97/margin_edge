@@ -7,18 +7,21 @@ ticker; a file that fails is reported, never skipped silently, until it is renam
 ``fetched_at``, then by name) is the session's chain; a session without one is not
 fetched. The newest valid prices file is the ticker's prices; older ones are validated and
 never read. After validation a chain keeps in memory only what the derivation reads, the
-rows of its two bracket expiries and of any expiry passed over before them, however many
-expiries its file holds.
+rows of the expiries its levels rest on at either horizon (its brackets and any expiry
+passed over before them), however many expiries its file holds.
 
-``derive`` gives each fetched session its row: the 14-DTE values (``surface``), the
-percentiles of the skew and the ATM IV over the ``percentile.WINDOW`` sessions ending with
-it, the stock's daily return (``prices``), and the correlations of the return with the
-changes of the 14-DTE 25Δ call and put IVs over the ``correlation.WINDOW`` sessions ending
-with it (``correlation``), so a row rests on the whole archive, not only on a report's
-window. ``formatted/{TICKER}/volatility.csv`` holds every fetched session in date order,
-with every value the percentiles and correlations rest on, and is rewritten from ``raw/``
-by ``record``. ``SERIES`` names the six series of a row that a report states, each with its
-label, its value and the reason it is blank.
+``derive`` gives each fetched session its row: its levels at 14 and 30 days (``surface``);
+the indicators computed from those rounded levels (``indicators``), the 14-DTE skew and ATM
+IV, the 30-DTE ATM IV and the term structure; the percentiles of the skew, the 14-DTE ATM IV
+and the term structure over the ``percentile.WINDOW`` sessions ending with it; the stock's
+daily return (``prices``); and the correlations of the return with the changes of the
+14-DTE 25Δ call and put IVs over the ``correlation.WINDOW`` sessions ending with it
+(``correlation``), so a row rests on the whole archive, not only on a report's window.
+``formatted/{TICKER}/volatility.csv`` caches every fetched session's levels in date order,
+and nothing derived from them: the closes, the seven IV levels, the bracket expiries and the
+sources, from which every indicator, percentile, return and correlation is computed again.
+``record`` rewrites it from ``raw/``. ``SERIES`` names the nine series of a row that a
+report states, each with its label, its value and the reason it is blank.
 """
 
 import csv
@@ -27,7 +30,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
-from fractions import Fraction
+from functools import partial
 from pathlib import Path
 from typing import Final, Literal
 
@@ -35,52 +38,35 @@ from market_state_research.common.layout import DataLayout, listed, write_file
 from market_state_research.common.sessions import previous_session, session_window
 from market_state_research.common.times import et_isoformat
 
-from . import chain, prices
+from . import chain, indicators, prices
 from .chain import Chain, read_chain
 from .correlation import correlation, iv_change
 from .percentile import WINDOW, Percentile, percentile
 from .prices import Bar, Prices, daily_return, read_prices
-from .surface import HORIZON, ExpiryReading, Surface, Target, Value, rounded, surface
+from .surface import HORIZON, HORIZONS, REQUIRED, TERM_HORIZON, Surface, Value, surface
 
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent / "data"
 CSV_NAME = "volatility.csv"
 RAW_NAMES = "chain_DATE_TOKEN.json.gz or prices_DATE_TOKEN.json.gz"
 CALL_LABEL = f"{HORIZON}-DTE call IV"
 PUT_LABEL = f"{HORIZON}-DTE put IV"
-_BRACKET_COLUMNS = (
-    "expiry_{k}",
-    "days_to_expiry_{k}",
-    "call25_iv_{k}_pct",
-    "put25_iv_{k}_pct",
-    "call50_iv_{k}_pct",
-    "put50_iv_{k}_pct",
-    "skew_{k}_pp",
-    "atm_iv_{k}_pct",
-)
 CSV_COLUMNS = (
     "date",
-    "skew_14d_pp",
-    "atm_iv_14d_pct",
-    "skew_14d_percentile",
-    "atm_iv_14d_percentile",
-    "call25_iv_14d_pct",
-    "put25_iv_14d_pct",
-    "daily_return_pct",
-    "call25_corr_15s",
-    "put25_corr_15s",
-    "method",
-    *(column.format(k=1) for column in _BRACKET_COLUMNS),
-    *(column.format(k=2) for column in _BRACKET_COLUMNS),
-    "skipped_expiries",
-    "skew_window_n",
-    "atm_window_n",
+    "close",
     "adj_close",
     "previous_adj_close",
+    *(f"{target}_iv_{HORIZON}d_pct" for target in REQUIRED[HORIZON]),
+    *(f"{target}_iv_{TERM_HORIZON}d_pct" for target in REQUIRED[TERM_HORIZON]),
+    f"expiry_{HORIZON}d_1",
+    f"expiry_{HORIZON}d_2",
+    f"skipped_{HORIZON}d",
+    f"expiry_{TERM_HORIZON}d_1",
+    f"expiry_{TERM_HORIZON}d_2",
+    f"skipped_{TERM_HORIZON}d",
     "fetched_at",
     "source",
     "price_source",
 )
-_POINTS: tuple[Target, ...] = ("call25", "put25", "call50", "put50")
 
 
 @dataclass(frozen=True)
@@ -121,13 +107,20 @@ class Raw:
 
 @dataclass(frozen=True)
 class Row:
-    """One fetched session: its chain, its 14-DTE values, their percentiles, the stock's bars
-    and daily return, and the two correlations."""
+    """One fetched session: its chain, its levels at 14 days (``near``) and at 30 (``far``),
+    the indicators computed from them and their percentiles, the stock's bars and daily
+    return, and the two correlations."""
 
     capture: Capture
-    surface: Surface
+    near: Surface
+    far: Surface
+    skew: Value
+    atm: Value
+    far_atm: Value
+    term: Value
     skew_percentile: Percentile
     atm_percentile: Percentile
+    term_percentile: Percentile
     bar: Bar | None
     previous_bar: Bar | None
     daily_return: Value
@@ -147,46 +140,74 @@ class Row:
     def source(self) -> str:
         return self.capture.source
 
+    @property
+    def detail(self) -> str:
+        """One line for people: how each horizon's levels were read, or why there are none."""
+        return f"{self.near.detail()}; {self.far.detail()}"
+
 
 Series = Literal[
     "skew_14d_percentile",
     "atm_iv_14d_percentile",
+    "term_structure_percentile",
     "skew_14d_pp",
     "atm_iv_14d_pct",
+    "atm_iv_30d_pct",
+    "term_structure_pp",
     "call25_corr_15s",
     "put25_corr_15s",
 ]
 SERIES: Final[tuple[Series, ...]] = (
     "skew_14d_percentile",
     "atm_iv_14d_percentile",
+    "term_structure_percentile",
     "skew_14d_pp",
     "atm_iv_14d_pct",
+    "atm_iv_30d_pct",
+    "term_structure_pp",
     "call25_corr_15s",
     "put25_corr_15s",
 )
 LABELS: Final[Mapping[Series, str]] = {
     "skew_14d_percentile": "skew percentile",
     "atm_iv_14d_percentile": "ATM IV percentile",
+    "term_structure_percentile": "term structure percentile",
     "skew_14d_pp": "14-DTE skew",
     "atm_iv_14d_pct": "14-DTE ATM IV",
+    "atm_iv_30d_pct": "30-DTE ATM IV",
+    "term_structure_pp": "term structure",
     "call25_corr_15s": "return–call IV correlation",
     "put25_corr_15s": "return–put IV correlation",
 }
+# The percentile series, each with the percentile it states.
+PERCENTILES: Final[Mapping[Series, Callable[[Row], Percentile]]] = {
+    "skew_14d_percentile": lambda row: row.skew_percentile,
+    "atm_iv_14d_percentile": lambda row: row.atm_percentile,
+    "term_structure_percentile": lambda row: row.term_percentile,
+}
+_OTHERS: Final[Mapping[Series, Callable[[Row], Value]]] = {
+    "skew_14d_pp": lambda row: row.skew,
+    "atm_iv_14d_pct": lambda row: row.atm,
+    "atm_iv_30d_pct": lambda row: row.far_atm,
+    "term_structure_pp": lambda row: row.term,
+    "call25_corr_15s": lambda row: row.call25_correlation,
+    "put25_corr_15s": lambda row: row.put25_correlation,
+}
+
+
+def _value(series: Series, row: Row) -> Decimal | None:
+    return PERCENTILES[series](row).value if series in PERCENTILES else _OTHERS[series](row).value
+
+
+def _reason(series: Series, row: Row) -> str | None:
+    return PERCENTILES[series](row).reason if series in PERCENTILES else _OTHERS[series](row).reason
+
+
 VALUES: Final[Mapping[Series, Callable[[Row], Decimal | None]]] = {
-    "skew_14d_percentile": lambda row: row.skew_percentile.value,
-    "atm_iv_14d_percentile": lambda row: row.atm_percentile.value,
-    "skew_14d_pp": lambda row: row.surface.skew.value,
-    "atm_iv_14d_pct": lambda row: row.surface.atm.value,
-    "call25_corr_15s": lambda row: row.call25_correlation.value,
-    "put25_corr_15s": lambda row: row.put25_correlation.value,
+    series: partial(_value, series) for series in SERIES
 }
 REASONS: Final[Mapping[Series, Callable[[Row], str | None]]] = {
-    "skew_14d_percentile": lambda row: row.skew_percentile.reason,
-    "atm_iv_14d_percentile": lambda row: row.atm_percentile.reason,
-    "skew_14d_pp": lambda row: row.surface.skew.reason,
-    "atm_iv_14d_pct": lambda row: row.surface.atm.reason,
-    "call25_corr_15s": lambda row: row.call25_correlation.reason,
-    "put25_corr_15s": lambda row: row.put25_correlation.reason,
+    series: partial(_reason, series) for series in SERIES
 }
 
 
@@ -195,10 +216,14 @@ def csv_path(layout: DataLayout, ticker: str) -> Path:
 
 
 def trimmed(item: Chain) -> Chain:
-    """``item`` with the rows and traded records of the expiries its values read only (its
-    brackets and the expiries passed over before them), from which ``surface`` gives the same
-    values as from the whole chain."""
-    kept = set(surface(item.session, item.listed, item.rows).read)
+    """``item`` with the rows and traded records of the expiries its levels read only (at each
+    horizon, its brackets and the expiries passed over before them), from which ``surface``
+    gives the same levels as from the whole chain."""
+    kept = {
+        expiry
+        for horizon in HORIZONS
+        for expiry in surface(item.session, item.listed, item.rows, horizon).read
+    }
     return replace(
         item,
         rows=tuple(row for row in item.rows if row.expiry in kept),
@@ -239,32 +264,47 @@ def select_prices(files: Iterable[PriceFile]) -> PriceFile | None:
     return max(files, key=lambda item: (item.prices.fetched_at, item.source), default=None)
 
 
+def _valued(values: Mapping[date, Value]) -> dict[date, Decimal]:
+    """The sessions of ``values`` that have a value, with it."""
+    return {day: item.value for day, item in values.items() if item.value is not None}
+
+
 def derive(sessions: Mapping[date, Capture], prices_file: PriceFile | None = None) -> dict[date, Row]:
     """Each fetched session's row, by date (see the module docstring)."""
-    surfaces = {
-        day: surface(day, capture.chain.listed, capture.chain.rows)
-        for day, capture in sorted(sessions.items())
+    ordered = sorted(sessions.items())
+    near = {day: surface(day, capture.chain.listed, capture.chain.rows, HORIZON) for day, capture in ordered}
+    far = {
+        day: surface(day, capture.chain.listed, capture.chain.rows, TERM_HORIZON) for day, capture in ordered
     }
-    skews = {day: item.skew.value for day, item in surfaces.items() if item.skew.value is not None}
-    atms = {day: item.atm.value for day, item in surfaces.items() if item.atm.value is not None}
+    skews = {day: indicators.skew(item) for day, item in near.items()}
+    atms = {day: indicators.atm(item) for day, item in near.items()}
+    far_atms = {day: indicators.atm(item) for day, item in far.items()}
+    terms = {day: indicators.term(near[day], far[day]) for day in near}
     found = None if prices_file is None else prices_file.prices
-    returns = {day: daily_return(found, day) for day in surfaces}
-    calls = {day: item.call25.value for day, item in surfaces.items()}
-    puts = {day: item.put25.value for day, item in surfaces.items()}
-    call_changes = {day: iv_change(calls, day, CALL_LABEL) for day in surfaces}
-    put_changes = {day: iv_change(puts, day, PUT_LABEL) for day in surfaces}
+    returns = {day: daily_return(found, day) for day in near}
+    calls = {day: item.level("call25").value for day, item in near.items()}
+    puts = {day: item.level("put25").value for day, item in near.items()}
+    call_changes = {day: iv_change(calls, day, CALL_LABEL) for day in near}
+    put_changes = {day: iv_change(puts, day, PUT_LABEL) for day in near}
+    ranked = {"skew": _valued(skews), "atm": _valued(atms), "term": _valued(terms)}
 
     def fetched(day: date) -> bool:
         return day in sessions
 
     rows: dict[date, Row] = {}
-    for day, item in surfaces.items():
+    for day in near:
         window = session_window(day, WINDOW)
         rows[day] = Row(
             capture=sessions[day],
-            surface=item,
-            skew_percentile=percentile(window, fetched, skews),
-            atm_percentile=percentile(window, fetched, atms),
+            near=near[day],
+            far=far[day],
+            skew=skews[day],
+            atm=atms[day],
+            far_atm=far_atms[day],
+            term=terms[day],
+            skew_percentile=percentile(window, fetched, ranked["skew"]),
+            atm_percentile=percentile(window, fetched, ranked["atm"]),
+            term_percentile=percentile(window, fetched, ranked["term"]),
             bar=None if found is None else found.bar(day),
             previous_bar=None if found is None else found.bar(previous_session(day)),
             daily_return=returns[day],
@@ -279,56 +319,38 @@ def _text(value: Decimal | None) -> str:
     return "" if value is None else str(value)
 
 
-def _percent(value: Fraction | None) -> str:
-    return "" if value is None else str(rounded(value * 100))
+def _bar_text(bar: Bar | None, name: str) -> str:
+    return "" if bar is None else bar.values[name]
 
 
-def _adjusted(bar: Bar | None) -> str:
-    return "" if bar is None else bar.values["adjClose"]
-
-
-def _reading_cells(reading: ExpiryReading | None) -> list[str]:
-    if reading is None:
-        return [""] * len(_BRACKET_COLUMNS)
-    skew, atm = reading.skew, reading.atm
+def _brackets(item: Surface) -> list[str]:
+    """The bracket expiries (the second blank for ``exact``, both for ``none``) and the expiries
+    skipped, separated by spaces."""
+    expiries = [expiry.isoformat() for expiry in item.expiries]
     return [
-        reading.expiry.isoformat(),
-        str(reading.days),
-        *(_percent(reading.points[target].iv) for target in _POINTS),
-        "" if skew is None else str(rounded(skew)),
-        "" if atm is None else str(rounded(atm)),
+        *expiries,
+        *[""] * (2 - len(expiries)),
+        " ".join(reading.expiry.isoformat() for reading in item.skipped),
     ]
 
 
 def csv_text(rows: Iterable[Row]) -> str:
-    """The CSV of ``rows`` in the given order: rounded decimals, Tiingo's adjusted closes as it
-    wrote them, New York ISO times."""
+    """The CSV of ``rows`` in the given order, levels only: Tiingo's closes as it wrote them, the
+    rounded IV levels, the bracket expiries, New York ISO times and the sources."""
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(CSV_COLUMNS)
     for row in rows:
-        item = row.surface
-        readings = list(item.readings) + [None] * (2 - len(item.readings))
         writer.writerow(
             [
                 row.date.isoformat(),
-                _text(item.skew.value),
-                _text(item.atm.value),
-                _text(row.skew_percentile.value),
-                _text(row.atm_percentile.value),
-                _text(item.call25.value),
-                _text(item.put25.value),
-                _text(row.daily_return.value),
-                _text(row.call25_correlation.value),
-                _text(row.put25_correlation.value),
-                item.method,
-                *_reading_cells(readings[0]),
-                *_reading_cells(readings[1]),
-                " ".join(reading.expiry.isoformat() for reading in item.skipped),
-                "" if row.skew_percentile.value is None else str(row.skew_percentile.n),
-                "" if row.atm_percentile.value is None else str(row.atm_percentile.n),
-                _adjusted(row.bar),
-                _adjusted(row.previous_bar),
+                _bar_text(row.bar, "close"),
+                _bar_text(row.bar, "adjClose"),
+                _bar_text(row.previous_bar, "adjClose"),
+                *(_text(row.near.level(target).value) for target in row.near.targets),
+                *(_text(row.far.level(target).value) for target in row.far.targets),
+                *_brackets(row.near),
+                *_brackets(row.far),
                 et_isoformat(row.fetched_at),
                 row.source,
                 row.price_source or "",

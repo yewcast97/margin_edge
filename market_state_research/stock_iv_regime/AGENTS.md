@@ -1,10 +1,10 @@
 # Stock IV regime
 
 This domain records, per ticker and per XNYS session, option-implied volatility indicators
-from EODHD's end-of-day option chains, the percentiles of two of them over the 252 sessions
-ending at each session, and the correlations of the stock's daily return (from Tiingo's
-end-of-day prices) with the day-over-day changes of two of them, over a look-back window,
-and charts them. This file says what the work aims at, what its table and reports hold and
+from EODHD's end-of-day option chains, the percentiles of three of them over the 252
+sessions ending at each session, and the correlations of the stock's daily return (from
+Tiingo's end-of-day prices) with the day-over-day changes of two implied volatilities, over a
+look-back window, and charts them. This file says what the work aims at, what its table and reports hold and
 mean, how each value is obtained, and how the code and the raw files are built, with the
 provider facts verified live. The operations are in [PROCEDURE.md](PROCEDURE.md). The
 conventions every domain shares (the layout, the three sections of `data/`, selection,
@@ -23,26 +23,33 @@ advice: its reading is the user's.
 
 ## The indicators
 
-| Indicator | Column | Meaning | Unit |
+| Indicator | Series | Meaning | Unit |
 | --- | --- | --- | --- |
 | Skew percentile | `skew_14d_percentile` | Where the session's 14-DTE skew lies among the 252 XNYS sessions ending with it (below). | 0–100 |
 | ATM IV percentile | `atm_iv_14d_percentile` | Where the session's 14-DTE ATM IV lies among the 252 XNYS sessions ending with it. | 0–100 |
+| Term structure percentile | `term_structure_percentile` | Where the session's term structure lies among the 252 XNYS sessions ending with it. | 0–100 |
 | 14-DTE 25Δ skew | `skew_14d_pp` | The implied volatility of the put at delta −0.25 minus that of the call at +0.25, at 14 calendar days to expiry, sign kept: positive where puts are dearer. | percentage points (pp) |
 | 14-DTE ATM IV | `atm_iv_14d_pct` | The mean of the implied volatility of the call at delta +0.50 and of the put at −0.50, at 14 calendar days to expiry. | percent |
+| 30-DTE ATM IV | `atm_iv_30d_pct` | The same at 30 calendar days to expiry. | percent |
+| Term structure | `term_structure_pp` | The 30-DTE ATM IV minus the 14-DTE ATM IV, sign kept: positive where the farther options are dearer. | percentage points (pp) |
 | Return–call IV correlation | `call25_corr_15s` | The correlation, over the 15 XNYS sessions ending with the session, of the stock's daily return with the change of the 14-DTE 25Δ call IV since the previous session (below). | −1 to 1 |
 | Return–put IV correlation | `put25_corr_15s` | The same with the 14-DTE 25Δ put IV. | −1 to 1 |
 
-The percentiles and the correlations are the domain's aim; the two values are what the
-percentiles rank. Every value they rest on is archived in the table: the 14-DTE 25Δ call
-IV (`call25_iv_14d_pct`) and put IV (`put25_iv_14d_pct`), the IV at +0.25Δ and −0.25Δ in
-percent, interpolated to 14 days like the skew; the daily return (`daily_return_pct`); and
-the two adjusted closes it is computed from.
+The percentiles and the correlations are the domain's aim; the skew, the 14-DTE ATM IV and
+the term structure are what the percentiles rank, and the 30-DTE ATM IV is the term
+structure's farther end. Each series is named as `record` and the reports state it. Every
+value is computed from levels the table caches, and the table holds no value derived from
+them (The formatted table): the 14-DTE IVs of the call at +0.25Δ
+(`call25_iv_14d_pct`) and +0.50Δ and of the put at −0.25Δ (`put25_iv_14d_pct`) and −0.50Δ,
+the 30-DTE IVs of the call at +0.50Δ and of the put at −0.50Δ, in percent, and the stock's
+closes.
 
 ## Method
 
 Everything here is computed from one session's own chain (the raw unit below) and the
 newest prices file, with exact fractions, and rounded half-even once at the end; zero is
-written without a sign (`surface.py`, `percentile.py`, `prices.py`, `correlation.py`).
+written without a sign (`surface.py`, `indicators.py`, `percentile.py`, `prices.py`,
+`correlation.py`).
 
 - **A quote is usable** when its `volatility` (IV) is above 0, its `delta` is given and its
   `ask` is above 0.
@@ -52,21 +59,27 @@ written without a sign (`surface.py`, `percentile.py`, `prices.py`, `correlation
   linearly in delta between the first adjacent pair whose deltas lie on either side of it.
   Nothing is extrapolated: without such a contract or pair there is no reading, and the
   reason says which type and target lack one.
-- **At one expiry**, the 25Δ skew is (put IV at −0.25 − call IV at +0.25) × 100, the ATM IV
-  is (call IV at +0.50 + put IV at −0.50) / 2 × 100, and the 25Δ call and put IVs are the
-  IVs at +0.25 and −0.25 × 100.
-- **At 14 days**: the brackets are expiries that give all four readings (call +0.25, put
-  −0.25, call +0.50, put −0.50). E1 is the last such expiry the session lists 1 to 14
-  calendar days out and E2 the first such one it lists 14 or more days out (within 65
-  days, the window a raw file keeps). An expiry nearer to 14 days that lacks a reading (a
-  stray listing of one strike, a side without usable quotes) is skipped, and the report
-  names it with why. An expiry exactly 14 days out that gives every reading is both
-  brackets and gives its own values (`exact`); otherwise each value is interpolated
-  linearly in calendar days between E1's and E2's (`interpolated`). A session without E1
-  or E2 has no value (`none`, with the reason, which names any expiry skipped); a session
-  with both has all four. Nothing is extrapolated or carried forward. Every value is rounded to two decimal places;
-  the per-expiry readings in the table are rounded the same way, for reading only (the
-  14-DTE value is computed from the exact readings).
+- **The levels of a horizon** are the IVs × 100 (percent) at its target deltas: at 14 days
+  the call at +0.25 and +0.50 and the put at −0.25 and −0.50; at 30 days the call at +0.50
+  and the put at −0.50.
+- **At a horizon of H days** (14 or 30), the brackets are expiries that give every reading
+  of the horizon (all four at 14 days, the two 50Δ readings at 30). E1 is the last such
+  expiry the session lists 1 to H calendar days out and E2 the first such one it lists H or
+  more days out (within 65 days, the window a raw file keeps). An expiry nearer to H that
+  lacks a reading (a stray listing of one strike, a side without usable quotes) is skipped,
+  and the report names it with why. An expiry exactly H days out that gives every reading is
+  both brackets and gives its own levels (`exact`); otherwise each level is interpolated
+  linearly in calendar days between E1's and E2's (`interpolated`). A session without E1 or
+  E2 has no level at H (`none`, with the reason, which names any expiry skipped); a session
+  with both has every level of H. Nothing is extrapolated or carried forward. Every level is
+  rounded to two decimal places.
+- **The indicators** are computed exactly from the rounded levels and rounded once to two
+  decimal places (`indicators.py`): the 14-DTE 25Δ skew = put IV at −0.25 − call IV at
+  +0.25; an ATM IV = (call IV at +0.50 + put IV at −0.50) / 2; the term structure = ((30-DTE
+  call IV at +0.50 + put IV at −0.50) − (14-DTE call IV at +0.50 + put IV at −0.50)) / 2,
+  the 30-DTE ATM IV minus the 14-DTE one taken before either is rounded. An indicator one of
+  whose levels is missing has none, with that level's reason. The report's per-expiry
+  readings (a bracket's skew and ATM IV) are rounded the same way, for reading only.
 - **Percentile of session D**: over the 252 XNYS sessions ending with D, 100 × the number
   of the other 251 sessions whose value is strictly below D's / n, n being the number of
   those sessions that have a value; equal values are not counted. It compares the rounded
@@ -92,10 +105,13 @@ written without a sign (`surface.py`, `percentile.py`, `prices.py`, `correlation
   The correlations have no percentile.
 
 A name with monthly expiries only (AEP; possibly others) lists an expiry 1 to 14 days out
-only in the ten or so sessions before each monthly expiry, so its 14-DTE values exist on
-those sessions alone: its percentiles then rest on few sessions, and it never has the 16
-consecutive valued sessions a correlation needs. Every other session is a gap with the
-reason `no expiry is listed 1 to 14 days out (…)`, which the chart's banner lists.
+only in the ten or so sessions before each monthly expiry, so its 14-DTE levels, and with
+them its skew, its 14-DTE ATM IV and its term structure, exist on those sessions alone: its
+percentiles then rest on few sessions, and it never has the 16 consecutive valued sessions
+a correlation needs. Every other session is a gap with the reason `no expiry is listed 1 to
+14 days out (…)`, which the chart's banner lists; its 30-DTE ATM IV lacks only the sessions
+whose next monthly expiry lies more than 30 days out (`no expiry is listed 1 to 30 days out
+(…)`).
 
 ## Sessions, chains, prices, window and span
 
@@ -120,27 +136,24 @@ reason `no expiry is listed 1 to 14 days out (…)`, which the chart's banner li
 
 `formatted/{TICKER}/volatility.csv`, rewritten from `raw/` by `record` and replaced only when
 its bytes would change: one row per fetched session, those before the window included,
-ascending by date, holding every value the percentiles and the correlations rest on. Python
-compares it by bytes and never parses it. Columns, in order:
+ascending by date. It caches the levels and nothing derived from them: no indicator,
+percentile, return or correlation, each of which `record` and `show` compute again from
+these levels by the Method (an absent level is blank, its reason in the report's gaps).
+Python compares it by bytes and never parses it. Columns, in order:
 
 | Column | Contents |
 | --- | --- |
 | `date` | The session, `YYYY-MM-DD`. |
-| `skew_14d_pp`, `atm_iv_14d_pct` | The 14-DTE skew and ATM IV, two decimal places, or blank. |
-| `skew_14d_percentile`, `atm_iv_14d_percentile` | The percentiles, one decimal place, or blank. |
-| `call25_iv_14d_pct`, `put25_iv_14d_pct` | The 14-DTE 25Δ call and put IVs, two decimal places, or blank: the values whose changes the correlations take. |
-| `daily_return_pct` | The daily return, four decimal places, or blank. |
-| `call25_corr_15s`, `put25_corr_15s` | The correlations, two decimal places, or blank. |
-| `method` | `exact`, `interpolated` or `none`. |
-| `expiry_k`, `days_to_expiry_k` (k = 1, 2) | E1 and E2 and their calendar days out; bracket 2 is blank for `exact`, both for `none`. |
-| `call25_iv_k_pct`, `put25_iv_k_pct`, `call50_iv_k_pct`, `put50_iv_k_pct` | The IV readings at bracket k, in percent, or blank. |
-| `skew_k_pp`, `atm_iv_k_pct` | The two values at bracket k, or blank. |
-| `skipped_expiries` | The expiries skipped as brackets for lacking a reading, ascending, separated by spaces, or blank. |
-| `skew_window_n`, `atm_window_n` | The n each percentile rests on, or blank without a percentile. |
-| `adj_close`, `previous_adj_close` | The adjusted closes of the session and of the XNYS session before it, as Tiingo wrote them, or blank. |
+| `close`, `adj_close` | Tiingo's close and adjusted close of the session, as it wrote them, or blank. |
+| `previous_adj_close` | The adjusted close of the XNYS session before it, which the daily return also rests on, or blank. |
+| `call25_iv_14d_pct`, `put25_iv_14d_pct`, `call50_iv_14d_pct`, `put50_iv_14d_pct` | The 14-DTE levels: the IVs of the call at +0.25Δ, the put at −0.25Δ, the call at +0.50Δ and the put at −0.50Δ, in percent, two decimal places, or blank. |
+| `call50_iv_30d_pct`, `put50_iv_30d_pct` | The 30-DTE levels: the IVs of the call at +0.50Δ and the put at −0.50Δ, likewise. |
+| `expiry_14d_1`, `expiry_14d_2` | The 14-DTE brackets E1 and E2; E2 is blank for `exact`, both for `none`. |
+| `skipped_14d` | The expiries skipped as 14-DTE brackets for lacking a reading, ascending, separated by spaces, or blank. |
+| `expiry_30d_1`, `expiry_30d_2`, `skipped_30d` | The same at 30 days. |
 | `fetched_at` | When the chain was fetched, ISO 8601 with its New York offset. |
 | `source` | The raw file name of the session's chain. |
-| `price_source` | The raw file name of the prices the row's bars come from, or blank. |
+| `price_source` | The raw file name of the prices the row's closes come from, or blank. |
 
 ## Reports
 
@@ -152,27 +165,29 @@ The report is one self-contained page (the chart library inlined; it opens offli
 window, and one whole: its two charts are served and read together, never one alone.
 
 - Two charts on one time axis, one above the other (the line between them can be dragged):
-  the skew percentile and the ATM IV percentile on a fixed 0–100 scale, and the return–call
-  and return–put IV correlations on a fixed −1 to 1 scale with a line at 0. Each draws the
-  stock's adjusted close under its two series, dotted, on a left scale of its own: the
+  the skew, ATM IV and term structure percentiles on a fixed 0–100 scale, and the
+  return–call and return–put IV correlations on a fixed −1 to 1 scale with a line at 0. Each
+  draws the stock's adjusted close under its series, dotted, on a left scale of its own: the
   context the indicators are read against, never compared with them by height, as the two
   scales are aligned by nothing. A line breaks where a session has no value; a dot marks
-  each value beside a break. The 14-DTE skew and ATM IV that the percentiles rank are in the
-  data table, not charted.
-- A readout, under the pointer or stepped with the arrow keys, naming the session, its
-  method and bracket expiries (`interpolated · 2026-10-16 (11d) → 2026-10-23 (18d) ·
-  skipped 2026-10-19 (14d)`) or why it has none, and six values (`—` where blank): the two
-  percentiles with their n, the two correlations, the adjusted close and the daily return.
+  each value beside a break. The skew, the ATM IVs and the term structure that the
+  percentiles rank are in the data table, not charted.
+- A readout, under the pointer or stepped with the arrow keys, naming the session, how each
+  horizon's levels were read, its method and bracket expiries (`14-DTE: interpolated ·
+  2026-10-16 (11d) → 2026-10-23 (18d) · skipped 2026-10-19 (14d); 30-DTE: interpolated ·
+  2026-11-13 (28d) → 2026-11-20 (35d)`), or why there are none, and seven values (`—` where
+  blank): the three percentiles with their n, the two correlations, the adjusted close and
+  the daily return.
   It keeps the height of its tallest session, so the chart never moves as the session shown
   changes. Fit all shows the whole window again.
 - A header with the ticker, `as_of`, coverage (fetched sessions of the N), the generation
   time, the table's path, the prices file and the sources; banners listing the missing
   sessions and, per series, the fetched sessions without a value.
-- A collapsible data table with one row per window session (the six series, the 14-DTE call
-  and put IVs, the daily return and the adjusted close, the method with each bracket's
-  readings and the strikes each IV was read at, the fetch time and the raw file; `missing`
-  where absent), its header generated with the rows, followed by the gaps: each fetched
-  window session's series without a value, with the reason.
+- A collapsible data table with one row per window session (the nine series, the 14-DTE 25Δ
+  call and put IVs, the daily return and the adjusted close, each horizon's method with each
+  bracket's readings and the strikes each IV was read at, the fetch time and the raw file;
+  `missing` where absent), its header generated with the rows, followed by the gaps: each
+  fetched window session's series without a value, with the reason.
 - A footer stating the method and the chart library's attribution.
 
 The twin holds the same statements and tables as Markdown text.
@@ -224,10 +239,11 @@ reads this domain's `raw/` ([explore_hypothesis/AGENTS.md](../../explore_hypothe
 | `api` | The EODHD queries and their URLs, one page per query (never a second page), page parsing with numbers kept as literal text, the record checks (OCC symbol against expiry, type and strike; number, date and word forms). |
 | `chain` | The chain raw unit: its bytes (`dump`, `load`), its name, its window (`WINDOW_DAYS`), every rule (`check_chain`) and the proof that a contracts listing is a session's (`proof_problem`). |
 | `prices` | The prices raw unit: its bytes, its name, Tiingo's bars (`parse_bars`, `check_bar`), every rule (`check_prices`) and the daily return. |
-| `surface` | The method: IV at a target delta, the per-expiry values, the brackets (expiries without every reading skipped), the 14-DTE values. |
+| `surface` | The method: IV at a target delta, the per-expiry readings, the brackets (expiries without every reading of the horizon skipped), the levels at 14 and at 30 days. |
+| `indicators` | The skew, the ATM IVs and the term structure, from the rounded levels. |
 | `percentile` | The 252-session percentile. |
 | `correlation` | The IV change and the 15-session correlation. |
-| `store` | Reading and validating every raw file of a ticker, the selection of each session's chain and of the prices, the rows (values, percentiles, returns and correlations over the whole archive), the six series a report states (`SERIES`), the CSV. |
+| `store` | Reading and validating every raw file of a ticker, the selection of each session's chain and of the prices, the rows (levels, indicators, percentiles, returns and correlations over the whole archive), the nine series a report states (`SERIES`), the CSV of levels. |
 | `chart` and `templates/chart.html` | The report (two charts on one page) and its twin, over `common.chart`: the vendored TradingView Lightweight Charts 5.2.1, pinned by SHA-256, and the page text helpers. |
 | `fetch` | The two ways a chain is fetched (below), writing each chain as it completes, and the prices request. |
 | `workflow` | `plan`, `fetch`, `record`, `show`. |
@@ -252,15 +268,15 @@ of one JSON object with exactly these keys, in this order:
 | `rows` | Every contract of every listed expiry, usable or not, as the provider's items (`id`, `type`, `attributes`), numbers as the provider's literal text in JSON strings (`"0.2751"`). |
 | `traded` | `contracts` only: the `eod` records dated the session of the contracts last traded on it, within the window; else null. |
 
-Every expiry within the window is kept: the horizon (`surface.HORIZON`, 14) is a rule of
-the derivation, not of the file. Sizes and times measured on 2026-10-19: MU's chain of
+Every expiry within the window is kept: the horizons (`surface.HORIZONS`, 14 and 30 days)
+are rules of the derivation, not of the file. Sizes and times measured on 2026-10-19: MU's chain of
 2026-10-16 (Monday, Wednesday and Friday expiries) holds 11 expiries, 4,696 contracts and
 2,485 traded records, 0.2 MB gzipped, validated in 0.07 s; INTC's (Friday expiries, and
 one stray Monday) 8 expiries, 1,070 contracts and 812 traded records, 55 KB, 0.02 s. A
 filled 301-session span of a name like MU is thus about 60 MB, and every command validates
 it for about 20 seconds (`plan` over 301 chains of 5,400 contracts each took 15 s and
 240 MB of memory). After validation each chain keeps in memory only the rows of the
-expiries its values read, its brackets and any expiry skipped before them
+expiries its levels read at either horizon, its brackets and any expiry skipped before them
 (`store.trimmed`). The attributes kept are exactly `contract`, `exp_date`,
 `expiration_type`, `type`, `strike`, `bid`, `ask`, `volume`, `open_interest`, `volatility`,
 `delta` and `tradetime` (the `fields[...]` selection of every query).

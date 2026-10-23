@@ -106,8 +106,16 @@ def test_record_then_reuse(layout, clock):
     }
     assert [session["date"] for session in output["sessions"]] == ["2026-10-14", "2026-10-15", "2026-10-16"]
     latest = output["sessions"][-1]
-    assert latest["skew_14d_percentile"] is not None
+    assert latest["skew_14d_percentile"] is not None and latest["term_structure_percentile"] == "0.0"
     assert (latest["call25_iv_14d_pct"], latest["put25_iv_14d_pct"]) == ("27.25", "34.53")  # bump 0.0003
+    # (29.00 + 34.53) / 2 = 31.765 and (30.10 + 35.63) / 2 = 32.865, each rounded half-even once.
+    assert (latest["atm_iv_14d_pct"], latest["atm_iv_30d_pct"], latest["term_structure_pp"]) == (
+        "31.76",
+        "32.86",
+        "1.10",
+    )
+    assert (latest["method_14d"], latest["expiries_14d"]) == ("interpolated", ["2026-10-25", "2026-11-04"])
+    assert (latest["method_30d"], latest["expiries_30d"]) == ("interpolated", ["2026-11-04", "2026-11-25"])
     # Closes rise by 1 from 100 over the 255 priced sessions: 354 / 353 - 1.
     assert latest["daily_return_pct"] == "0.2833"
     assert latest["call25_corr_15s"] is None and latest["put25_corr_15s"] is not None
@@ -132,6 +140,7 @@ def test_record_is_pending_without_the_span_unless_partial(layout, clock):
     assert {gap["series"] for gap in partial["gaps"]} == {
         "skew_14d_percentile",
         "atm_iv_14d_percentile",
+        "term_structure_percentile",
         "call25_corr_15s",
         "put25_corr_15s",
     }
@@ -169,7 +178,7 @@ def test_show_prints_the_status_and_the_twin(layout, clock):
     fill(layout)
     text = show(layout, TICKER, LOOKBACK, clock.now)
     assert text.startswith(
-        "Action: record. CSV: none. Report: none (missing).\n\n# TEST · 14-DTE implied volatility"
+        "Action: record. CSV: none. Report: none (missing).\n\n# TEST · implied volatility, 14 and 30 DTE"
     )
     assert "| 2026-10-16 |" in text
 

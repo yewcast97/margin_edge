@@ -1,9 +1,11 @@
-# Stock IV regime: 14-DTE skew and ATM IV percentiles, return–IV correlations
+# Stock IV regime: skew, ATM IV and term structure percentiles, return–IV correlations
 
-This procedure keeps each ticker's 14-DTE indicators, their 252-session percentiles and the
-15-session correlations of its daily return with the changes of its 14-DTE 25Δ call and put
-IVs current from EODHD's options API and Tiingo's daily prices, and writes the report (two
-charts on one page) with its Markdown twin. `plan` says what is missing, `fetch` writes it,
+This procedure keeps each ticker's indicators (the 14-DTE skew and ATM IV, the 30-DTE ATM
+IV and the term structure between them), the 252-session percentiles of the skew, the
+14-DTE ATM IV and the term structure, and the 15-session correlations of its daily return
+with the changes of its 14-DTE 25Δ call and put IVs current from EODHD's options API and
+Tiingo's daily prices, and writes the report (two charts on one page) with its Markdown
+twin. `plan` says what is missing, `fetch` writes it,
 `record` writes the table and the report. What the values mean, how they are computed and
 what the raw files hold are in [AGENTS.md](AGENTS.md).
 
@@ -154,7 +156,7 @@ stop at their budget on one ticker without writing a session of it before `as_of
 budget.
 
 Until the span is filled, a report written with `--partial` (only when the user asks for one
-now) has a gap wherever a value lacks what it needs (section 4): the window's 14-DTE values
+now) has a gap wherever a value lacks what it needs (section 4): the window's indicators
 and correlations fill first, the percentiles last, once the 252 sessions ending with a
 session are fetched.
 
@@ -175,7 +177,7 @@ uv run --locked python -m market_state_research.stock_iv_regime.script record TI
 | Field | Meaning |
 | --- | --- |
 | `window`, `missing_sessions`, `missing_history`, `gaps` | As in `plan`. |
-| `sessions` | `{date, fetched_at, source, method, expiries, skew_14d_percentile, atm_iv_14d_percentile, skew_14d_pp, atm_iv_14d_pct, call25_corr_15s, put25_corr_15s, call25_iv_14d_pct, put25_iv_14d_pct, daily_return_pct}` of each fetched window session. |
+| `sessions` | `{date, fetched_at, source, method_14d, expiries_14d, method_30d, expiries_30d, skew_14d_percentile, atm_iv_14d_percentile, term_structure_percentile, skew_14d_pp, atm_iv_14d_pct, atm_iv_30d_pct, term_structure_pp, call25_corr_15s, put25_corr_15s, call25_iv_14d_pct, put25_iv_14d_pct, daily_return_pct}` of each fetched window session. |
 | `csv` | `{path, rows, written}`; `written` is false when the file already held these bytes. |
 | `report` | `{status, path, markdown, reason}`: `written` (the report and its twin) or `pending` (no report; the `reason` names what is not fetched or not current). |
 
@@ -188,9 +190,11 @@ What each value of a session needs, with `--partial` or without:
 | Value | Needs |
 | --- | --- |
 | `skew_14d_pp`, `atm_iv_14d_pct`, `call25_iv_14d_pct`, `put25_iv_14d_pct` | The session's own chain, listing an expiry 1 to 14 days out and one 14 or more days out that give all four readings ([AGENTS.md](AGENTS.md), Method). |
+| `atm_iv_30d_pct` | The session's own chain, listing an expiry 1 to 30 days out and one 30 or more days out that give both 50Δ readings. |
+| `term_structure_pp` | Both of the above. |
 | `daily_return_pct` | The newest prices file, holding the bars of the session and of the session before it. |
 | `call25_corr_15s`, `put25_corr_15s` | The 16 sessions ending with the session fetched, with a return and an IV change on each of the last 15, neither series constant. |
-| `skew_14d_percentile`, `atm_iv_14d_percentile` | The 252 sessions ending with the session fetched, with a value on the session and on at least one other. |
+| `skew_14d_percentile`, `atm_iv_14d_percentile`, `term_structure_percentile` | The 252 sessions ending with the session fetched, with a value on the session and on at least one other. |
 
 The 252 and 15 sessions define the indicators ([AGENTS.md](AGENTS.md), The indicators), and
 no parameter changes them: `--lookback N` sets only how many sessions the report shows, and

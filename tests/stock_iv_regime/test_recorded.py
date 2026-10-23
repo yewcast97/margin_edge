@@ -51,7 +51,8 @@ def test_latest_proves_the_recorded_listing_and_keeps_literal_numbers():
         ("2026-11-20", 46),
         ("2026-12-18", 54),
     ]
-    # Every contract of both expiries is kept; neither lies 1 to 14 days out, so there is no value.
+    # Every contract of both expiries is kept; neither lies 1 to 14 days out, nor 1 to 30, so there is
+    # no level at either horizon.
     assert {row.expiry for row in item.rows} == {date(2026, 11, 20), date(2026, 12, 18)}
     assert len(item.rows) == 100
     first = next(row for row in item.rows if row.contract == "AEP261120C00080000")
@@ -60,4 +61,7 @@ def test_latest_proves_the_recorded_listing_and_keeps_literal_numbers():
     assert check_chain(load(dump(item)), "AEP", None, NOW).source == "contracts"
     assert surface(SESSION, item.listed, item.rows).reason == (
         "no expiry is listed 1 to 14 days out (2026-10-17 to 2026-10-30)"
+    )
+    assert surface(SESSION, item.listed, item.rows, 30).reason == (
+        "no expiry is listed 1 to 30 days out (2026-10-17 to 2026-11-15)"
     )

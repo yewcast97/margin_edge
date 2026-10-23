@@ -56,20 +56,32 @@ def test_payload(state, layout):
     first, latest = data["rows"]
     # 2026-10-16 is the 254th session saved: its put IVs are raised by 0.003.
     assert latest["skew_14d_pp"] == "7.55" and latest["atm_iv_14d_pct"] == "31.90"
+    assert (latest["atm_iv_30d_pct"], latest["term_structure_pp"]) == ("33.00", "1.10")
     assert (latest["call25_iv_14d_pct"], latest["put25_iv_14d_pct"]) == ("27.25", "34.80")
     # 101 / 104 - 1 = -2.884615...%.
     assert (latest["daily_return_pct"], latest["adj_close"]) == ("-2.8846", "101")
     assert latest["price_source"] == data["prices"] == PRICES
-    assert (latest["skew_14d_percentile"], latest["skew_window_n"], latest["method"]) == (
+    assert (latest["skew_14d_percentile"], latest["skew_window_n"], latest["term_window_n"]) == (
         None,
         None,
-        "interpolated",
+        None,
     )
+    assert (latest["method_14d"], latest["method_30d"]) == ("interpolated", "interpolated")
     assert first["skew_window_n"] == 251 and first["skew_14d_percentile"] is not None
+    # Every session's term structure is 1.10: none lies strictly below another's.
+    assert (first["term_structure_percentile"], first["term_window_n"]) == ("0.0", 251)
     assert first["put25_corr_15s"] is not None and first["call25_corr_15s"] is None
     assert "changes" not in latest
+    assert latest["detail"] == (
+        "14-DTE: interpolated · 2026-10-25 (9d) → 2026-11-04 (19d); "
+        "30-DTE: interpolated · 2026-11-04 (19d) → 2026-11-25 (40d)"
+    )
     assert latest["readings"].startswith(
-        "interpolated · 2026-10-25 (9d): skew 7.55, ATM 31.90 (c25 155–160, p25 145,"
+        "14-DTE: interpolated · 2026-10-25 (9d): skew 7.55, ATM 31.90 (c25 155–160, p25 145,"
+    )
+    assert latest["readings"].endswith(
+        "; 30-DTE: interpolated · 2026-11-04 (19d): ATM 31.90 (c50 150–155, p50 150–155) → "
+        "2026-11-25 (40d): ATM 34.00 (c50 150–155, p50 150–155)"
     )
     assert {
         "date": "2026-10-16",
@@ -93,40 +105,54 @@ def test_html_is_self_contained_and_deterministic(state, layout):
     assert "Partial chart.</strong> 1 of 3 sessions are missing: 2026-10-15." in page
     assert (
         "<strong>Gaps.</strong> no return–call IV correlation on 1 fetched session: 2026-10-14; no skew "
-        "percentile, ATM IV percentile, return–call IV correlation or return–put IV correlation on 1 "
-        "fetched session: 2026-10-16. The gaps below the data table give each reason." in page
+        "percentile, ATM IV percentile, term structure percentile, return–call IV correlation or return–put "
+        "IV correlation on 1 fetched session: 2026-10-16. The gaps below the data table give each reason."
+        in page
     )
     embedded = re.search(r'<script id="regime-chart-data" type="application/json">(.*?)</script>', page)
     assert embedded is not None
     assert json.loads(embedded.group(1)) == payload(spec)
     assert f'<td class="missing" colspan="{len(chart.TABLE_COLUMNS) - 1}">missing</td>' in page
-    assert len(chart.TABLE_COLUMNS) == 14
+    assert len(chart.TABLE_COLUMNS) == 17
     head = "".join(f'<th scope="col">{column}</th>' for column in chart.TABLE_COLUMNS)
     assert f"<thead><tr>{head}</tr></thead>" in page
     assert '<th scope="col">Return–Δ put IV correlation (15s)</th>' in page
     assert f"<dt>Prices</dt><dd>{PRICES}</dd>" in page
-    # The readout of the latest session: the two percentiles, the two correlations, the close, the return.
+    # The readout of the latest session: the three percentiles, the two correlations, the close, the return.
     readout = re.findall(r'id="readout-value-(\d)">([^<]*)</span>', page)
-    assert readout == [("0", "—"), ("1", "—"), ("2", "—"), ("3", "—"), ("4", "101"), ("5", "-2.8846")]
+    assert readout == [
+        ("0", "—"),
+        ("1", "—"),
+        ("2", "—"),
+        ("3", "—"),
+        ("4", "—"),
+        ("5", "101"),
+        ("6", "-2.8846"),
+    ]
     # Two charts, always together: the percentiles and the correlations, each over the close.
-    assert "14-DTE 25Δ skew and ATM IV · percentiles over 252 sessions (0–100)" in page
+    assert (
+        "14-DTE 25Δ skew and ATM IV, 30 − 14-DTE term structure · percentiles over 252 sessions (0–100)"
+        in page
+    )
+    assert '{ key: "term_structure_percentile", color: "--series-5", n: "term_window_n" }' in page
+    assert page.count("--series-5:") == 3
     assert "Daily return vs Δ 14-DTE 25Δ call and put IV · correlations over 15 sessions (−1 to 1)" in page
     assert page.count("LWC.createChart(") == 1
     template = page.replace(library.script, "")
-    assert "30-DTE" not in template
+    assert "30-DTE" in template
     assert not any(gone in template for gone in ("Show changes", "readout-change", "(Δ ", "HistogramSeries"))
 
 
 def test_markdown_twin(state, layout):
     text = render_markdown(state.spec(layout, NOW))
     lines = text.splitlines()
-    assert lines[0] == "# TEST · 14-DTE implied volatility · 3 sessions 2026-10-14 → 2026-10-16"
+    assert lines[0] == "# TEST · implied volatility, 14 and 30 DTE · 3 sessions 2026-10-14 → 2026-10-16"
     assert "Coverage: 2 of 3 sessions fetched; 1 missing." in text
     assert f"Prices: {PRICES}." in lines
     row = next(line for line in lines if line.startswith("| 2026-10-16 |"))
     cells = [cell.strip() for cell in row.strip("|").split(" | ")]
-    assert cells[1:7] == ["—", "—", "7.55", "31.90", "—", "—"]
-    assert cells[7:11] == ["27.25", "34.80", "-2.8846", "101"]
+    assert cells[1:10] == ["—", "—", "—", "7.55", "31.90", "33.00", "1.10", "—", "—"]
+    assert cells[10:14] == ["27.25", "34.80", "-2.8846", "101"]
     assert len(cells) == len(chart.TABLE_COLUMNS)
     first = next(line for line in lines if line.startswith("| 2026-10-14 |"))
     assert first.split(" | ")[1].endswith("(n 251)")
@@ -162,10 +188,13 @@ def test_a_skipped_expiry_is_named_with_why(layout):
     lone = [attributes(TICKER, stray, "call", "190", delta="0.05")]
     save(layout, chain(AS_OF, {e1: quotes(TICKER, e1), stray: lone, e2: quotes(TICKER, e2)}))
     (row,) = payload(resolve(layout, TICKER, 1, NOW).spec(layout, NOW))["rows"]
-    assert row["detail"] == "interpolated · 2026-10-25 (9d) → 2026-11-04 (19d) · skipped 2026-10-28 (12d)"
+    no_far = "30-DTE: none · no expiry is listed 30 to 65 days out (2026-11-15 to 2026-12-20)"
+    assert row["detail"] == (
+        f"14-DTE: interpolated · 2026-10-25 (9d) → 2026-11-04 (19d) · skipped 2026-10-28 (12d); {no_far}"
+    )
     assert row["readings"].endswith(
         " · skipped at 2026-10-28 (12d) call +0.25: no usable call has delta +0.25 and no two adjacent ones "
         "bracket it; put -0.25: no usable put; call +0.50: no usable call has delta +0.50 and no two "
-        "adjacent ones bracket it; put -0.50: no usable put"
+        f"adjacent ones bracket it; put -0.50: no usable put; {no_far}"
     )
-    assert row["skew_14d_pp"] == "7.25"
+    assert (row["skew_14d_pp"], row["atm_iv_30d_pct"], row["term_structure_pp"]) == ("7.25", None, None)
