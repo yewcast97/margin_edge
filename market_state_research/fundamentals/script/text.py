@@ -22,9 +22,6 @@ a word reads the same however the issuer typeset it; nothing else is folded.
   markup, and an unclosed element extends to the end of the document.
 - Plain text (old ``.txt`` filings and exhibits, and each turn of an earnings call's
   transcript, ``earningscalls.call_text``): the line normalisation only.
-- XML (a Schedule 13D or 13G filed in EDGAR's XML form): one line per element that holds
-  text, in document order, ``{name}: {text}``, the element's name without its namespace
-  (``xml_text``). A document that declares a document type or an entity is refused.
 
 ``locate`` finds a quote as the agent copied it from the derived text: the quote's
 whitespace runs match any whitespace (a quote may cross a line break), letters match
@@ -94,7 +91,6 @@ changes either one has the same effect.
 
 import re
 import unicodedata
-import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Final
@@ -238,38 +234,6 @@ def html_text(body: str) -> str:
     parser.feed(body)
     parser.close()
     return plain_text("".join(parser.parts))
-
-
-def _local_name(element: ElementTree.Element) -> str:
-    return str(element.tag).rpartition("}")[2]
-
-
-def xml_text(data: bytes) -> str:
-    """The derived text of an XML document: per run of text, in document order, a line
-    ``{name}: {text}``, the name its element's without the namespace (the text after a child
-    element is its parent's), then the line normalisation. A document type or entity
-    declaration is refused, so no entity is ever expanded."""
-    upper = data.upper()
-    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
-        raise ValueError("the XML document declares a document type or an entity")
-    try:
-        root = ElementTree.fromstring(data)
-    except ElementTree.ParseError as error:
-        raise ValueError(f"the XML document is not well-formed: {error}") from None
-    runs = [(_local_name(root), root.text)]
-    stack = [(root, iter(root))]
-    while stack:  # depth first, without recursion: a deep document cannot exhaust the stack
-        element, children = stack[-1]
-        child = next(children, None)
-        if child is None:
-            stack.pop()
-            if stack:
-                runs.append((_local_name(stack[-1][0]), element.tail))
-            continue
-        runs.append((_local_name(child), child.text))
-        stack.append((child, iter(child)))
-    lines = [f"{name}: {words}" for name, text in runs if (words := " ".join((text or "").split()))]
-    return plain_text("\n".join(lines))
 
 
 def normalise(quote: str) -> str:

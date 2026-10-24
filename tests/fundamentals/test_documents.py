@@ -1,18 +1,16 @@
 """``documents``: one ticker's raw tree read into its seasons, every raw file validated, and derived text.
 
 The tree is written through ``workflow.fetch`` over the fake EDGAR and EarningsCalls.dev of
-``workflow_support``, and by the planters here, which put a submissions body, a calls page, a
-transcript or the company facts where ``fetch`` writes them. Expected paths, ``DOC_ID`` values,
+``workflow_support``, and by the planters here, which put a submissions body, a calls page or a
+transcript where ``fetch`` writes them. Expected paths, ``DOC_ID`` values,
 dates and messages are written out in ``workflow_support``, ``calls_support`` and here,
 independently of the code under test. Every file lives below pytest's ``tmp_path``.
 """
 
 import io
-import json
 import os
 import shutil
 from datetime import date, datetime
-from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -40,7 +38,6 @@ from market_state_research.fundamentals.script.documents import (
     transcript_name,
 )
 from market_state_research.fundamentals.script.filings import Window
-from market_state_research.fundamentals.script.form4 import Form4, Owner, Transaction
 from market_state_research.fundamentals.script.text import html_text
 
 from .calls_support import (
@@ -60,32 +57,25 @@ from .edgar_support import (
     EIGHT_K_OTHER,
     EIGHT_K_Q2,
     ENTITY_NAME,
-    FORM_4,
     OLD_TEN_K,
     OLD_TEN_Q,
-    PROXY,
+    PENDING_8K,
     Q2_EXHIBITS,
     RECENT,
     TEN_K,
     TEN_Q_1,
-    TEN_Q_2,
     TICKER,
     Row,
     filing_index_html,
     submissions_json,
 )
-from .fake_edgar import FakeEdgar, ok
 from .support import NOW, TODAY, edt, est
 from .workflow_support import (
     CALLS_FETCHED_AT,
     DOC_IDS,
     FETCHED_AT,
-    PROXY_SENTENCE,
     RAW,
     WINDOW,
-    archive_document_url,
-    companyfacts_document,
-    companyfacts_json,
     edgar,
     fetch,
     place,
@@ -96,16 +86,15 @@ from .workflow_support import (
 )
 
 # The company-level files a first fetch of WINDOW writes: EDGAR's clock reads 05:30:01 for the
-# ticker map, a second later for the submissions and 05:30:18 for the company facts, its 18th
-# request; the provider's reads 05:31:00 for the calls list.
+# ticker map and a second later for the submissions; the provider's reads 05:31:00 for the calls
+# list.
 SUBMISSIONS = "submissions_20261008T053002EDT.json"
-COMPANYFACTS = "companyfacts_20261008T053018EDT.json"
 CAPTURE = "calls_20261008T053100EDT_1.json"
 # Each season's documents after that fetch, in order, by their role in DOC_IDS.
 SEASON_DOCUMENTS = {
     "2024-12-28": ("old_ten_k",),
     "2025-09-27": ("old_ten_q", "call_old_q"),
-    "2025-12-27": ("ten_k", "eight_k_other", "proxy"),
+    "2025-12-27": ("ten_k", "eight_k_other"),
     "2026-03-28": ("ten_q_1", "eight_k_1", "exhibit_1", "call_q1"),
     "2026-06-27": ("ten_q_2", "eight_k_2", "exhibit_2_1", "exhibit_2_2", "call_q2"),
 }
@@ -131,10 +120,6 @@ INVALID_CAPTURE = (
     "the newest calls list in raw/ is invalid (see invalid_files); rename its pages with .rejected "
     "and run fetch"
 )
-NO_FACTS = "no companyfacts file is in raw/; run fetch"
-INVALID_FACTS = (
-    "the newest companyfacts file is invalid (see invalid_files); rename it with .rejected and run fetch"
-)
 TRANSCRIPT_Q2_INVALID = (
     "the transcript of the call 248001 (2026-07-23) in raw/ is invalid (see invalid_files); rename it "
     "with .rejected and run fetch"
@@ -143,7 +128,7 @@ TRANSCRIPT_Q2_INVALID = (
 REFRESHED_Q2 = "transcript_248001_20261008T054506EDT.json"
 CORRECTED_TITLE = "Intel Corporation - Q2 2026 Earnings Call (corrected)"
 
-# A later 10-Q, listed only by the tests that need it: it places the Form 4 of 2026-07-30 in the
+# A later 10-Q, listed only by the tests that need it: it places the 8-K of 2026-07-30 in the
 # quarter ended 2026-06-27 and the call of 2026-10-06 in its own season.
 TEN_Q_3 = Row("10-Q", "0000050863-26-000090", date(2026, 10, 7), date(2026, 9, 26), "intc-20260926.htm")
 LATER_RECENT = (TEN_Q_3, *RECENT)
@@ -152,101 +137,6 @@ LATER_RECENT = (TEN_Q_3, *RECENT)
 Q1_2025 = Row("10-Q", "0000050863-25-000080", date(2025, 5, 2), date(2025, 3, 29), "intc-20250329.htm")
 Q2_2025 = Row("10-Q", "0000050863-25-000140", date(2025, 8, 1), date(2025, 6, 28), "intc-20250628.htm")
 LONGER_RECENT = (*RECENT[:-1], Q2_2025, Q1_2025, OLD_TEN_K)
-
-# Filings the quarter ended 2026-03-28 holds in the holders' world: a beneficial owner's schedule
-# in HTML and one rendered from XML, an officer's Form 4 and Intel's own Form 4 as the holder of
-# another issuer's shares, each with its primary document as EDGAR lists it.
-SCHEDULE_HTML = Row("SC 13G/A", "0000950123-26-005001", date(2026, 5, 8), None, "sc13ga.htm")
-OFFICER_SALE = Row("4", "0001209191-26-041111", date(2026, 5, 19), date(2026, 5, 15), "xslF345X06/form4.xml")
-OTHER_ISSUER = Row("4", "0000050863-26-000050", date(2026, 5, 22), date(2026, 5, 20), "xslF345X05/doc4.xml")
-SCHEDULE_XML = Row(
-    "SCHEDULE 13G/A",
-    "0001104659-26-060001",
-    date(2026, 6, 1),
-    None,
-    "xslSCHEDULE_13G_X02/primary_doc.xml",
-)
-HOLDER_RECENT = (*RECENT[:3], SCHEDULE_XML, OTHER_ISSUER, OFFICER_SALE, SCHEDULE_HTML, *RECENT[3:])
-# Where each lands under raw/INTC/: the raw file a rendered primary document names.
-HOLDER_FILES = {
-    "schedule_html": "2026-03-28/SC13GA_2026-05-08_0000950123-26-005001/sc13ga.htm",
-    "officer_sale": "2026-03-28/4_2026-05-15_0001209191-26-041111/form4.xml",
-    "other_issuer": "2026-03-28/4_2026-05-20_0000050863-26-000050/doc4.xml",
-    "schedule_xml": "2026-03-28/SCHEDULE13GA_2026-06-01_0001104659-26-060001/primary_doc.xml",
-}
-OTHER_CIK = "0001234567"
-OFFICER = Owner("0001999001", "Jane Officer", False, True, False, "Chief Financial Officer")
-INTEL_AS_HOLDER = Owner(CIK, ENTITY_NAME, False, False, True, "")
-SALE = Transaction(date(2026, 5, 15), "S", Decimal("12000"), Decimal("31.25"), False)
-SCHEDULE_13G_HTML = (
-    b"<html><body><p>Amendment No. 3 to Schedule 13G.</p>"
-    b"<p>Example Capital Management holds 4.9% of the class.</p></body></html>"
-)
-SCHEDULE_13G_XML = (
-    b'<?xml version="1.0" encoding="UTF-8"?>\n'
-    b'<edgarSubmission xmlns="http://www.sec.gov/edgar/schedule13g" '
-    b'xmlns:com="http://www.sec.gov/edgar/common">\n'
-    b"  <headerData><submissionType>SCHEDULE 13G/A</submissionType></headerData>\n"
-    b"  <formData>\n"
-    b"    <coverPageHeader><issuerInfo><issuerCik>0000050863</issuerCik>"
-    b"<com:issuerName>INTEL CORP</com:issuerName></issuerInfo></coverPageHeader>\n"
-    b"    <reportingPersonDetails>\n"
-    b"      <reportingPersonName>Example Capital   Management</reportingPersonName>\n"
-    b"      <classPercent>4.9</classPercent>\n"
-    b"    </reportingPersonDetails>\n"
-    b"  </formData>\n"
-    b"</edgarSubmission>\n"
-)
-# Its derived text: one line per element holding text, the name without its namespace.
-SCHEDULE_13G_TEXT = (
-    "submissionType: SCHEDULE 13G/A\n"
-    "issuerCik: 0000050863\n"
-    "issuerName: INTEL CORP\n"
-    "reportingPersonName: Example Capital Management\n"
-    "classPercent: 4.9\n"
-)
-
-
-def form4_xml(issuer: str, owner: Owner, relationship: str) -> bytes:
-    """A Form 4 as EDGAR keeps its XML (schema X0609): ``owner`` reports one sale of 12,000 shares
-    at $31.25 on 2026-05-15 of ``issuer``'s common stock."""
-    return (
-        '<?xml version="1.0"?>\n<ownershipDocument>\n<schemaVersion>X0609</schemaVersion>\n'
-        "<documentType>4</documentType>\n<periodOfReport>2026-05-15</periodOfReport>\n"
-        f"<issuer><issuerCik>{issuer}</issuerCik><issuerName>EXAMPLE ISSUER</issuerName></issuer>\n"
-        "<reportingOwner>\n"
-        f"<reportingOwnerId><rptOwnerCik>{owner.cik}</rptOwnerCik>"
-        f"<rptOwnerName>{owner.name}</rptOwnerName></reportingOwnerId>\n"
-        f"<reportingOwnerRelationship>{relationship}</reportingOwnerRelationship>\n"
-        "</reportingOwner>\n<nonDerivativeTable><nonDerivativeTransaction>\n"
-        "<securityTitle><value>Common Stock</value></securityTitle>\n"
-        "<transactionDate><value>2026-05-15</value></transactionDate>\n"
-        "<transactionCoding><transactionFormType>4</transactionFormType>"
-        "<transactionCode>S</transactionCode></transactionCoding>\n"
-        "<transactionAmounts><transactionShares><value>12000</value></transactionShares>"
-        "<transactionPricePerShare><value>31.25</value></transactionPricePerShare>"
-        "<transactionAcquiredDisposedCode><value>D</value></transactionAcquiredDisposedCode>"
-        "</transactionAmounts>\n</nonDerivativeTransaction></nonDerivativeTable>\n</ownershipDocument>\n"
-    ).encode()
-
-
-OFFICER_SALE_XML = form4_xml(
-    CIK, OFFICER, "<isOfficer>1</isOfficer><officerTitle>Chief Financial Officer</officerTitle>"
-)
-OTHER_ISSUER_XML = form4_xml(OTHER_CIK, INTEL_AS_HOLDER, "<isTenPercentOwner>1</isTenPercentOwner>")
-
-
-def holders_edgar() -> FakeEdgar:
-    """EDGAR listing ``HOLDER_RECENT`` and serving each filing it adds at its raw file's name."""
-    served = edgar(rows=HOLDER_RECENT)
-    for row, name, body, content_type in (
-        (SCHEDULE_HTML, "sc13ga.htm", SCHEDULE_13G_HTML, "text/html"),
-        (OFFICER_SALE, "form4.xml", OFFICER_SALE_XML, "text/xml"),
-        (OTHER_ISSUER, "doc4.xml", OTHER_ISSUER_XML, "text/xml"),
-        (SCHEDULE_XML, "primary_doc.xml", SCHEDULE_13G_XML, "text/xml"),
-    ):
-        served.responses[archive_document_url(row.accession, name)] = ok(body, content_type)
-    return served
 
 
 def state(layout: DataLayout, now: datetime = NOW) -> RawState:
@@ -292,19 +182,6 @@ def plant_transcript(
     )
 
 
-def plant_companyfacts(layout: DataLayout, body: bytes, at: datetime) -> Path:
-    return place(layout.raw(TICKER) / f"companyfacts_{timestamp_token(at)}.json", body)
-
-
-def facts_without(accession: str) -> bytes:
-    """The fixtures' company facts without any fact of the filing ``accession``."""
-    document = companyfacts_document()
-    for concept in document["facts"]["us-gaap"].values():
-        for unit, entries in concept["units"].items():
-            concept["units"][unit] = [entry for entry in entries if entry["accn"] != accession]
-    return json.dumps(document).encode()
-
-
 def edgar_only(layout: DataLayout) -> None:
     """Every EDGAR file of ``WINDOW``'s span, the transcripts, and no calls list."""
     fetch(layout)
@@ -321,8 +198,8 @@ def test_doc_ids_are_the_folder_and_the_file_name_without_its_extension():
     assert doc_id("8-K_2026-07-23_0000050863-26-000155", "q2.earnings.htm") == (
         "8-K_2026-07-23_0000050863-26-000155_q2.earnings"
     )
-    assert doc_id("SCHEDULE13GA_2026-06-01_0001104659-26-060001", "primary_doc.xml") == (
-        "SCHEDULE13GA_2026-06-01_0001104659-26-060001_primary_doc"
+    assert doc_id("8-K_2026-07-23_0000050863-26-000155", "q226cfocommentary.htm") == (
+        "8-K_2026-07-23_0000050863-26-000155_q226cfocommentary"
     )
     assert call_doc_id(date(2026, 6, 27), 248001) == "call_2026-06-27_248001"
 
@@ -333,12 +210,6 @@ def test_doc_ids_are_the_folder_and_the_file_name_without_its_extension():
         ("10-K", "10-K_2026-05-08_0000950123-26-005001"),
         ("10-Q", "10-Q_2026-05-08_0000950123-26-005001"),
         ("8-K", "8-K_2026-05-08_0000950123-26-005001"),
-        ("DEF 14A", "DEF14A_2026-05-08_0000950123-26-005001"),
-        ("SC 13D/A", "SC13DA_2026-05-08_0000950123-26-005001"),
-        ("SC 13G/A", "SC13GA_2026-05-08_0000950123-26-005001"),
-        ("SCHEDULE 13D/A", "SCHEDULE13DA_2026-05-08_0000950123-26-005001"),
-        ("SCHEDULE 13G/A", "SCHEDULE13GA_2026-05-08_0000950123-26-005001"),
-        ("4", "4_2026-05-08_0000950123-26-005001"),
     ],
 )
 def test_a_filings_folder_is_its_form_without_spaces_or_slashes_its_date_and_accession(form, folder):
@@ -367,8 +238,8 @@ def test_call_file_names_carry_the_fetch_time_and_page_or_the_call_id():
         ("filing", "0000950123-09-000001.txt", True),
         ("exhibit", "ex99.TXT", True),
         ("exhibit", "ex99.htm", False),
-        ("proxy", "d123456ddef14a.htm", False),
-        ("holder", "primary_doc.xml", False),
+        ("8-K", "intc-20260723.htm", False),
+        ("8-K", "intc-20260723.txt", True),
     ],
 )
 def test_layout_mode_follows_the_documents_kind_and_name_alone(tmp_path, kind, name, layout_read):
@@ -386,9 +257,8 @@ def test_fetch_writes_the_company_files_at_the_top_and_each_seasons_documents_in
 
     written = sorted(str(path.relative_to(root)) for path in root.rglob("*") if path.is_file())
 
-    assert written == sorted([SUBMISSIONS, COMPANYFACTS, CAPTURE, *RAW.values()])
+    assert written == sorted([SUBMISSIONS, CAPTURE, *RAW.values()])
     assert (root / SUBMISSIONS).read_bytes() == submissions_json().encode()
-    assert (root / COMPANYFACTS).read_bytes() == companyfacts_json().encode()
     assert (root / CAPTURE).read_bytes() == events_page()
     for role in RAW:
         assert raw_file(layout, role).read_bytes() == raw_bytes(role)
@@ -407,11 +277,7 @@ def test_the_seasons_come_from_the_newest_submissions_with_every_document_fetch_
         (),
         (),
     )
-    assert (raw.submissions, raw.companyfacts, raw.former_layout) == (
-        raw_path(layout, SUBMISSIONS),
-        raw_path(layout, COMPANYFACTS),
-        (),
-    )
+    assert (raw.submissions, raw.former_layout) == (raw_path(layout, SUBMISSIONS), ())
     assert [files.day.isoformat() for files in raw.seasons] == list(SEASON_DOCUMENTS)
     for files in raw.seasons:
         assert files.folder == raw_path(layout, files.day.isoformat())
@@ -460,17 +326,6 @@ def test_each_document_names_its_kind_season_filing_and_label(layout):
         "0000050863-26-000062",
         date(2026, 7, 23),
     )
-    # A proxy statement is placed by its filing date (its reportDate would be the meeting's).
-    assert by_id[DOC_IDS["proxy"]] == Document(
-        DOC_IDS["proxy"],
-        "proxy",
-        FISCAL_YEAR,
-        raw_file(layout, "proxy"),
-        "DEF 14A filed 2026-03-27 (d123456ddef14a.htm)",
-        "DEF 14A",
-        "0001193125-26-112233",
-        date(2026, 3, 27),
-    )
 
 
 def test_an_8_k_needs_its_index_page_its_primary_document_and_the_exhibits_the_page_lists(layout):
@@ -480,11 +335,10 @@ def test_an_8_k_needs_its_index_page_its_primary_document_and_the_exhibits_the_p
 
     (release,) = q2.filings
     what = "of the 8-K 0000050863-26-000062 dated 2026-07-23"
-    assert (release.item.accession, release.folder, release.index_valid, release.form4) == (
+    assert (release.item.accession, release.folder, release.index_valid) == (
         EIGHT_K_Q2.accession,
         raw_path(layout, "2026-06-27/8-K_2026-07-23_0000050863-26-000062"),
         True,
-        None,
     )
     assert [(row.exhibit, row.sequence, row.document) for row in release.exhibits] == [
         ("EX-99.1", 2, "q226earningsrelease.htm"),
@@ -499,8 +353,9 @@ def test_an_8_k_needs_its_index_page_its_primary_document_and_the_exhibits_the_p
     assert [document.doc_id for document in release.documents] == [
         DOC_IDS[role] for role in ("eight_k_2", "exhibit_2_1", "exhibit_2_2")
     ]
-    # An 8-K whose page lists no exhibit needs its page and primary document; a proxy its document.
-    officers, proxy = fiscal_year.filings
+    # An 8-K whose page lists no exhibit needs its page and primary document; the proxy statement
+    # EDGAR lists in the season is no filing the domain reads.
+    (officers,) = fiscal_year.filings
     assert (officers.item.accession, officers.exhibits, officers.index_valid) == (
         EIGHT_K_OTHER.accession,
         (),
@@ -510,17 +365,6 @@ def test_an_8_k_needs_its_index_page_its_primary_document_and_the_exhibits_the_p
         raw_file(layout, "index_other"),
         raw_file(layout, "eight_k_other"),
     ]
-    assert proxy.needed == (
-        Needed(
-            "primary document of the DEF 14A 0001193125-26-112233 filed 2026-03-27",
-            raw_file(layout, "proxy"),
-            True,
-        ),
-    )
-    assert (proxy.item.accession, [document.kind for document in proxy.documents]) == (
-        PROXY.accession,
-        ["proxy"],
-    )
 
 
 def test_an_8_ks_exhibits_come_from_its_index_page_on_every_read(layout):
@@ -587,8 +431,8 @@ def test_the_newest_submissions_place_every_filing_again_by_rule_b(layout):
     fetch(layout)
     listing = state(layout).listing
     assert listing is not None
-    # The Form 4 of 2026-07-30 is dated after the newest season's 10-Q was filed: pending.
-    assert [item.accession for item in listing.pending] == [FORM_4.accession]
+    # The 8-K of 2026-07-30 is dated after the newest season's 10-Q was filed: pending.
+    assert [item.accession for item in listing.pending] == [PENDING_8K.accession]
     newer = plant_submissions(layout, edt(2026, 10, 8, 5, 45), LATER_RECENT)
 
     raw = state(layout)
@@ -598,12 +442,12 @@ def test_the_newest_submissions_place_every_filing_again_by_rule_b(layout):
     q2 = season_of(layout, Q2)
     assert [(item.form, item.accession) for item in q2.season.fetched] == [
         ("8-K", EIGHT_K_Q2.accession),
-        ("4", FORM_4.accession),
+        ("8-K", PENDING_8K.accession),
     ]
-    # Its raw file is the XML the rendered primary document names, in its own folder.
-    xml = raw_path(layout, "2026-06-27/4_2026-07-30_0001209191-26-061234/wk-form4_1754251234.xml")
+    index = raw_path(layout, "2026-06-27/8-K_2026-07-30_0000050863-26-000066/0000050863-26-000066-index.htm")
     assert q2.missing == (
-        f"the XML of the Form 4 0001209191-26-061234 dated 2026-07-30 is not in raw/ ({xml}); run fetch"
+        "the filing index page of the 8-K 0000050863-26-000066 dated 2026-07-30 is not in raw/ "
+        f"({index}); run fetch"
     )
 
 
@@ -614,11 +458,6 @@ def test_the_newest_submissions_place_every_filing_again_by_rule_b(layout):
             "submissions_20261008T070000EDT.json",
             "submissions: cik must be a string of up to ten digits or an integer",
             id="submissions",
-        ),
-        pytest.param(
-            "companyfacts_20261008T070000EDT.json",
-            "companyfacts CIK0000050863: invalid JSON: Expecting value (line 1, column 1)",
-            id="companyfacts",
         ),
         pytest.param(
             "calls_20261008T070000EDT_1.json",
@@ -645,7 +484,6 @@ def test_without_a_submissions_file_no_season_is_listed(layout):
         (),
         (),
     )
-    assert (raw.companyfacts, raw.facts, raw.facts_problem) == (None, None, NO_FACTS)
     assert (raw.capture, raw.capture_problem) == (None, NO_CAPTURE)
     assert raw.events_due(WINDOW, NOW) is None  # nothing to weigh without a season
 
@@ -723,12 +561,6 @@ def test_submissions_whose_seasons_cannot_be_listed_give_the_reason_without_an_i
             Q2,
             "EX-99.2 q226cfocommentary.htm of the 8-K 0000050863-26-000062 dated 2026-07-23",
             id="exhibit",
-        ),
-        pytest.param(
-            "proxy",
-            FISCAL_YEAR,
-            "primary document of the DEF 14A 0001193125-26-112233 filed 2026-03-27",
-            id="proxy",
         ),
     ],
 )
@@ -896,23 +728,20 @@ def test_a_late_10_q_moves_the_filing_and_the_call_rule_b_placed_before_it(layou
     )
     fiscal_year = raw.season(FISCAL_YEAR)
     assert fiscal_year is not None
-    assert [item.accession for item in fiscal_year.season.fetched] == [
-        EIGHT_K_OTHER.accession,
-        PROXY.accession,
-    ]
+    assert [item.accession for item in fiscal_year.season.fetched] == [EIGHT_K_OTHER.accession]
     assert fiscal_year.missing is None
 
 
 def test_a_filing_folder_where_rule_b_does_not_place_it_is_moved_or_misnamed(layout):
     fetch(layout)
     placed = {
-        "2026-06-27/4_2026-07-30_0001209191-26-061234": "pending",
-        "2026-06-27/DEF14A_2026-03-27_0001193125-26-112233": "in the season 2025-12-27",
+        "2026-06-27/8-K_2026-07-30_0000050863-26-000066": "pending",
+        "2026-06-27/8-K_2026-02-09_0000050863-26-000020": "in the season 2025-12-27",
         "2026-06-27/10-Q_2026-03-28_0000050863-26-000041": "in the season 2026-03-28",
     }
     for folder in placed:
         raw_path(layout, folder).mkdir()
-    raw_path(layout, "2025-12-27/DEF14A_2026-03-28_0001193125-26-112233").mkdir()
+    raw_path(layout, "2025-12-27/8-K_2026-02-10_0000050863-26-000020").mkdir()
 
     assert invalid(layout) == {
         **{
@@ -922,8 +751,8 @@ def test_a_filing_folder_where_rule_b_does_not_place_it_is_moved_or_misnamed(lay
             )
             for folder, where in placed.items()
         },
-        "2025-12-27/DEF14A_2026-03-28_0001193125-26-112233": (
-            "the newest submissions name this filing's folder DEF14A_2026-03-27_0001193125-26-112233; "
+        "2025-12-27/8-K_2026-02-10_0000050863-26-000020": (
+            "the newest submissions name this filing's folder 8-K_2026-02-09_0000050863-26-000020; "
             "rename it with .rejected and run fetch"
         ),
     }
@@ -950,6 +779,7 @@ def test_entries_fetch_does_not_write_are_invalid(layout):
         "submissions.json",
         "submissions_20261008T253000EDT.json",  # no such time
         "companyfacts_20261008T053018.json",  # no zone
+        "measures_20261008T053018EDT.json",  # no file fetch ever wrote
         "calls_20261008T053100EDT_0.json",  # no page 0
         "calls_20261008T053100EDT.json",  # no page
         "2026-02-30",  # no such day
@@ -962,7 +792,8 @@ def test_entries_fetch_does_not_write_are_invalid(layout):
         "transcript_248001_20261008T253000EDT.json",  # no such time
         "transcript_248001_20261008T054506.json",  # no zone
         "10-Q_2026-06-27_0000050863-26-000064.zip",
-        "10-K405_2026-06-27_0000050863-26-000064",  # no form fetch writes
+        "10-K405_2026-06-27_0000050863-26-000064",  # no form fetch writes or wrote
+        "DEFA14A_2026-06-27_0000050863-26-000064",
     )
     for name in top:
         place(raw_path(layout, name), b"x")
@@ -1033,163 +864,32 @@ def test_names_ending_in_rejected_and_dotfiles_are_skipped(layout):
     )
 
 
-# --------------------------------------------------------------------------- Form 4 and schedules
+# --------------------------------------------------------------------------- retired files
 
 
-def test_a_form_rendered_from_xml_is_kept_at_its_raw_files_name_and_a_holders_schedule_is_a_document(layout):
-    fetch(layout, holders_edgar())
-
-    raw = state(layout)
-
-    assert raw.invalid_files == ()
-    for relative in HOLDER_FILES.values():
-        assert raw_path(layout, relative).is_file()
-    q1 = raw.season(Q1)
-    assert q1 is not None and q1.missing is None
-    assert [document.doc_id for document in q1.documents] == [
-        DOC_IDS["ten_q_1"],
-        DOC_IDS["eight_k_1"],
-        DOC_IDS["exhibit_1"],
-        "SC13GA_2026-05-08_0000950123-26-005001_sc13ga",
-        "SCHEDULE13GA_2026-06-01_0001104659-26-060001_primary_doc",
-        DOC_IDS["call_q1"],
+def test_the_company_facts_and_the_folders_of_forms_no_longer_read_are_unlisted_and_left_out(layout):
+    fetch(layout)
+    facts = place(raw_path(layout, "companyfacts_20261008T053018EDT.json"), b"not even JSON")
+    folders = [
+        place(raw_path(layout, f"{relative}/document"), b"x").parent
+        for relative in (
+            "2025-12-27/DEF14A_2026-03-27_0001193125-26-112233",
+            "2026-03-28/4_2026-04-30_0001209191-26-050505",
+            "2026-03-28/SC13DA_2026-05-08_0000950103-26-004322",
+            "2026-03-28/SC13GA_2026-05-08_0000950103-26-004321",
+            "2026-03-28/SCHEDULE13DA_2026-05-12_0001104659-26-054322",
+            "2026-03-28/SCHEDULE13GA_2026-05-12_0001104659-26-054321",
+        )
     ]
-    by_id = raw.documents()
-    assert by_id["SCHEDULE13GA_2026-06-01_0001104659-26-060001_primary_doc"] == Document(
-        "SCHEDULE13GA_2026-06-01_0001104659-26-060001_primary_doc",
-        "holder",
-        Q1,
-        raw_path(layout, HOLDER_FILES["schedule_xml"]),
-        "SCHEDULE 13G/A filed 2026-06-01 (primary_doc.xml)",
-        "SCHEDULE 13G/A",
-        "0001104659-26-060001",
-        date(2026, 6, 1),
-    )
-    holder = by_id["SC13GA_2026-05-08_0000950123-26-005001_sc13ga"]
-    assert (holder.kind, holder.label) == ("holder", "SC 13G/A filed 2026-05-08 (sc13ga.htm)")
-    assert derive_text(by_id["SCHEDULE13GA_2026-06-01_0001104659-26-060001_primary_doc"]) == SCHEDULE_13G_TEXT
-    assert derive_text(holder) == (
-        "Amendment No. 3 to Schedule 13G.\nExample Capital Management holds 4.9% of the class.\n"
-    )
-
-
-def test_a_form_4_is_read_from_its_xml_another_issuers_included_and_quoted_by_no_one(layout):
-    fetch(layout, holders_edgar())
-
-    q1 = season_of(layout, Q1)
-
-    sale, other = (files for files in q1.filings if files.item.form == "4")
-    assert sale.needed == (
-        Needed(
-            "XML of the Form 4 0001209191-26-041111 dated 2026-05-15",
-            raw_path(layout, HOLDER_FILES["officer_sale"]),
-            True,
-        ),
-    )
-    assert (sale.documents, other.documents) == ((), ())
-    assert q1.form4s() == (
-        (OFFICER_SALE.accession, Form4(date(2026, 5, 15), CIK, (OFFICER,), (SALE,))),
-        (OTHER_ISSUER.accession, Form4(date(2026, 5, 15), OTHER_CIK, (INTEL_AS_HOLDER,), (SALE,))),
-    )
-
-
-def test_a_form_4_that_does_not_read_is_invalid(layout):
-    fetch(layout, holders_edgar())
-    path = place(
-        raw_path(layout, HOLDER_FILES["officer_sale"]),
-        b"<ownershipDocument><documentType>5</documentType></ownershipDocument>",
-    )
+    place(raw_path(layout, "companyfacts_20261008T070000EDT.json"), b"x")  # named after the clock
 
     raw = state(layout)
 
-    assert raw.invalid_files == ((path, "Form 4: documentType must be 4"),)
-    q1 = raw.season(Q1)
-    assert q1 is not None
-    assert [accession for accession, _ in q1.form4s()] == [OTHER_ISSUER.accession]
-    assert q1.missing == (
-        "the XML of the Form 4 0001209191-26-041111 dated 2026-05-15 in raw/ is invalid "
-        "(see invalid_files); rename it with .rejected and run fetch"
-    )
-
-
-# --------------------------------------------------------------------------- the company facts
-
-
-def test_the_newest_company_facts_hold_each_seasons_filing_or_say_why_not(layout):
-    fetch(layout)
-
-    raw = state(layout)
-
-    assert raw.facts is not None
-    assert (raw.facts.cik, raw.facts.entity_name, raw.facts_problem) == (CIK, ENTITY_NAME, None)
-    # The fixtures' facts hold no figure of the oldest 10-K, fetched long after it was filed.
-    assert {files.day.isoformat(): raw.facts_status(files) for files in raw.seasons} == {
-        "2024-12-28": (
-            "absent",
-            "EDGAR's companyfacts, fetched 2026-10-08, holds no fact of the 10-K 0000050863-25-000009",
-        ),
-        "2025-09-27": ("present", None),
-        "2025-12-27": ("present", None),
-        "2026-03-28": ("present", None),
-        "2026-06-27": ("present", None),
-    }
-
-
-def test_company_facts_fetched_on_or_before_a_filings_date_may_hold_it_later(layout):
-    fetch(layout)
-    raw_path(layout, COMPANYFACTS).unlink()
-    plant_companyfacts(layout, facts_without(TEN_Q_2.accession), edt(2026, 7, 24, 18, 0))
-
-    raw = state(layout)
-    q2 = raw.season(Q2)
-    assert q2 is not None
-    assert raw.facts_status(q2) == (
-        "waiting",
-        "the newest companyfacts, fetched 2026-07-24, on or before the 10-Q 0000050863-26-000064 was "
-        "filed, holds no fact of it: a later fetch brings them",
-    )
-
-    plant_companyfacts(layout, facts_without(TEN_Q_2.accession), edt(2026, 7, 25, 6, 0))
-
-    raw = state(layout)
-    q2 = raw.season(Q2)
-    assert q2 is not None
-    assert raw.facts_status(q2) == (
-        "absent",
-        "EDGAR's companyfacts, fetched 2026-07-25, holds no fact of the 10-Q 0000050863-26-000064",
-    )
-
-
-def test_without_company_facts_every_season_lacks_them(layout):
-    fetch(layout)
-    raw_path(layout, COMPANYFACTS).unlink()
-
-    raw = state(layout)
-
-    assert (raw.companyfacts, raw.facts, raw.facts_problem) == (None, None, NO_FACTS)
-    assert {raw.facts_status(files) for files in raw.seasons} == {("missing", NO_FACTS)}
-
-
-def test_newest_company_facts_that_do_not_read_are_invalid(layout):
-    fetch(layout)
-    path = plant_companyfacts(
-        layout, json.dumps({**companyfacts_document(), "cik": 1}).encode(), edt(2026, 10, 8, 5, 50)
-    )
-
-    raw = state(layout)
-
-    assert raw.invalid_files == ((path, "companyfacts CIK0000050863: cik is not the requested CIK"),)
-    assert (raw.companyfacts, raw.facts, raw.facts_problem) == (path, None, INVALID_FACTS)
-    assert {raw.facts_status(files) for files in raw.seasons} == {("missing", INVALID_FACTS)}
-
-
-def test_without_a_submissions_file_the_company_facts_are_still_validated(layout):
-    path = place(raw_path(layout, COMPANYFACTS), b"not even JSON")
-
-    raw = state(layout)
-
-    assert path in [invalid_path for invalid_path, _ in raw.invalid_files]
-    assert raw.facts_problem == INVALID_FACTS
+    assert (raw.unlisted, raw.invalid_files) == ((facts, *folders), ())
+    assert [files.missing for files in raw.seasons] == [None] * 5
+    assert [document.doc_id for document in season_of(layout, Q1).documents] == [
+        DOC_IDS[role] for role in SEASON_DOCUMENTS["2026-03-28"]
+    ]
 
 
 # --------------------------------------------------------------------------- calls
@@ -1603,7 +1303,7 @@ def test_a_file_that_grew_after_its_check_is_refused_after_one_byte_more_than_th
 
 
 def test_reading_the_raw_tree_writes_nothing(layout):
-    fetch(layout, holders_edgar())
+    fetch(layout)
     before = snapshot(layout.root)
 
     state(layout)
@@ -1629,35 +1329,14 @@ def test_derived_text_of_edgar_documents(layout):
         "Pursuant to the requirements of the Securities Exchange Act of 1934, the registrant has duly "
         "caused this report to be signed.\n"
     )
-    assert derive_text(by_id[DOC_IDS["proxy"]]) == (
-        f"Notice of 2026 Annual Meeting of Stockholders\n{PROXY_SENTENCE}\n"
-        "No director or executive officer has pledged shares of the Company.\n"
-    )
 
 
-def test_edgar_text_reads_txt_names_as_plain_text_xml_names_as_xml_and_latin_1_as_windows_1252():
+def test_edgar_text_reads_txt_names_as_plain_text_every_other_as_html_and_latin_1_as_windows_1252():
     assert edgar_text(b"Line one\r\n  wrapped   here\n", "filing.TXT") == "Line one\nwrapped here\n"
     assert edgar_text(b"<p>A&nbsp;b</p>", "filing.htm") == "A b\n"
     assert edgar_text(b"<p>It\x92s \x96 fine</p>", "filing.htm") == "It’s – fine\n"
-    assert edgar_text(SCHEDULE_13G_XML, "primary_doc.xml") == SCHEDULE_13G_TEXT
-    assert edgar_text(SCHEDULE_13G_XML, "PRIMARY_DOC.XML") == SCHEDULE_13G_TEXT
-
-
-@pytest.mark.parametrize(
-    ("data", "message"),
-    [
-        pytest.param(
-            b'<?xml version="1.0"?><!DOCTYPE a [<!ENTITY e "x">]><a>&e;</a>',
-            "the XML document declares a document type or an entity",
-            id="entity",
-        ),
-        pytest.param(b"<a><b></a>", "the XML document is not well-formed: ", id="not-well-formed"),
-    ],
-)
-def test_an_xml_document_that_declares_entities_or_does_not_parse_derives_no_text(data, message):
-    with pytest.raises(ValueError) as caught:
-        edgar_text(data, "primary_doc.xml")
-    assert str(caught.value).startswith(message)
+    # No document is read as XML any more: an XML name is read as HTML, its elements' text kept.
+    assert edgar_text(b'<?xml version="1.0"?><a><b>kept</b></a>', "primary_doc.xml") == "kept\n"
 
 
 def test_a_calls_text_is_derived_from_its_transcript_with_its_turns(layout):

@@ -8,20 +8,17 @@ the watchlist ``__main__`` passes) it looks the CIK up in EDGAR's ``company_tick
 (requested once per run), reads the company's submissions JSON and writes it to
 ``raw/{T}/submissions_{token}.json`` unless its bytes equal the newest such file's, and lists
 the seasons (``filings.select_seasons``). For each season of the span (the seasons the
-``Window`` admits and the ``items.BASELINE_SEASONS`` before them, whose documents the
-window's readings compare with), oldest first, it writes the season's 10-K or 10-Q, then each
-filing Rule B places in the season, in order: an 8-K's filing index page (read before it is
-written), its primary document and every ``EX-99`` exhibit the page lists; a proxy
-statement's or a schedule's primary document; a Form 4's XML (read before it is written).
-Each lands at its path under ``raw/{T}/{PERIOD}/`` (``documents``), bytes as served; a file
-already there is never rewritten, nor requested again without ``refresh``. Then it reads the
-company facts and writes them to ``raw/{T}/companyfacts_{token}.json`` unless their bytes
-equal the newest such file's. A failed request, or a body that does not read, aborts the run
-with one line; nothing of that document is written, and the files written before it stay.
-Filings Rule B leaves pending are listed when the window ends on or after the newest listed
-season end, and none of their documents is requested; the rows Rule B cannot place are listed
-as skipped; a window that starts before the oldest filing ``filings.recent`` lists is reported
-``truncated``.
+``Window`` admits and the ``aspects.BASELINE_SEASONS`` before them, the baselines of the
+window's comparisons), oldest first, it writes the season's 10-K or 10-Q, then each 8-K Rule B
+places in the season, in order: its filing index page (read before it is written), its primary
+document and every ``EX-99`` exhibit the page lists. Each lands at its path under
+``raw/{T}/{PERIOD}/`` (``documents``), bytes as served; a file already there is never
+rewritten, nor requested again without ``refresh``. A failed request, or a body that does not
+read, aborts the run with one line; nothing of that document is written, and the files written
+before it stay. Filings Rule B leaves pending are listed when the window ends on or after the
+newest listed season end, and none of their documents is requested; the rows Rule B cannot
+place are listed as skipped; a window that starts before the oldest filing ``filings.recent``
+lists is reported ``truncated``.
 
 Then, for a ticker whose seasons are listed, the calls: when ``documents.RawState.events_due``
 says so, it requests every page of the ticker's calls list, reads them strictly
@@ -34,31 +31,31 @@ the provider's request limit (HTTP 429) stops every later request to it in the r
 on with EDGAR alone (``stopped``).
 
 With ``refresh`` (``--refresh``, run only when the user asks) ``fetch`` requests every span
-document, the company facts, the calls list and every transcript again: an EDGAR document is
-compared with its file (``verified`` or ``changed``, never rewritten), and a transcript whose
-bytes changed is written beside the newest copy (``refreshed``).
+document, the calls list and every transcript again: an EDGAR document is compared with its file
+(``verified`` or ``changed``, never rewritten), and a transcript whose bytes changed is written
+beside the newest copy (``refreshed``).
 
 The other commands work offline over ``documents.season_documents``, which validates every raw
 file it reads. ``derive`` writes each document's derived text to
-``formatted/{T}/{PERIOD}/{DOC_ID}.md`` and each season's ``measures.md`` (``measures``), each
-only when it is missing or differs from its derivation. ``check`` parses and checks the bot's
-readings of each season (``readings``). ``render`` writes a season's report
-``reports/{T}/{PERIOD}/report_{token}.md`` (``report``), never over a file. ``plan`` says per
-ticker what comes next, in this order: ``fetch`` while the former layout is in ``raw/``, no
-season is listed, a span season's EDGAR document is not in ``raw/``, a raw file is invalid, no
-valid company facts are in ``raw/``, a span season's call is ``missing`` or the calls list is
-due (with ``refresh``, whenever the window holds a listed season); ``derive`` while a span
-document's text or a window season's measures differ from their derivation; ``research`` while
-a window season's readings are missing or fail ``check``; ``render`` while a window season's
-newest report is not the report rendered now; else ``reuse``. ``show`` prints the newest
-report of each ticker.
+``formatted/{T}/{PERIOD}/{DOC_ID}.md`` and each season's sheet, ``season.md`` (``sheet``),
+each only when it is missing or differs from its derivation. ``check`` parses and checks the
+bot's readings of each comparison of each season (``readings``). ``render`` writes a
+comparison's report ``reports/{T}/{PERIOD}/report_{KIND}_{token}.md`` (``report``), never over a
+file. ``plan`` says per ticker what comes next, in this order: ``fetch`` while the former layout
+is in ``raw/``, no season is listed, a span season's EDGAR document is not in ``raw/``, a raw
+file is invalid, a span season's call is ``missing`` or the calls list is due (with
+``refresh``, whenever the window holds a listed season); ``derive`` while a span document's
+text or a window season's sheet differs from its derivation; ``research`` while the readings of
+a window season's comparison are missing or fail ``check``; ``render`` while a window
+comparison's newest report is not the report rendered now; else ``reuse``. ``show`` prints the
+newest season's reports of each ticker.
 
 Messages never repeat captured or private input, and the ``User-Agent`` and the
 EarningsCalls.dev key reach this module only inside their clients. Every time is New York time.
 """
 
 import os
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from functools import cached_property, partial
@@ -70,8 +67,8 @@ from market_state_research.common.text import printable, ticker_symbol
 from market_state_research.common.times import et_isoformat, to_eastern
 from market_state_research.common.watchlist import domain_watchlist, stock_tickers
 
+from .aspects import BASELINE_SEASONS, KINDS, Comparison, Kind, comparison, comparisons
 from .client import (
-    COMPANYFACTS_LIMIT,
     DOCUMENT_LIMIT,
     INDEX_LIMIT,
     JSON_LIMIT,
@@ -82,7 +79,6 @@ from .client import (
 )
 from .client import Fetched as EdgarFetched
 from .documents import (
-    COMPANYFACTS_PREFIX,
     FORMER,
     JSON_SUFFIX,
     SUBMISSIONS_PREFIX,
@@ -114,7 +110,6 @@ from .earningscalls import (
     parse_events_page,
     parse_transcript,
 )
-from .facts import read_companyfacts
 from .filings import (
     TICKERS_FILE,
     Dated,
@@ -127,18 +122,14 @@ from .filings import (
     parse_submissions,
     select_seasons,
 )
-from .form4 import parse_form4
-from .items import BASELINE_SEASONS, ITEMS
-from .measures import Measures, baseline_seasons, season_measures
-from .readings import Problem, Readings, Source, parse_readings, readings_problems
-from .readings import Season as RulesSeason
+from .readings import Comparison as RulesComparison
+from .readings import Problem, Readings, Source, parse_readings, readings_name, readings_problems
 from .report import newest_report, render_report, report_name, same_report
+from .sheet import SHEET, baseline_documents, season_sheet
 
 WATCHLIST = domain_watchlist(Path(__file__).resolve().parent.parent)  # plan's, fetch's and show's default
 MAX_READINGS_BYTES = 4 * 1024 * 1024
 TEXT_LIMIT = 64 * 1024 * 1024  # a derived text file: at most what a 50 MiB document derives
-READINGS = "readings.md"
-MEASURES = "measures.md"
 NOT_LISTED = "not in SEC company_tickers.json"
 INVALID_RAW = (
     "{ticker}: {count} in raw/ failed validation; first: {path}: {reason}; "
@@ -249,7 +240,6 @@ def _unsupported(
         "cik": cik,
         "entity_name": entity_name,
         "submissions": submissions,
-        "companyfacts": None,
         "window": _window_json(window),
         "truncated": None,
         "seasons": [],
@@ -278,18 +268,11 @@ class _Fetcher:
     client: EdgarClient
     refresh: bool
 
-    def _document(self, path: Path, url: str, check: Callable[[bytes], object] | None = None) -> FileStatus:
+    def _document(self, path: Path, url: str) -> FileStatus:
         """Write the document at ``url`` to ``path`` unless a file is there already; with ``refresh``,
-        request it anyway and compare it with that file. ``check`` reads the body before it is
-        written (a ``ValueError`` aborts the run)."""
+        request it anyway and compare it with that file."""
         if not os.path.lexists(path):
-            body = self.client.document(url).body
-            if check is not None:
-                try:
-                    check(body)
-                except ValueError as error:
-                    raise ValueError(f"GET {url}: {error}") from None
-            write_file(path, body)
+            write_file(path, self.client.document(url).body)
             return "new"
         if not self.refresh:
             return "reused"
@@ -329,45 +312,32 @@ class _Fetcher:
             status = "verified" if self.client.index_page(url).body == data else "changed"
         return status, [row.document for row in rows]
 
-    def dated(self, season: Season, item: Dated) -> dict[str, Any]:
+    def eight_k(self, season: Season, item: Dated) -> dict[str, Any]:
+        """An 8-K's index page, then its primary document and the exhibits the page lists."""
         folder = filing_folder(item.form, item.dated, item.accession)
         directory = self.raw / season_folder(season.period) / folder
-        files: list[dict[str, Any]] = []
-        if item.form == "8-K":
-            index_path = directory / f"{item.accession}-index.htm"
-            status, exhibits = self._index(index_path, item)
-            files.append(self._entry(index_path, folder, status, False))
-            for name in (item.document, *exhibits):
-                path = directory / name
-                files.append(
-                    self._entry(
-                        path, folder, self._document(path, archive_url(self.cik, item.accession, name)), True
-                    )
-                )
-        else:
-            path = directory / item.document
-            status = self._document(
-                path,
-                archive_url(self.cik, item.accession, item.document),
-                parse_form4 if item.form == "4" else None,
-            )
-            files.append(self._entry(path, folder, status, item.form != "4"))
+        index_path = directory / f"{item.accession}-index.htm"
+        status, exhibits = self._index(index_path, item)
+        files = [self._entry(index_path, folder, status, False)]
+        for name in (item.document, *exhibits):
+            path = directory / name
+            url = archive_url(self.cik, item.accession, name)
+            files.append(self._entry(path, folder, self._document(path, url), True))
         return {**_dated_json(item), "files": files}
 
 
-def _stamped_body(
-    layout: DataLayout, ticker: str, prefix: str, fetched: EdgarFetched, limit: int
-) -> tuple[Path, FileStatus]:
-    """Write a body as ``{prefix}{token}.json`` unless its bytes equal the newest such file's."""
+def _stamped_body(layout: DataLayout, ticker: str, fetched: EdgarFetched) -> tuple[Path, FileStatus]:
+    """Write the submissions as ``submissions_{token}.json`` unless their bytes equal the newest
+    such file's."""
     directory = layout.raw(ticker)
-    held = newest(directory, prefix, JSON_SUFFIX, fetched.fetched_at)
+    held = newest(directory, SUBMISSIONS_PREFIX, JSON_SUFFIX, fetched.fetched_at)
     if held is not None:
         try:
-            if read_raw(held, limit) == fetched.body:
+            if read_raw(held, JSON_LIMIT) == fetched.body:
                 return held, "reused"
         except ValueError:  # an invalid newest file is never the same body
             pass
-    path = directory / stamped(prefix.rstrip("_"), fetched.fetched_at, JSON_SUFFIX)
+    path = directory / stamped(SUBMISSIONS_PREFIX.rstrip("_"), fetched.fetched_at, JSON_SUFFIX)
     write_file(path, fetched.body)
     return path, "new"
 
@@ -383,19 +353,8 @@ def _submissions(
     except UnicodeDecodeError:
         raise ValueError("submissions: the body is not UTF-8") from None
     parse_submissions(body, cik)  # an unreadable body aborts the run before anything is written
-    path, status = _stamped_body(layout, ticker, SUBMISSIONS_PREFIX, fetched, JSON_LIMIT)
+    path, status = _stamped_body(layout, ticker, fetched)
     return {"path": str(path), "status": status}, body, fetched.fetched_at
-
-
-def _companyfacts(layout: DataLayout, ticker: str, cik: str, client: EdgarClient) -> dict[str, Any]:
-    """Read the company facts; write them unless their bytes equal the newest file's."""
-    fetched = client.companyfacts(cik)
-    try:
-        read_companyfacts(fetched.body, cik)
-    except ValueError as error:
-        raise ValueError(f"GET {fetched.url}: {error}") from None
-    path, status = _stamped_body(layout, ticker, COMPANYFACTS_PREFIX, fetched, COMPANYFACTS_LIMIT)
-    return {"path": str(path), "status": status}
 
 
 def span_seasons(seasons: Sequence[Season], window: Window) -> tuple[Season, ...]:
@@ -432,11 +391,10 @@ def _fetch_ticker(
             "season": season.period.isoformat(),
             "in_window": window.admits(season.period),
             "filing": fetcher.filing(season),
-            "filings": [fetcher.dated(season, item) for item in season.fetched],
+            "filings": [fetcher.eight_k(season, item) for item in season.fetched],
         }
         for season in span
     ]
-    facts = _companyfacts(layout, ticker, cik, client) if span else None
     return {
         "ticker": ticker,
         "status": "fetched",
@@ -444,7 +402,6 @@ def _fetch_ticker(
         "cik": cik,
         "entity_name": submissions.entity_name,
         "submissions": held,
-        "companyfacts": facts,
         "window": _window_json(window),
         "truncated": listing.truncated(window),
         "seasons": seasons,
@@ -598,9 +555,9 @@ def fetch(
     refresh: bool = False,
     watchlist: Path = WATCHLIST,
 ) -> dict[str, Any]:
-    """Write every ticker's submissions, the EDGAR documents of each span season not in ``raw/``
-    yet and its company facts, then its calls list when due and its calls' transcripts; with
-    ``refresh``, request all of them again (module docstring).
+    """Write every ticker's submissions and the EDGAR documents of each span season not in ``raw/``
+    yet, then its calls list when due and its calls' transcripts; with ``refresh``, request all of
+    them again (module docstring).
 
     Without tickers, the ``stock`` section of the ``watchlist`` file is fetched; explicit tickers
     never read the file. A ticker EDGAR does not list, or whose recent filings
@@ -702,10 +659,12 @@ class _Texts:
 
 @dataclass(frozen=True)
 class ReadingsCheck:
-    """One season's readings and every problem ``check`` finds in them (valid without any)."""
+    """One comparison's readings and every problem ``check`` finds in them (valid without any); the
+    kind is the one they were read as, None for a draft that could not be read."""
 
     path: Path
     season: date
+    kind: Kind | None
     readings: Readings | None
     problems: tuple[Problem, ...]
 
@@ -716,36 +675,48 @@ class ReadingsCheck:
 
 @dataclass
 class _State:
-    """One ticker's raw files, derived texts, measures, readings and reports as of ``now``."""
+    """One ticker's raw files, derived texts, sheets, readings and reports as of ``now``."""
 
     layout: DataLayout
     ticker: str
     now: datetime
     raw: RawState
     texts: _Texts
-    measures_cache: dict[date, Measures] = field(default_factory=dict)
-    checks_cache: dict[date, ReadingsCheck] = field(default_factory=dict)
+    sheets_cache: dict[date, str] = field(default_factory=dict)
+    checks_cache: dict[tuple[date, Kind], ReadingsCheck] = field(default_factory=dict)
 
-    def measures(self, files: SeasonFiles) -> Measures:
-        if files.day not in self.measures_cache:
-            self.measures_cache[files.day] = season_measures(self.raw, files)
-        return self.measures_cache[files.day]
+    def sheet(self, files: SeasonFiles) -> str:
+        if files.day not in self.sheets_cache:
+            self.sheets_cache[files.day] = season_sheet(self.raw, files)
+        return self.sheets_cache[files.day]
 
-    def measures_path(self, files: SeasonFiles) -> Path:
-        return self.layout.formatted(self.ticker) / season_folder(files.day) / MEASURES
+    def sheet_path(self, files: SeasonFiles) -> Path:
+        return self.layout.formatted(self.ticker) / season_folder(files.day) / SHEET
 
-    def measures_status(self, files: SeasonFiles) -> Fresh:
-        path = self.measures_path(files)
+    def sheet_status(self, files: SeasonFiles) -> Fresh:
+        path = self.sheet_path(files)
         if not os.path.lexists(path):
             return "missing"
         try:
             held = read_raw(path, TEXT_LIMIT).decode("utf-8")
         except (ValueError, UnicodeDecodeError):
             return "stale"
-        return "fresh" if held == self.measures(files).text else "stale"
+        return "fresh" if held == self.sheet(files) else "stale"
 
-    def readings_path(self, files: SeasonFiles) -> Path:
-        return self.layout.reports(self.ticker) / season_folder(files.day) / READINGS
+    def comparisons(self, files: SeasonFiles) -> tuple[Comparison, ...]:
+        listing = self.raw.listing
+        return () if listing is None else comparisons(listing, files.season)
+
+    def baseline_files(self, files: SeasonFiles, kind: Kind) -> SeasonFiles | None:
+        """The season files of the comparison's baseline season, None when there is none."""
+        listing = self.raw.listing
+        found = None if listing is None else comparison(listing, files.season, kind)
+        if found is None or found.baseline is None:
+            return None
+        return self.raw.season(found.baseline.period)
+
+    def readings_path(self, files: SeasonFiles, kind: Kind) -> Path:
+        return self.layout.reports(self.ticker) / season_folder(files.day) / readings_name(kind)
 
     @cached_property
     def sources(self) -> dict[str, Source]:
@@ -764,117 +735,126 @@ class _State:
             for document in files.documents
         }
 
-    def rules_season(self, files: SeasonFiles) -> RulesSeason:
+    def rules(self, files: SeasonFiles, kind: Kind) -> RulesComparison:
+        """What the rules need of the season's comparison of ``kind`` (a 10-Q season's ``year``
+        has no baseline: the rules refuse it)."""
         listing = self.raw.listing
-        by_season = {
-            held.day: tuple(document.doc_id for document in held.documents) for held in self.raw.seasons
-        }
-        baselines: dict[str, tuple[tuple[date, ...], tuple[str, ...]]] = {}
-        if listing is not None:
-            for item in ITEMS:
-                if item.baseline not in baselines:
-                    days = tuple(
-                        season.period for season in baseline_seasons(listing, files.season, item.baseline)
-                    )
-                    baselines[item.baseline] = (
-                        days,
-                        tuple(doc for day in days for doc in by_season.get(day, ())),
-                    )
-        return RulesSeason(
+        found = None if listing is None else comparison(listing, files.season, kind)
+        baseline = None if found is None else found.baseline
+        return RulesComparison(
+            kind=kind,
             period=files.day,
             form=files.season.filing.form,
-            proxy=bool(files.season.of_forms(("DEF 14A",))),
-            call=files.call.status,
             documents=frozenset(document.doc_id for document in files.documents),
+            baseline=None if baseline is None else baseline.period,
+            baseline_documents=() if found is None else baseline_documents(self.raw, found),
             sources=self.sources,
-            baselines=baselines,
         )
 
-    def check(self, files: SeasonFiles, path: Path | None = None) -> ReadingsCheck:
-        """The season's readings (``path``, or its readings file) parsed and checked."""
-        chosen = path or self.readings_path(files)
-        if path is None and files.day in self.checks_cache:
-            return self.checks_cache[files.day]
+    def _checked(self, files: SeasonFiles, path: Path, kind: Kind | None) -> ReadingsCheck:
+        """The readings at ``path`` parsed and checked as ``kind``'s, or as their title's (a draft)."""
         try:
-            content = read_raw(chosen, MAX_READINGS_BYTES).decode("utf-8-sig")
+            content = read_raw(path, MAX_READINGS_BYTES).decode("utf-8-sig")
         except (ValueError, UnicodeDecodeError) as error:
-            found = ReadingsCheck(chosen, files.day, None, (Problem(1, UNREADABLE.format(error=error)),))
-        else:
-            readings, problems = parse_readings(content, self.ticker, files.day)
-            problems.extend(readings_problems(readings, self.rules_season(files)))
-            found = ReadingsCheck(
-                chosen, files.day, readings, tuple(sorted(problems, key=lambda item: item.line))
-            )
-        if path is None:
-            self.checks_cache[files.day] = found
-        return found
+            return ReadingsCheck(path, files.day, kind, None, (Problem(1, UNREADABLE.format(error=error)),))
+        readings, problems = parse_readings(content, self.ticker, files.day, kind)
+        problems.extend(readings_problems(readings, self.rules(files, readings.kind)))
+        return ReadingsCheck(
+            path, files.day, readings.kind, readings, tuple(sorted(problems, key=lambda item: item.line))
+        )
 
-    def readings_status(self, files: SeasonFiles) -> tuple[str, int]:
+    def check(self, files: SeasonFiles, kind: Kind) -> ReadingsCheck:
+        """The season's readings file of ``kind``, parsed and checked."""
+        key = (files.day, kind)
+        if key not in self.checks_cache:
+            self.checks_cache[key] = self._checked(files, self.readings_path(files, kind), kind)
+        return self.checks_cache[key]
+
+    def check_draft(self, files: SeasonFiles, path: Path) -> ReadingsCheck:
+        """A draft of the season's readings, read as the kind its title names."""
+        return self._checked(files, path, None)
+
+    def readings_status(self, files: SeasonFiles, kind: Kind) -> tuple[str, int]:
         """``missing``, ``failing`` (with the number of problems) or ``valid``."""
-        if not os.path.lexists(self.readings_path(files)):
+        if not os.path.lexists(self.readings_path(files, kind)):
             return "missing", 0
-        found = self.check(files)
+        found = self.check(files, kind)
         return ("valid", 0) if found.valid else ("failing", len(found.problems))
+
+    def unnamed(self, files: SeasonFiles, kind: Kind) -> list[str] | None:
+        """The season's documents its readings of ``kind`` name on no line, None without readings."""
+        if not os.path.lexists(self.readings_path(files, kind)):
+            return None
+        readings = self.check(files, kind).readings
+        if readings is None:
+            return None
+        named = {
+            doc_id
+            for _, item in readings.items
+            for doc_id in (
+                *(item.season or ()),
+                *(item.baseline or ()),
+                *(quote.doc_id for quote in item.quotes),
+            )
+        }
+        return [document.doc_id for document in files.documents if document.doc_id not in named]
 
     def report_directory(self, files: SeasonFiles) -> Path:
         return self.layout.reports(self.ticker) / season_folder(files.day)
 
-    def renderable(self, files: SeasonFiles) -> str | None:
-        """Why the season's report cannot be rendered now, or None."""
-        missing = files.missing
-        if missing is not None:
-            return missing
-        if files.call.status == "missing":
-            return files.call.reason
-        stale = [document.doc_id for document in files.documents if self.texts.status(document) != "present"]
+    def renderable(self, files: SeasonFiles, kind: Kind) -> str | None:
+        """Why the report of the season's comparison of ``kind`` cannot be rendered now, or None."""
+        sides = [files] + [held for held in (self.baseline_files(files, kind),) if held is not None]
+        for held in sides:
+            missing = held.missing
+            if missing is not None:
+                return missing
+            if held.call.status == "missing":
+                return held.call.reason
+        stale = [
+            document.doc_id
+            for held in sides
+            for document in held.documents
+            if self.texts.status(document) != "present"
+        ]
         if stale:
             return f"{_plural(len(stale), 'text file')} missing or out of date; run derive"
-        if self.measures_status(files) != "fresh":
-            return "the season's measures.md is missing or out of date; run derive"
-        status, problems = self.readings_status(files)
+        if self.sheet_status(files) != "fresh":
+            return f"the season's {SHEET} is missing or out of date; run derive"
+        status, problems = self.readings_status(files, kind)
         if status != "valid":
-            return f"the season's readings are {status}" + (
+            return f"the season's {kind} readings are {status}" + (
                 f" ({_plural(problems, 'problem')})" if problems else ""
             )
         return None
 
-    def render(self, files: SeasonFiles, moment: datetime) -> str:
-        """The season's report rendered at ``moment``, or ``ValueError`` saying why it cannot be."""
+    def render(self, files: SeasonFiles, kind: Kind, moment: datetime) -> str:
+        """The report of the season's comparison of ``kind`` rendered at ``moment``, or ``ValueError``
+        saying why it cannot be."""
         _refuse_invalid(self.raw)
-        why = self.renderable(files)
+        why = self.renderable(files, kind)
         if why is not None:
-            raise ValueError(f"{self.ticker} {files.day}: {why}")
-        readings = self.check(files).readings
-        if (
-            readings is None
-            or self.raw.listing is None
-            or self.raw.cik is None
-            or self.raw.entity_name is None
-        ):
-            raise ValueError(f"{self.ticker} {files.day}: the readings cannot be read")
-        return render_report(
-            self.ticker,
-            self.raw.cik,
-            self.raw.entity_name,
-            self.raw.listing,
-            files,
-            self.measures(files),
-            readings,
-            moment,
-        )
+            raise ValueError(f"{self.ticker} {files.day} {kind}: {why}")
+        readings = self.check(files, kind).readings
+        listing = self.raw.listing
+        found = None if listing is None else comparison(listing, files.season, kind)
+        if readings is None or found is None:
+            raise ValueError(f"{self.ticker} {files.day} {kind}: the readings cannot be read")
+        return render_report(self.raw, files, found, readings, moment)
 
-    def report_status(self, files: SeasonFiles) -> tuple[Fresh, Path | None]:
-        """Whether the season's newest report is the report rendered now."""
-        path = newest_report(self.report_directory(files), self.now)
+    def report_status(self, files: SeasonFiles, kind: Kind) -> tuple[Fresh, Path | None]:
+        """Whether the newest report of the season's comparison of ``kind`` is the report rendered
+        now."""
+        path = newest_report(self.report_directory(files), kind, self.now)
         if path is None:
             return "missing", None
-        if self.renderable(files) is not None or self.raw.invalid_files or self.raw.former_layout:
+        if self.renderable(files, kind) is not None or self.raw.invalid_files or self.raw.former_layout:
             return "stale", path
         try:
             held = read_raw(path, MAX_READINGS_BYTES).decode("utf-8")
         except (ValueError, UnicodeDecodeError):
             return "stale", path
-        return ("fresh" if same_report(held, self.render(files, self.now)) else "stale"), path
+        return ("fresh" if same_report(held, self.render(files, kind, self.now)) else "stale"), path
 
     def action(self, window: Window, refresh: bool = False) -> tuple[Action, str | None]:
         """What comes next for the window's seasons, and why (module docstring)."""
@@ -891,10 +871,6 @@ class _State:
             return "fetch", missing
         if raw.invalid_files:
             return "fetch", _invalid_reason(raw.invalid_files, RENAME_AND_FETCH)
-        for files in raw.within(window):
-            status, reason = raw.facts_status(files)
-            if status == "missing":
-                return "fetch", reason
         call = next((files.call.reason for files in span if files.call.status == "missing"), None)
         if call is not None:
             return "fetch", call
@@ -911,18 +887,24 @@ class _State:
         ]
         if stale:
             return "derive", f"{_plural(len(stale), 'text file')} missing or out of date: {', '.join(stale)}"
-        measures = [str(files.day) for files in raw.within(window) if self.measures_status(files) != "fresh"]
-        if measures:
-            return "derive", f"measures.md missing or out of date for: {', '.join(measures)}"
+        sheets = [str(files.day) for files in raw.within(window) if self.sheet_status(files) != "fresh"]
+        if sheets:
+            return "derive", f"{SHEET} missing or out of date for: {', '.join(sheets)}"
         research = []
         for files in raw.within(window):
-            readings, problems = self.readings_status(files)
-            if readings != "valid":
-                count = f", {_plural(problems, 'problem')}" if problems else ""
-                research.append(f"{files.day} ({readings}{count})")
+            for found in self.comparisons(files):
+                readings, problems = self.readings_status(files, found.kind)
+                if readings != "valid":
+                    count = f", {_plural(problems, 'problem')}" if problems else ""
+                    research.append(f"{files.day} {found.kind} ({readings}{count})")
         if research:
             return "research", "readings missing or failing check: " + ", ".join(research)
-        reports = [str(files.day) for files in raw.within(window) if self.report_status(files)[0] != "fresh"]
+        reports = [
+            f"{files.day} {found.kind}"
+            for files in raw.within(window)
+            for found in self.comparisons(files)
+            if self.report_status(files, found.kind)[0] != "fresh"
+        ]
         if reports:
             return "render", f"no current report for: {', '.join(reports)}"
         return "reuse", None
@@ -959,13 +941,30 @@ def _stray(state: _State) -> tuple[list[str], list[str]]:
 # --------------------------------------------------------------------------- plan
 
 
+def _comparison_json(state: _State, files: SeasonFiles, found: Comparison) -> dict[str, Any]:
+    status, problems = state.readings_status(files, found.kind)
+    report, path = state.report_status(files, found.kind)
+    baseline = found.baseline
+    return {
+        "kind": found.kind,
+        "baseline": None
+        if baseline is None
+        else {"season": baseline.period.isoformat(), "form": baseline.filing.form},
+        "readings": {
+            "path": str(state.readings_path(files, found.kind)),
+            "status": status,
+            "problems": problems,
+            "unnamed_documents": state.unnamed(files, found.kind),
+        },
+        "report": {"path": None if path is None else str(path), "status": report},
+    }
+
+
 def _season_json(state: _State, files: SeasonFiles, window: Window) -> dict[str, Any]:
     own = files.season.filing
     folder = filing_folder(own.form, own.period, own.accession)
     texts = [document.doc_id for document in files.documents if state.texts.status(document) != "present"]
     in_window = window.admits(files.day)
-    readings_status, problems = state.readings_status(files) if in_window else ("not needed", 0)
-    facts, facts_reason = state.raw.facts_status(files)
     entry: dict[str, Any] = {
         "season": files.day.isoformat(),
         "in_window": in_window,
@@ -975,11 +974,7 @@ def _season_json(state: _State, files: SeasonFiles, window: Window) -> dict[str,
             "raw": files.filing is not None,
         },
         "filings": [
-            {
-                **_dated_json(item.item),
-                "raw": all(needed.present for needed in item.needed)
-                and (item.item.form != "4" or item.form4 is not None),
-            }
+            {**_dated_json(item.item), "raw": all(needed.present for needed in item.needed)}
             for item in files.filings
         ],
         "listed_only": [_dated_json(item) for item in files.season.filings if not item.fetched],
@@ -993,17 +988,10 @@ def _season_json(state: _State, files: SeasonFiles, window: Window) -> dict[str,
             "reason": files.call.reason,
         },
         "texts": {"documents": len(files.documents), "stale": texts},
-        "companyfacts": {"status": facts, "reason": facts_reason},
     }
     if in_window:
-        report, path = state.report_status(files)
-        entry["measures"] = {"path": str(state.measures_path(files)), "status": state.measures_status(files)}
-        entry["readings"] = {
-            "path": str(state.readings_path(files)),
-            "status": readings_status,
-            "problems": problems,
-        }
-        entry["report"] = {"path": None if path is None else str(path), "status": report}
+        entry["sheet"] = {"path": str(state.sheet_path(files)), "status": state.sheet_status(files)}
+        entry["comparisons"] = [_comparison_json(state, files, found) for found in state.comparisons(files)]
     return entry
 
 
@@ -1021,7 +1009,6 @@ def describe(state: _State, window: Window, refresh: bool = False) -> dict[str, 
         "cik": raw.cik,
         "entity_name": raw.entity_name,
         "submissions": None if raw.submissions is None else str(raw.submissions),
-        "companyfacts": None if raw.companyfacts is None else str(raw.companyfacts),
         "window": _window_json(window),
         "truncated": None if listing is None else listing.truncated(window),
         "former_layout": [str(path) for path in raw.former_layout],
@@ -1099,13 +1086,13 @@ def _write_text(path: Path, derived: str, existing: str | None) -> TextWrite:
 
 def derive(layout: DataLayout, ticker: str, now: datetime) -> dict[str, Any]:
     """Write the derived text of every document of every listed season in ``raw/`` and the
-    ``measures.md`` of every listed season whose 10-K or 10-Q is in ``raw/``, each only when it
-    is missing, cannot be read or differs from its derivation."""
+    ``season.md`` of every listed season whose 10-K or 10-Q is in ``raw/``, each only when it is
+    missing, cannot be read or differs from its derivation."""
     state = resolve(layout, ticker, now)
     _refuse_invalid(state.raw)
     texts = state.texts
     written: list[dict[str, Any]] = []
-    measures: list[dict[str, Any]] = []
+    sheets: list[dict[str, Any]] = []
     for files in state.raw.seasons:
         for document in files.documents:
             path = texts.path(document)
@@ -1120,18 +1107,18 @@ def derive(layout: DataLayout, ticker: str, now: datetime) -> dict[str, Any]:
                 }
             )
         if files.filing is not None:
-            path = state.measures_path(files)
+            path = state.sheet_path(files)
             try:
                 existing = read_raw(path, TEXT_LIMIT).decode("utf-8")
             except (ValueError, UnicodeDecodeError):
                 existing = None
-            status = _write_text(path, state.measures(files).text, existing)
-            measures.append({"season": files.day.isoformat(), "path": str(path), "status": status})
+            status = _write_text(path, state.sheet(files), existing)
+            sheets.append({"season": files.day.isoformat(), "path": str(path), "status": status})
     stray_files, stray_reports = _stray(state)
     return {
         "ticker": state.ticker,
         "documents": written,
-        "measures": measures,
+        "sheets": sheets,
         "stray_files": stray_files,
         "stray_reports": stray_reports,
     }
@@ -1144,14 +1131,15 @@ def _check_json(found: ReadingsCheck) -> dict[str, Any]:
     return {
         "path": str(found.path),
         "season": found.season.isoformat(),
+        "kind": found.kind,
         "valid": found.valid,
         "problems": [{"line": problem.line, "message": problem.message} for problem in found.problems],
     }
 
 
 def check(layout: DataLayout, ticker: str, now: datetime, paths: Sequence[Path] = ()) -> dict[str, Any]:
-    """Check the readings at ``paths`` (each a season's draft: its season is its folder's name) or
-    every season's readings file; write nothing."""
+    """Check the readings at ``paths`` (each a season's draft: its season is its folder's name, its
+    kind its title's) or every readings file of every season; write nothing."""
     state = resolve(layout, ticker, now)
     _refuse_invalid(state.raw)
     checks: list[ReadingsCheck] = []
@@ -1166,10 +1154,13 @@ def check(layout: DataLayout, ticker: str, now: datetime, paths: Sequence[Path] 
             files = state.raw.season(day)
             if files is None:
                 raise ValueError(f"{path}: no season of the newest submissions ends on {day}")
-            checks.append(state.check(files, path))
+            checks.append(state.check_draft(files, path))
     else:
         checks = [
-            state.check(files) for files in state.raw.seasons if os.path.lexists(state.readings_path(files))
+            state.check(files, kind)
+            for files in state.raw.seasons
+            for kind in KINDS
+            if os.path.lexists(state.readings_path(files, kind))
         ]
     return {"ticker": state.ticker, "readings": [_check_json(found) for found in checks]}
 
@@ -1178,37 +1169,44 @@ def check(layout: DataLayout, ticker: str, now: datetime, paths: Sequence[Path] 
 
 
 def render(layout: DataLayout, ticker: str, now: datetime) -> dict[str, Any]:
-    """Write a report of every listed season with readings whose report rendered now differs from its
-    newest one (or which has none); refuse while a raw file is invalid, or when no season has a
-    report to write and none a current one (the reason of the first season that cannot be
-    rendered)."""
+    """Write a report of every comparison of a listed season with readings whose report rendered now
+    differs from its newest one (or which has none); refuse while a raw file is invalid, or when no
+    comparison has a report to write and none a current one (the reason of the first that cannot
+    be rendered)."""
     state = resolve(layout, ticker, now)
     _refuse_invalid(state.raw)
     moment = state.now.replace(microsecond=0)
-    candidates = [files for files in state.raw.seasons if os.path.lexists(state.readings_path(files))]
+    candidates = [
+        (files, found.kind)
+        for files in state.raw.seasons
+        for found in state.comparisons(files)
+        if os.path.lexists(state.readings_path(files, found.kind))
+    ]
     if not candidates:
         raise ValueError(f"{state.ticker}: no season has readings; run plan")
     written, current, skipped = [], [], []
-    for files in candidates:
-        why = state.renderable(files)
+    for files, kind in candidates:
+        named = {"season": files.day.isoformat(), "kind": kind}
+        why = state.renderable(files, kind)
         if why is not None:
-            skipped.append({"season": files.day.isoformat(), "reason": why})
-        elif state.report_status(files)[0] == "fresh":
-            current.append(files.day.isoformat())
+            skipped.append({**named, "reason": why})
+        elif state.report_status(files, kind)[0] == "fresh":
+            current.append(named)
         else:
-            path = state.report_directory(files) / report_name(moment)
-            write_file(path, state.render(files, moment))
-            written.append({"season": files.day.isoformat(), "path": str(path)})
+            path = state.report_directory(files) / report_name(kind, moment)
+            write_file(path, state.render(files, kind, moment))
+            written.append({**named, "path": str(path)})
     if not written and not current:
+        first = skipped[0]
         raise ValueError(
-            f"{state.ticker}: no report to write: {skipped[0]['season']}: {skipped[0]['reason']}"
+            f"{state.ticker}: no report to write: {first['season']} {first['kind']}: {first['reason']}"
         )
     return {"ticker": state.ticker, "reports": written, "current": current, "skipped": skipped}
 
 
 def show(layout: DataLayout, tickers: Sequence[str], now: datetime, *, watchlist: Path = WATCHLIST) -> str:
-    """Per ticker, the action ``plan`` gives and the newest season report rendered now (or why there
-    is none)."""
+    """Per ticker, the action ``plan`` gives and the reports of the newest season one of whose
+    reports can be rendered now, each rendered now (or why there is none)."""
     tickers = tickers or stock_tickers(watchlist)
     symbols = list(dict.fromkeys(ticker_symbol(ticker) for ticker in tickers))
     moment = to_eastern(now, "now")
@@ -1218,16 +1216,27 @@ def show(layout: DataLayout, tickers: Sequence[str], now: datetime, *, watchlist
         state = resolve(layout, symbol, moment)
         action, reason = state.action(window)
         header = f"{symbol}: action {action}" + ("." if reason is None else f": {printable(reason)}.")
-        newest = None
+        newest: tuple[SeasonFiles, list[Kind]] | None = None
         for files in reversed(state.raw.seasons):
-            if os.path.lexists(state.readings_path(files)) and state.renderable(files) is None:
-                newest = files
+            kinds = [
+                found.kind
+                for found in state.comparisons(files)
+                if os.path.lexists(state.readings_path(files, found.kind))
+                and state.renderable(files, found.kind) is None
+            ]
+            if kinds:
+                newest = (files, kinds)
                 break
         if newest is None or state.raw.invalid_files or state.raw.former_layout:
             parts.append(f"{header}\n\nNo season report can be rendered now.\n")
             continue
-        text = state.render(newest, moment)
-        status, path = state.report_status(newest)
-        shown = "none" if path is None else str(path)
-        parts.append(f"{header} Newest report: {printable(shown)} ({status}).\n\n{text}")
+        files, kinds = newest
+        named, texts = [], []
+        for kind in kinds:
+            texts.append(state.render(files, kind, moment))
+            status, path = state.report_status(files, kind)
+            named.append(
+                f"Newest {kind} report: {printable('none' if path is None else str(path))} ({status})."
+            )
+        parts.append(f"{header} {' '.join(named)}\n\n" + "\n".join(texts))
     return "\n".join(parts)

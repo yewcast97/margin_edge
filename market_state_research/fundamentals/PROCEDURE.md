@@ -1,10 +1,11 @@
-# Fundamentals: season reports of what changed against the baselines
+# Fundamentals: six aspects of each season against its baseline
 
 This procedure compares, for each stock of the watchlist (or the tickers given) and each
-season whose end lies in a window of dates, the season with its baselines over the catalogue
-of items, and renders one report per season. The model of seasons and calls, the items, the
-quote rules, the readings' grammar and rules, the report, the sources and the file layout are
-in [AGENTS.md](AGENTS.md).
+season whose end lies in a window of dates, the season with its baseline over six aspects, in
+one comparison per kind that applies to it (the quarter against the season before, and for a
+10-K season the year against the previous 10-K season), and renders one report per comparison.
+The model of seasons and calls, the aspects and the comparisons, the quote rules, the readings'
+grammar and rules, the reports, the sources and the file layout are in [AGENTS.md](AGENTS.md).
 
 Run every command from the repository root with Python 3.13+ and locked dependencies:
 
@@ -16,8 +17,8 @@ A run: `fetch` with the window (section 2), then `plan` with the same window (se
 whose `action` names the next step: `fetch` again, `derive` (section 4), `research` (section
 5) or `render` (section 6). Repeat `plan` until it says `reuse` or the work cannot go on, then
 `show` and report back (section 6). Run `fetch` first in every run, at least once a day while
-a season's call or company facts are `waiting`: `plan` works offline and cannot see what EDGAR
-or the transcript provider published since.
+a season's call is `waiting`: `plan` works offline and cannot see what EDGAR or the transcript
+provider published since.
 
 ## 1. Parameters
 
@@ -27,12 +28,13 @@ or the transcript provider published since.
 | `--watchlist PATH` | this domain's `watchlist.json`, which you maintain ([market_state_research/AGENTS.md](../AGENTS.md), Watchlists) | `fetch`, `plan` and `show` only: the watchlist read when no ticker is given, which `fetch` and `plan` print as `watchlist` (null when tickers are given). One that is missing, malformed or without a ticker stops the command with one line naming the file: write or correct the file with the tickers the user follows, report the change and run the command again. |
 | `--from YYYY-MM-DD` | the same day two years before `--to` (29 February: 28 February) | `fetch` and `plan` only: the earliest season end in the window, a New York date in ASCII digits; refused when it is after `--to`. |
 | `--to YYYY-MM-DD` | today's New York date | `fetch` and `plan` only: the latest season end in the window; refused when it is after today. |
-| `--refresh` | off | `fetch` and `plan` only: request the span's EDGAR documents, company facts, transcripts and calls list again, whatever `raw/` holds (section 2); `plan` then says `fetch`. Use it only when the user asks, on one `fetch`, and plan afterwards without it: one EDGAR request per span document and one EarningsCalls.dev request per transcript, plus the calls list. |
+| `--refresh` | off | `fetch` and `plan` only: request the span's EDGAR documents, transcripts and calls list again, whatever `raw/` holds (section 2); `plan` then says `fetch`. Use it only when the user asks, on one `fetch`, and plan afterwards without it: one EDGAR request per span document and one EarningsCalls.dev request per transcript, plus the calls list. |
 | `--data-dir PATH` | this domain's `data/` | Another data directory, for offline checks; every command takes it. |
 
 Both window dates are included and bound season ends, not filing dates; `fetch` also writes
-the four seasons before the window, which its readings compare with. Give `plan` the same
-window as `fetch`. The other commands take no window.
+the four seasons before the window, the baselines of its comparisons. Give `plan` the same
+window as `fetch`. The other commands take no window. A long window yields many reports: one
+per season, two for each 10-K season.
 
 **Settings.** `fetch` reads two lines of the repository-root `.env` (the process environment
 takes precedence); no other command reads a setting. Never print or repeat a value, and write
@@ -50,8 +52,8 @@ it nowhere but where it is used.
   When the key is missing or malformed, ask the user to add or correct the line themselves;
   never ask for the key in the conversation or open an account.
 
-**Limits.** An old or new value: 1 to 600 characters on one line; a quote: 20 to 800
-characters after normalisation.
+**Limits.** An item's title: 1 to 120 characters; a value or a difference: 1 to 600 characters
+on one line; a quote: 20 to 800 characters after normalisation.
 
 ## 2. Fetch: write the span's documents into `raw/`
 
@@ -60,19 +62,20 @@ uv run --locked python -m market_state_research.fundamentals.script fetch
 uv run --locked python -m market_state_research.fundamentals.script fetch INTC --from 2025-01-01 --to 2026-10-09
 ```
 
-It writes the submissions JSON and the company facts when they changed, each EDGAR document
-of a span season that is not in `raw/` yet, the ticker's calls list when it is due and each
-span call's transcript that is not in `raw/` yet; it writes no text. A ticker's first fetch
-of the default window takes about 300 EDGAR requests, a minute or more. It prints `requests`
-(EDGAR), `user_agent: "set"`, `transcript_requests` (EarningsCalls.dev), `api_key: "set"`,
-`window`, `refresh`, `stopped` and an entry per ticker under `tickers`; act on these:
+It writes the submissions JSON when it changed, each EDGAR document of a span season that is
+not in `raw/` yet (the 10-K or 10-Q and each 8-K's index page, primary document and EX-99
+exhibits), the ticker's calls list when it is due and each span call's transcript that is not
+in `raw/` yet; it writes no text. A ticker's first fetch of the default window takes about 100
+EDGAR requests, half a minute or more. It prints `requests` (EDGAR), `user_agent: "set"`,
+`transcript_requests` (EarningsCalls.dev), `api_key: "set"`, `window`, `refresh`, `stopped` and
+an entry per ticker under `tickers`; act on these:
 
 | Field | Meaning |
 | --- | --- |
 | `status`, `reason` | `fetched`, or `unsupported` with the reason (EDGAR does not list the ticker, no 10-K or 10-Q, two filings for one period, an Item 2.02 8-K without a usable event date): report it and stop for that ticker; the others go on. |
-| `submissions`, `companyfacts` | Each with `path` and `status`: `new` (written now) or `reused` (the same bytes as the newest file, which `path` names). |
+| `submissions` | With `path` and `status`: `new` (written now) or `reused` (the same bytes as the newest file, which `path` names). |
 | `truncated`, `pending_filings[]`, `skipped_filings[]` | Report them: `truncated: true` means seasons before the oldest recent filing are not read; a pending filing (with its `form`, `accession`, `dated`, `filed`, `items`) may later join a season already read; a skipped filing (with its `reason`) is never fetched. |
-| `seasons[]` | Per span season, oldest first: `season`, `in_window`, its `filing` (`form`, `accession`, `filed`, `period`, `doc_id`, `path`, `status`) and its `filings[]` (`form`, `accession`, `dated`, `filed`, `items` and `files[]`, each with `path`, `doc_id`, null for an index page or a Form 4's XML, and `status`). A status is `new` (written now) or `reused` (already in `raw/`, not requested); with `--refresh`, `verified` (requested again: the same bytes) or `changed` (EDGAR now serves other bytes, and nothing was written: replace the stored file only when the user asks, by renaming it `.rejected` and running `fetch` again). |
+| `seasons[]` | Per span season, oldest first: `season`, `in_window`, its `filing` (`form`, `accession`, `filed`, `period`, `doc_id`, `path`, `status`) and its `filings[]`, the 8-Ks (`form`, `accession`, `dated`, `filed`, `items` and `files[]`, each with `path`, `doc_id`, null for an index page, and `status`). A status is `new` (written now) or `reused` (already in `raw/`, not requested); with `--refresh`, `verified` (requested again: the same bytes) or `changed` (EDGAR now serves other bytes, and nothing was written: replace the stored file only when the user asks, by renaming it `.rejected` and running `fetch` again). |
 | `calls` | `status`: `fetched`; `unsupported` with the `reason` (the provider's symbol names several issuers): report it and stop for that ticker's calls; or `stopped` with the `reason` (below). `events`: the calls list kept, with its `path`, `pages`, `fetched_at`, `status` (`new`, asked for now with the `reason` it was due, or `reused`); null when none is in `raw/`. `transcripts[]`: each span call's `id`, `date`, `fiscal_year`, `fiscal_quarter`, `season`, `doc_id`, `path` and `status` (`new` or `reused`; with `--refresh`, `verified`, or `refreshed`: the provider served other bytes, now written beside the stored copy at `path`, the copy every later read takes). `pending_calls[]`: calls dated after the newest season's filing. |
 | `stopped` | Null, or the `ticker` and `reason` where EarningsCalls.dev's request limit stopped every later request to it in this run (exit 0): the later tickers' EDGAR files were still fetched, and their `calls.status` is `stopped`. Report it with the reset the line names, and run `fetch` again only after it. |
 
@@ -94,83 +97,81 @@ fields:
 | Field | Meaning |
 | --- | --- |
 | `action`, `reason` | What to do next (table below) and why (`reason` is null for `reuse`). |
-| `cik`, `entity_name`, `submissions`, `companyfacts` | The issuer and the newest submissions and company facts files read. |
+| `cik`, `entity_name`, `submissions` | The issuer and the newest submissions file read. |
 | `truncated`, `pending_filings[]`, `skipped_filings[]` | As in `fetch`. |
 | `former_layout[]` | Folders of the layout before 2026-10-23 (section 7). |
 | `invalid_files[]` | Raw files that failed validation, a moved filing or transcript included, each with `path` and `reason`. |
-| `unlisted_files[]` | Filing folders and transcripts the newest listing does not hold: left out (report them). |
+| `unlisted_files[]` | Filing folders and transcripts the newest listing does not hold, and what `fetch` wrote until 2026-10-24 and no longer writes (section 7): left out (report them). |
 | `calls` | `events`: the newest calls list in `raw/` (`path`, `pages`, `fetched_at`), null when none is valid; `due`: why `fetch` asks for the list again now, or null; `pending_calls[]`. |
-| `seasons[]` | Per span season, oldest first: `season`, `in_window`; `filing` and `filings[]`, each with `raw` (true once its files are in `raw/` and valid), and `listed_only[]`, the season's filings nothing fetches; `documents`: `complete`, or what is missing; `call` with `status` (`transcript`, `unavailable`, `waiting` or `missing`: AGENTS.md, Seasons, filings and calls), `due`, `as_of`, `calls[]`, `documents` (their `DOC_ID`s) and `reason`; `texts` (`documents`, the count, and `stale`, the `DOC_ID`s whose text is missing or differs); `companyfacts` (`status`: `present`, `waiting` or `absent`, and `reason`). A window season also has `measures` (`path`; `status` `fresh`, `stale` or `missing`), `readings` (`path`, where they are or go; `status` `valid`, `failing` or `missing`; the number of `problems`) and `report` (the newest report's `path`; `status` `fresh`, `stale` or `missing`). |
+| `seasons[]` | Per span season, oldest first: `season`, `in_window`; `filing` and `filings[]`, each with `raw` (true once its files are in `raw/` and valid), and `listed_only[]`, the season's filings nothing fetches; `documents`: `complete`, or what is missing; `call` with `status` (`transcript`, `unavailable`, `waiting` or `missing`: AGENTS.md, Seasons, filings and calls), `due`, `as_of`, `calls[]`, `documents` (their `DOC_ID`s) and `reason`; `texts` (`documents`, the count, and `stale`, the `DOC_ID`s whose text is missing or differs). A window season also has `sheet` (`path` of its `season.md`; `status` `fresh`, `stale` or `missing`) and `comparisons[]`, one per comparison of the season: `kind` (`quarter`, `year`), `baseline` (its `season` and `form`, null when none is listed), `readings` (`path`, where they are or go; `status` `valid`, `failing` or `missing`; the number of `problems`; `unnamed_documents`, the season's `DOC_ID`s no line of the readings names, null without readings) and `report` (the newest report's `path`; `status` `fresh`, `stale` or `missing`). |
 | `stray_files[]`, `stray_reports[]` | Files directly in `formatted/{T}/` and `reports/{T}/`, from the former layout (section 7). |
 
 The first action that applies:
 
 | `action` | When | Next step |
 | --- | --- | --- |
-| `fetch` | A former-layout folder is in `raw/`; no season is listed; a span season's 10-K, 10-Q or fetched filing is not in `raw/`; a raw file is invalid; no company facts are in `raw/`; a span season's call is `missing`; or the calls list is due (`calls.due`; with `--refresh`, whenever the window holds a listed season). | Rename each `former_layout` and `invalid_files` entry with `.rejected`, if any, then run `fetch` with the same window (and `--refresh`, when `plan` had it). When `reason` refuses the submissions (`no 10-K or 10-Q …`, two filings for one period, an 8-K's event date) or `fetch` reported the ticker or its calls `unsupported`, report it and stop for that ticker. |
-| `derive` | A span document's text is missing or differs, or a window season's `measures.md` is missing or out of date. | Run `derive` (section 4). |
-| `research` | A window season's `readings.status` is not `valid`. | Read the season (section 4), then write and check its readings (section 5). |
-| `render` | Every window season's readings pass, and a window season's newest report is not the report rendered now. | Run `render` (section 6). |
-| `reuse` | Every window season's newest report is the report rendered now. | Run `show` and report back (section 6). When `seasons` is empty, tell the user the window holds no season end. |
+| `fetch` | A former-layout folder is in `raw/`; no season is listed; a span season's 10-K, 10-Q or 8-K is not in `raw/`; a raw file is invalid; a span season's call is `missing`; or the calls list is due (`calls.due`; with `--refresh`, whenever the window holds a listed season). | Rename each `former_layout` and `invalid_files` entry with `.rejected`, if any, then run `fetch` with the same window (and `--refresh`, when `plan` had it). When `reason` refuses the submissions (`no 10-K or 10-Q …`, two filings for one period, an 8-K's event date) or `fetch` reported the ticker or its calls `unsupported`, report it and stop for that ticker. |
+| `derive` | A span document's text is missing or differs, or a window season's `season.md` is missing or out of date. | Run `derive` (section 4). |
+| `research` | The `readings.status` of a window comparison is not `valid`. | Read the season and its baselines (section 4), then write and check the readings (section 5). |
+| `render` | Every window comparison's readings pass, and one's newest report is not the report rendered now. | Run `render` (section 6). |
+| `reuse` | Every window comparison's newest report is the report rendered now. | Run `show` and report back (section 6). When `seasons` is empty, tell the user the window holds no season end. |
 
-A `waiting` or `unavailable` call, and company facts `waiting` or `absent`, block no action:
-the season's call items are `unavailable` and its missing figures not computable until a
-later `fetch` brings them, which makes its measures and report stale.
+A `waiting` or `unavailable` call blocks no action: the season is read without its call until a
+later `fetch` brings the transcript, which makes its sheet and reports stale and its call a
+document the readings do not name yet (`unnamed_documents`).
 
-## 4. Derive the texts and measures, and read the season
+## 4. Derive the texts and sheets, and read the season
 
 ```sh
 uv run --locked python -m market_state_research.fundamentals.script derive INTC
 ```
 
 `derive` writes the derived text of every document of every listed season in `raw/` and the
-`measures.md` of every listed season, whatever the window: each missing file, one that cannot
-be read and one that differs from its derivation. It prints `ticker`, `documents[]` (each with
+`season.md` of every listed season, whatever the window: each missing file, one that cannot be
+read and one that differs from its derivation. It prints `ticker`, `documents[]` (each with
 `doc_id`, `season`, `kind`, `path` and `status`: `published`, `exists` or `rewritten`),
-`measures[]` (each with `season`, `path` and `status`), `stray_files[]` and `stray_reports[]`
+`sheets[]` (each with `season`, `path` and `status`), `stray_files[]` and `stray_reports[]`
 (section 7).
 
-Read a season from its `measures.md`, `data/formatted/{T}/{PERIOD}/measures.md`
-(AGENTS.md, Derived text, figures and measures): its call line, its `## Baselines` table (per
-baseline, the seasons and the `DOC_ID`s you read and name), its filings, its figures, the
-Python items and the inputs of the bot's items. Each document's text is at
-`data/formatted/{T}/{PERIOD}/{DOC_ID}.md`. A call's text holds, per turn, a heading line with
-the speaker's name and role as the provider gives them (`David Zinsner (executive)`,
-`Jane Analyst (analyst)`, `Operator (operator)`), then the turn's paragraphs, one per line; the
-prepared remarks are the turns before the first analyst's, the questions and answers the
-turns from it on. A `.txt` document's line is not a statement (AGENTS.md, Quotes): read the
-whole sentence around every line you find.
+Read a season from its sheet, `data/formatted/{T}/{PERIOD}/season.md` (AGENTS.md, Derived text
+and the season's sheet): its call line, its `## Comparisons` table (per comparison, the
+baseline season and the `DOC_ID`s of its documents, the ones a `baseline:` line names), its
+filings and its inputs (the season's documents by what they are). Each document's text is at
+`data/formatted/{T}/{PERIOD}/{DOC_ID}.md`, a baseline season's in that season's folder. A
+call's text holds, per turn, a heading line with the speaker's name and role as the provider
+gives them (`David Zinsner (executive)`, `Jane Analyst (analyst)`, `Operator (operator)`), then
+the turn's paragraphs, one per line; the prepared remarks are the turns before the first
+analyst's, the questions and answers the turns from it on. A `.txt` document's line is not a
+statement (AGENTS.md, Quotes): read the whole sentence around every line you find.
 
-Read each bot item's rule (AGENTS.md, The catalogue): it names the value to read, once in the
-documents of the item's baseline (its old value) and once in the season's (its new value):
+Read every document of the season and of the comparison's baseline season, whole, for each
+aspect (AGENTS.md, The aspects and the comparisons), in this order: the 10-K or 10-Q, then the
+8-Ks by date (an earnings release's exhibits with them), then the call. Where to look first:
 
-| Section | Where to read |
+| Aspect | Where to read |
 | --- | --- |
-| 1 Guidance | The outlook of the season's earnings release (often a table of ranges) and of its call, against the previous season's (the previous guidance). 1.7 holds the season's results (`measures.md`, Inputs) against the previous guidance for this quarter; 1.9 reads the 1.7 readings of the earlier seasons in `reports/{T}/`, where they exist. |
-| 2 Financials | The segment note of the 10-K or 10-Q (2.7, 2.8) against the same quarter last year's or the previous quarter's; the items the issuer calls non-recurring, one-time or unusual in the release's reconciliations and the filing's MD&A (2.9). |
-| 3 Accounting and audit | The 8-Ks with Items 4.01 and 4.02 (Inputs); in a 10-K, the auditor's report (opinion, critical audit matters), the impairment notes and the revenue recognition policy; in every filing, the controls and procedures item, the basis of presentation and accounting standards notes and any going concern statement; the release's non-GAAP reconciliation (3.10). |
-| 4 Risk, legal and related parties | The risk factors (a 10-Q's Part II, Item 1A updates those of the 10-K) against the previous quarter's filing and the previous 10-K; the legal proceedings, contingencies, related-party and guarantee notes; the 10-K's concentration note (4.8). |
-| 5 Governance and insiders | Each 8-K with Item 5.02 (Inputs), whole; each schedule (5.4): the subject issuer its cover names (a schedule the issuer files as another company's holder is not about the issuer) and the holder's percent of the class against its previous schedule; the proxy statement's pledging and compensation sections (5.5, 5.6). |
-| 6 Capital allocation and financing | The release's dividend statement, the filing's equity note and repurchase table, the debt note (covenants, refinancing), the 8-Ks with Items 1.01, 2.01, 2.03 and 3.02, the registrations listed (6.3); for 6.4, the amount stated against the equity and total assets the Inputs give. |
-| 7 Earnings call: statements | The executives' prepared remarks against the previous call's; 7.4 holds the figures they state against the filing and `measures.md`. |
-| 8 Earnings call: questions and answers | The turns from the first analyst's on, against the previous call's. |
-| 9 Disclosure | The operating metrics (units, customers, backlog, other indicators) the previous quarter's release and filing state (9.2). |
+| Guidance | The outlook of each earnings release (often a table of ranges and points) and of its call; for a quarter, the results of the quarter in the season's release against the guidance the baseline's release and call gave for it. |
+| Capital expenditure | The release's capital spending lines (gross, net of partners' contributions), the filing's liquidity section and cash flow statement, the projects the filing and the call name (fabs, plants, equipment) and their timing. |
+| Upstream supply | The filing's risk factors and its discussion of operations (suppliers, components, materials, capacity, lead times, prices), the inventory note, the release's and the call's statements on supply. |
+| Downstream demand | The release's and the call's statements on demand, orders, backlog, bookings and pricing; the filing's revenue discussion, its customers' inventory and its concentration of revenue (a 10-K's major customers note). |
+| Debt structure | The filing's debt note and liquidity section (notes, rates, maturities, credit facilities, commercial paper, covenants), the 8-Ks with Items 1.01 and 2.03, and the registrations and prospectuses the sheet lists; the interest expense the filing states. |
+| Product roadmap | The release's business highlights, the filing's discussion of products and technologies, and the call's statements on products, process nodes, launches, ramps and delays. |
 
-These searches find candidate lines; a hit is not a reading, and a statement may meet a rule
-without any of these words:
+These searches find candidate lines; a hit is not a reading, and a statement may belong to an
+aspect without any of these words:
 
 ```sh
 grep -n -i -E "outlook|guidance|expect|forecast|range|approximately|full year|full-year|next quarter|reaffirm|withdraw" \
   market_state_research/fundamentals/data/formatted/INTC/2026-06-27/DOC_ID.md
-grep -n -i -E "operating segment|reportable segment|non-recurring|nonrecurring|one-time|unusual|restructuring|impairment" \
+grep -n -i -E "capital expenditure|capital spending|capital investment|capex|construction|fab|factory|facilit|equipment" \
   market_state_research/fundamentals/data/formatted/INTC/2026-06-27/DOC_ID.md
-grep -n -i -E "going concern|material weakness|critical audit matter|opinion|restat|change in accounting|adopt|estimate" \
+grep -n -i -E "supplier|supply|substrate|wafer|component|material|capacity|lead time|shortage|constrain|inventor" \
   market_state_research/fundamentals/data/formatted/INTC/2026-06-27/DOC_ID.md
-grep -n -i -E "risk factor|legal proceeding|litigation|investigation|subpoena|contingen|related part|guarantee|customer" \
+grep -n -i -E "demand|customer|order|backlog|booking|pricing|price|end market|concentration|percent of revenue" \
   market_state_research/fundamentals/data/formatted/INTC/2026-06-27/DOC_ID.md
-grep -n -i -E "pledg|percent of class|aggregate amount|performance measure|metric|incentive" \
+grep -n -i -E "notes due|senior notes|debt|loan|credit facilit|commercial paper|covenant|borrow|refinanc|repay|interest expense" \
   market_state_research/fundamentals/data/formatted/INTC/2026-06-27/DOC_ID.md
-grep -n -i -E "dividend|repurchase|buyback|authoriz|covenant|waiver|refinanc|notes due|credit facilit|offering|convertible|acqui|divest" \
+grep -n -i -E "launch|ramp|roadmap|process node|node|introduc|milestone|delay|discontinu|next-generation|product" \
   market_state_research/fundamentals/data/formatted/INTC/2026-06-27/DOC_ID.md
 ```
 
@@ -178,43 +179,52 @@ grep -n -i -E "dividend|repurchase|buyback|authoriz|covenant|waiver|refinanc|not
 
 ### 5.1 Which readings, and where
 
-1. Write the readings of each window season whose `readings.status` is `missing`, and fix
-   those that are `failing`, each from the season's documents and its baselines' alone. Never
-   rewrite passing readings unless a bot item's rule changed after they were written
-   (AGENTS.md, The items).
-2. Write them at the season's `plan` `readings.path`, `data/reports/{T}/{PERIOD}/readings.md`,
-   in the grammar of AGENTS.md (The readings): the title, then every bot item of the
-   catalogue, in order, each with its three lines and its quotes. Rewrite them until `check`
-   passes them (5.3).
+1. Write the readings of each window comparison whose `readings.status` is `missing`, and fix
+   those that are `failing`, each from the documents of the season and of its comparison's
+   baseline season alone. Never rewrite passing readings unless an aspect changed after they
+   were written (AGENTS.md, The aspects and the comparisons), or a document their
+   `unnamed_documents` lists (a call transcript that arrived later, say) states items they
+   lack.
+2. Write them at the comparison's `plan` `readings.path`,
+   `data/reports/{T}/{PERIOD}/readings_{KIND}.md`, in the grammar of AGENTS.md (The readings):
+   the title, then the six aspects, in order, each `na` or its items. A 10-Q season has one
+   file, `readings_quarter.md`. A 10-K season has two: `readings_quarter.md`, the fourth
+   quarter's items against the documents of the third quarter's season, and `readings_year.md`,
+   the fiscal year's items against those of the previous 10-K season. Rewrite them until
+   `check` passes them (5.3).
 
 ### 5.2 Each item
 
-- `baseline:` the `DOC_ID`s of the baseline documents you read for the item, from its baseline
-  kind's row of `measures.md`'s `## Baselines`, joined by `; `; `none` for an item whose
-  baseline is `none` and with the old values `no baseline`, `not applicable` and `unavailable`.
-- `old:` the value the item's rule names as the baseline documents state it, and `new:` the
-  same value as the season's documents state it, each one line of facts: the figures with their
-  units and periods, the names, counts and dates (`old: full-year revenue $61.0 to $65.0
-  billion, midpoint $63.0 billion` and `new: full-year revenue $60.0 to $64.0 billion, midpoint
-  $62.0 billion`), written alike on both lines so that the two read side by side; `none` when
-  the documents state nothing of the kind (no 8-K with Item 4.01, no going concern doubt).
-  State both values whatever the size of the change, and never a judgment, a cause the
-  documents do not state, or valuation, forecast or advice wording. The old value of an item
-  whose baseline is `none` is `—`.
-- Instead of a value, the status that applies (AGENTS.md, The items): `not applicable` for
-  every annual item in a 10-Q season and every proxy item in a season without a `DEF 14A`
-  among its filings, and `unavailable` for every call item while the call line of
-  `measures.md` is not `transcript`, each as the new value and, for an item with a baseline, the
-  old one; `no baseline` as the old value only, while the item's baseline row lists no
-  document (for a call item, no call); `not disclosed` or `not computable` only for an item the
-  catalogue says may be so.
-- Quotes: the statements the values rest on, each followed by its attribution line,
-  `— DOC_ID` or, for a call, `— DOC_ID, Speaker (role)` as the turn's heading writes it. An
-  item of `high` importance whose new value is stated, not `none`, quotes at least one
-  statement of the season's own documents; a quote comes from the season's documents or from
-  those its baseline line names. Which statements to quote, that a quote is a whole statement
-  copied verbatim from the derived text, the whole statements `check` refuses and the cuts it
-  cannot see, and the length limits are the quote rules (AGENTS.md, Quotes).
+- One item per subject: a guided measure for one period, a capital project, an input, a
+  customer or end market, a note or facility, a product or process node. Statements on one
+  subject in several documents of either side are one item with several quotes; statements on
+  different subjects are different items. List every item you find, in the order its first
+  statement comes in the documents (5.1), the items only the baseline states last; title each
+  with the subject in your own words (`Full-year revenue guidance, fiscal year`), facts only.
+- `season:` the `DOC_ID`s of the season's documents the new value rests on, joined by `; `;
+  `baseline:` those of the baseline season's documents the old value rests on, from the
+  comparison's row of the sheet's `## Comparisons`; `none` beside a value that is `na` or
+  `no baseline`.
+- `new:` the value as the season's documents state it and `old:` the same value as the
+  baseline's documents state it, each one line of facts that names its period, its basis and
+  its unit (`old: fiscal 2025 revenue $50.0 to $54.0 billion, GAAP` and `new: fiscal 2026
+  revenue $52.0 to $56.0 billion, GAAP`), written alike on both lines so that the two read side
+  by side; `na` when the documents of that side state nothing of the item, and `no baseline`
+  as the old value when the comparison's `baseline` is null or the sheet lists none of its
+  documents. State both values whatever the size of the change, and never a judgment, a cause
+  the documents do not state, or valuation, forecast or advice wording. An item no side states
+  is no item: an aspect whose documents state nothing of it is the line `na`.
+- `difference:` the difference between the two values in facts (`$2.0 billion higher at both
+  ends of the range`, `a point of approximately $9 billion in place of a range of $8.0 to
+  $11.0 billion`); `none` when the two values are written alike; `na` beside a value that is
+  `na` or `no baseline`. Compute nothing the documents do not state but the arithmetic between
+  the two values as written.
+- Quotes: the statements each value rests on, each followed by its attribution line,
+  `— DOC_ID` or, for a call, `— DOC_ID, Speaker (role)` as the turn's heading writes it. Quote
+  every document a `season:` or `baseline:` line names at least once, and only those. Which
+  statements to quote, that a quote is a whole statement copied verbatim from the derived text,
+  the whole statements `check` refuses and the cuts it cannot see, and the length limits are
+  the quote rules (AGENTS.md, Quotes).
 
 ### 5.3 Check
 
@@ -224,15 +234,15 @@ uv run --locked python -m market_state_research.fundamentals.script check INTC \
   market_state_research/fundamentals/data/reports/INTC/2026-06-27/draft.md
 ```
 
-`check` writes nothing. Without a path it checks the `readings.md` of every listed season
+`check` writes nothing. Without a path it checks every readings file of every listed season
 that has one; a path names a draft, which lies in its season's folder
-(`data/reports/{T}/{PERIOD}/`, any name). It prints `ticker` and `readings[]`, each with
-`path`, `season`, `valid` and `problems[]` (each with its `line` and `message`), and exits 0
-even with problems: fix what each message names and check again until every window season's
-readings are `valid`. Readings also fail while a
-document they name has a text file that is missing or differs from the derivation: run
-`derive`, then copy again every quote the new text no longer holds. Never change a text file
-to make a quote match.
+(`data/reports/{T}/{PERIOD}/`, any name) and is read as the comparison its title names. It
+prints `ticker` and `readings[]`, each with `path`, `season`, `kind`, `valid` and
+`problems[]` (each with its `line` and `message`), and exits 0 even with problems: fix what
+each message names and check again until every window comparison's readings are `valid`.
+Readings also fail while a document they name has a text file that is missing or differs from
+the derivation: run `derive`, then copy again every quote the new text no longer holds. Never
+change a text file to make a quote match.
 
 ## 6. Render, show and report back
 
@@ -242,13 +252,14 @@ uv run --locked python -m market_state_research.fundamentals.script show
 uv run --locked python -m market_state_research.fundamentals.script plan
 ```
 
-`render` writes a new report, `data/reports/{T}/{PERIOD}/report_{TOKEN}.md`, for every listed
-season whose readings pass and whose newest report is not current, and prints `ticker`,
-`reports[]` (each with `season` and `path`), `current[]` (the seasons whose newest report is
-current) and `skipped[]` (each with `season` and the `reason` its report cannot be rendered).
-`show` writes nothing: per ticker it prints the action `plan` gives over the default window,
-the newest season whose report can be rendered now with its newest report's path and
-freshness, and that report rendered now (or `No season report can be rendered now.`).
+`render` writes a new report, `data/reports/{T}/{PERIOD}/report_{KIND}_{TOKEN}.md`, for every
+comparison whose readings pass and whose newest report is not current, and prints `ticker`,
+`reports[]` (each with `season`, `kind` and `path`), `current[]` (each `season` and `kind` whose
+newest report is current) and `skipped[]` (each with `season`, `kind` and the `reason` its
+report cannot be rendered). `show` writes nothing: per ticker it prints the action `plan` gives
+over the default window, the newest season one of whose reports can be rendered now with each
+of its newest reports' path and freshness, and those reports rendered now (or `No season report
+can be rendered now.`).
 
 The final `plan`, with the tickers and the window of the run's first `plan`, must show `reuse`
 for every supported ticker. A ticker that `fetch` reported `unsupported` (EDGAR does not list
@@ -256,12 +267,12 @@ it, its submissions are refused, or the provider's symbol is ambiguous) stays at
 report it with `fetch`'s reason. One left at `fetch` because `fetch` stopped at the provider's
 request limit: report it with the `stopped` line.
 
-Report for each ticker: its newest season report's path as a link (the report lists every item
-by importance with its old and new values: point to it rather than picking items from it); the
-window, whether it is `truncated`, any `pending_filings`, `skipped_filings` and
-`pending_calls`, each season whose call is `waiting` (with its `reason`) or `unavailable`
-(with its `as_of`) and each whose company facts are `waiting` or `absent`; unsupported tickers
-and calls with their reason, `stopped`, `invalid_files`, `unlisted_files`, the documents
+Report for each ticker: each window comparison's newest report path as a link (the report lists
+every item of each aspect with its new and old values and their difference: point to it rather
+than picking items from it); the window, whether it is `truncated`, any `pending_filings`,
+`skipped_filings` and `pending_calls`, each season whose call is `waiting` (with its `reason`)
+or `unavailable` (with its `as_of`), and each comparison with `unnamed_documents`; unsupported
+tickers and calls with their reason, `stopped`, `invalid_files`, `unlisted_files`, the documents
 `fetch --refresh` found `changed` and the transcripts it `refreshed`, files renamed `.rejected`
 with their messages, and the `stray_reports` left in place. Never add a judgment, a cause or a
 summary the report does not state: point to the reports. What blocks you or looks wrong in a
@@ -278,6 +289,13 @@ texts directly in `formatted/{T}/` and per-document reports and time series dire
 seasons. `derive` and `plan` list the old texts as `stray_files`: delete them, since no
 command reads them. The old reports are `stray_reports`: leave them where they are and name
 them in the report back.
+
+A data directory fetched from 2026-10-23 to 2026-10-24 also holds the company facts
+(`raw/{T}/companyfacts_{TOKEN}.json`) and, in its season folders, the folders of the Form 4s,
+proxy statements and beneficial owners' schedules (`4_…`, `DEF14A_…`, `SC13GA_…`,
+`SCHEDULE13GA_…` …): `plan` lists them as `unlisted_files`, and they block nothing. A season
+folder may hold that catalogue's `measures.md`, `readings.md` and `report_{TOKEN}.md`: no
+command reads them; leave them in place.
 
 ## Failure handling
 
@@ -302,13 +320,15 @@ more:
 | `…: HTTP 404 …; EarningsCalls.dev serves nothing at this address` | The provider lists a call whose transcript it does not serve: run `fetch` once more after a day; when it fails the same way, report the line and stop for that ticker. |
 | `stopped` in `fetch`'s output (`…: HTTP 429; EarningsCalls.dev's request limit is reached …; run fetch again once it resets`) | Report it with the reset date the line names; run `fetch` again only after it. EDGAR's files of every ticker were still fetched. |
 | `…; EarningsCalls.dev is unavailable: wait and run fetch again`, `…; EDGAR is unavailable: …`, `…; EDGAR's rate limit: …` or `…: the body ended after N of M bytes; run fetch again` | Wait some minutes (ten for EDGAR's rate limit), then run `fetch` once more. When it fails the same way again, report it and stop for that ticker. |
-| `calls.status: unsupported` (`EarningsCalls.dev lists N issuers for T (ambiguous): their calls cannot be told apart`) | Report it; the ticker's call items stay `unavailable`. |
-| `GET URL: calls list …`, `GET URL: transcript: …`, `GET URL: …` naming a company facts or Form 4 field | The provider's or EDGAR's format changed and nothing of that body was written. Report the line and open an issue with it. |
+| `calls.status: unsupported` (`EarningsCalls.dev lists N issuers for T (ambiguous): their calls cannot be told apart`) | Report it; the ticker's seasons are read without their calls. |
+| `GET URL: calls list …`, `GET URL: transcript: …` | The provider's format changed and nothing of that body was written. Report the line and open an issue with it. |
 | `filing index ACC: …` (`fetch`) | EDGAR changed the index page layout and nothing of the 8-K was written, or, when a `PATH` comes first, an index page in `raw/` no longer parses (do what the line says). Report the line and open an issue with it. |
-| `INTC: no season has readings; run plan` or `INTC: no report to write: PERIOD: REASON` (`render`) | Not an error to report: do what `plan` says; the reason names what the season lacks. |
+| `INTC: no season has readings; run plan` or `INTC: no report to write: PERIOD KIND: REASON` (`render`) | Not an error to report: do what `plan` says; the reason names what the comparison lacks. |
 | `PATH: a readings draft lies in its season's folder, named YYYY-MM-DD` (`check`) | Move the draft into `data/reports/{T}/{PERIOD}/` and check it there. |
-| `'no baseline' while the baseline is in raw/: DOC_ID; …` | Read those documents and give the item its old value. |
-| `DOC_ID is no document of this item's baseline (KIND: SEASONS)` | Name only documents of the seasons `measures.md` lists for the item's baseline. |
+| `only a 10-K season has year readings: …` | A 10-Q season has the quarter comparison alone: write its items in `readings_quarter.md`, titled `quarter readings`. |
+| `'no baseline' while the baseline is in raw/: DOC_ID; …` | Read those documents and give the item its old value, or `na`. |
+| `DOC_ID is no document of the season PERIOD` or `DOC_ID is no document of the baseline season PERIOD` | Name on `season:` only the season's documents and on `baseline:` only those the sheet's `## Comparisons` row of the comparison lists. |
+| `DOC_ID is named on this line but quoted nowhere in this item` | Quote the statement of that document the value rests on, or take the document off the line. |
 | `a quote must be whole sentences, …` | The quote cuts a statement: quote it from its start to its end (AGENTS.md, Quotes). |
 | `a call's quote names its turn: '— DOC_ID, Speaker (role)', …` or `the quote lies in the turn 'HEADING', not the one its attribution names` | Attribute the quote to the turn its first occurrence lies in, exactly as that turn's heading line writes it. |
-| `an old or new value states facts only, without valuation, forecast or advice wording; found: …` | Restate the value as the facts alone, without that word. |
+| `an item's title, values and difference state facts only, without valuation, forecast or advice wording; found: …` | Restate them as the facts alone, without that word. |

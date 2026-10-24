@@ -109,8 +109,8 @@ three by hand, under that domain's `AGENTS.md`:
 | Section | Contents | Written by |
 | --- | --- | --- |
 | `raw/` | What was fetched, verbatim, as the domain's `AGENTS.md` describes each file; in `posts`, every post of one account over one interval the user asked about. | `fetch`, the one network command of each scripted domain, and the bot only renames a file `.rejected`; in `posts`, the bot, once per file. |
-| `formatted/` | What Python derives from `raw/`: the tables, texts or measures the domain's `AGENTS.md` names; in `posts`, the fact-check of each raw file. | `record` in `stock_iv_regime` and `market_position_regime`, `derive` in `fundamentals`; the bot in `posts`. |
-| `reports/` | What the user reads. | `record`, or `render` in `fundamentals`, where the bot also writes each season's readings; the bot in `posts`, one report per request. |
+| `formatted/` | What Python derives from `raw/`: the tables, texts or sheets the domain's `AGENTS.md` names; in `posts`, the fact-check of each raw file. | `record` in `stock_iv_regime` and `market_position_regime`, `derive` in `fundamentals`; the bot in `posts`. |
+| `reports/` | What the user reads. | `record`, or `render` in `fundamentals`, where the bot also writes the readings of each season's comparisons; the bot in `posts`, one report per request. |
 
 - **A run keeps what is stored.** The raw files are the evidence every value rests on, and
   requesting them again costs quota and time: `fetch` requests only what the window lacks,
@@ -142,8 +142,8 @@ three by hand, under that domain's `AGENTS.md`:
   in place with a dated history, cannot be rebuilt, and is kept like `raw/`.
 - **`reports/` is never overwritten.** A report name that exists fails the command, and
   older reports stay: no command deletes one, and neither does the bot. The fundamentals
-  domain's readings are the bot's: it may rewrite a season's readings until `check` passes
-  them, and again after an item's rule changes (the domain's `AGENTS.md`). A `posts` report
+  domain's readings are the bot's: it may rewrite a comparison's readings until `check` passes
+  them, and again after an aspect changes (the domain's `AGENTS.md`). A `posts` report
   answers one request, under a name of its own, and is never rewritten.
 - **Selection replaces bookkeeping.** Per key (a session's chain, a week's report, a call's
   transcript) the newest file wins (the domain's `AGENTS.md` says what a key is), so a refresh
@@ -194,9 +194,7 @@ three by hand, under that domain's `AGENTS.md`:
   unscheduled closure NYSE announces after that release is reported in an issue. A
   document that is no session's is dated by its own date, with no session logic:
   `market_position_regime`'s statistics of a month or a week, each published after it,
-  the filings and earnings-call transcripts of `fundamentals` (whose one use of the sessions
-  is an item's test of an earnings release accepted on the eve of a day without one), and
-  the posts of `posts`.
+  the filings and earnings-call transcripts of `fundamentals`, and the posts of `posts`.
 - Python reads its sources only through APIs or public files at fixed addresses, each from a
   command of its own that `plan` names (`fetch`), only to the source's fixed hosts over
   HTTPS, with bounded bodies and no redirect followed: a public read-only API that publishes
@@ -231,7 +229,7 @@ three by hand, under that domain's `AGENTS.md`:
 | --- | --- | --- |
 | [`stock_iv_regime`](stock_iv_regime/AGENTS.md) ([procedure](stock_iv_regime/PROCEDURE.md)) | Per session, the 14-DTE 25Δ skew, the 14-DTE ATM IV and the term structure (the 30-DTE ATM IV minus the 14-DTE) with their 252-session percentiles, and the 15-session correlations of the stock's daily return with the changes of the 14-DTE 25Δ call and put IVs, over a look-back window, in two charts read together. | EODHD options API (`EODHD_API`) and Tiingo daily prices (`TIINGO_API`). |
 | [`market_position_regime`](market_position_regime/AGENTS.md) ([procedure](market_position_regime/PROCEDURE.md)) | For the US equity market over a window of dates, FINRA's margin debt by month, S&P 500 futures positioning by week (asset managers' net long and leveraged funds' net short, each as its percentile over 52 weeks) and the VIX and the SKEW by session (each as a percentile over 252 sessions), in three charts read together. | FINRA's margin statistics workbook, the CFTC's Traders in Financial Futures (Socrata API) and Cboe's daily VIX and SKEW histories, none with a key. |
-| [`fundamentals`](fundamentals/AGENTS.md) ([procedure](fundamentals/PROCEDURE.md)) | Per stock issuer and season (fiscal period), what changed against stated baselines: 68 items in nine sections, each stating its old and new value, 15 computed by Python from EDGAR's XBRL facts, listing and Form 4s and the calls' transcripts, 51 read by the bot from the documents with verbatim quotes, and one report per season listing every item by importance, with no threshold and none left out. | SEC EDGAR (`SEC_USER_AGENT`) and the EarningsCalls.dev transcript API (`EARNINGSCALLS_API`). |
+| [`fundamentals`](fundamentals/AGENTS.md) ([procedure](fundamentals/PROCEDURE.md)) | Per stock issuer and season (fiscal period), six aspects (guidance, capital expenditure, upstream supply, downstream demand, debt structure, product roadmap) against the season before and, for a 10-K season, the previous 10-K season: every item the bot finds in the documents, its new and old values side by side with their difference and verbatim quotes, `na` where a side or an aspect states nothing, and one report per comparison, with no threshold and none left out. | SEC EDGAR (`SEC_USER_AGENT`) and the EarningsCalls.dev transcript API (`EARNINGSCALLS_API`). |
 | [`posts`](posts/AGENTS.md) ([procedure](posts/PROCEDURE.md)) | Per nominated poster, every post of the intervals the user asked about, archived verbatim and fact-checked claim by claim against cited evidence (`true`, `unverified` or `fake`); a profile with the poster's background and the count of verdicts so far; a report per request. | The poster's accounts, by the route the bot's host offers (a key only when that route is a platform's API: `{PLATFORM}_API`); evidence from primary sources first. |
 
 ### stock_iv_regime
@@ -286,22 +284,22 @@ Nothing adds a regime label.
 
 For each stock and each season (a fiscal period, named by its end) ending in a window of
 New York dates (`--from`, `--to`; default the two years ending today), the domain compares the
-season with stated baselines (the previous quarter, the same quarter last year, the previous
-10-K, proxy statement or guidance, the previous four or eight seasons) over 68 items in nine
-sections, from guidance and financials to the earnings call and the timing of the filings.
-`fetch` writes, for the window's seasons and the four before them, each season's 10-K or 10-Q,
-8-Ks with their exhibits, proxy statement, beneficial owners' schedules and Form 4s from SEC
-EDGAR to `raw/{TICKER}/{PERIOD}/`, the company's XBRL facts, and the issuer's earnings-call
-list and each call's transcript, with its speakers' names and roles, from EarningsCalls.dev.
-`plan` names the next step; `derive` writes each document's text and each season's
-`measures.md`, the 15 items Python computes; the bot writes each season's
-`reports/{TICKER}/{PERIOD}/readings.md`, the 51 items read from the documents with verbatim
-quotes, which `check` validates; `render` writes the season report `report_{TOKEN}.md` beside
-them, one table of every item, the high, then medium, then low importance the catalogue gives
-it, with its old value, its new value and, for a figure, the change (or a status saying why a
-value cannot be stated), then each item's evidence; and `show` prints the newest report of each
-ticker. No threshold decides whether a change counts, and nothing scores or ranks a season.
-Every comparison is mechanical; no valuation, forecast or advice is added.
+season with its baseline over six aspects: guidance, capital expenditure, upstream supply,
+downstream demand, debt structure and the product roadmap. Every season is compared with the
+season before it (`quarter`: the first quarter with the 10-K season), and a 10-K season also
+with the previous 10-K season (`year`). `fetch` writes, for the window's seasons and the four
+before them, each season's 10-K or 10-Q and 8-Ks with their exhibits from SEC EDGAR to
+`raw/{TICKER}/{PERIOD}/`, and the issuer's earnings-call list and each call's transcript, with
+its speakers' names and roles, from EarningsCalls.dev. `plan` names the next step; `derive`
+writes each document's text and each season's sheet, `season.md`, which lists its
+comparisons' baselines, its filings and its documents; the bot writes, per comparison,
+`reports/{TICKER}/{PERIOD}/readings_{KIND}.md`: every item it finds of each aspect, the season's
+value and the baseline's side by side with their difference and verbatim quotes, `na` where a
+side or an aspect states nothing, which `check` validates; `render` writes the report
+`report_{KIND}_{TOKEN}.md` beside them, one table per aspect of its items, each value with the
+documents it rests on, then each item's evidence; and `show` prints the newest season's reports
+of each ticker. Python computes no figure; no threshold decides whether a change counts, and
+nothing scores or ranks an item. No valuation, forecast or advice is added.
 
 ### posts
 

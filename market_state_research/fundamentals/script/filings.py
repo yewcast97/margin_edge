@@ -24,12 +24,12 @@ Amendments and transition reports (``10-K/A``, ``10-KT``, ``10-Q/A``, ``10-QT``,
 one chosen, wherever they are listed. A ``Window`` selects the seasons whose end falls
 between its two dates, both included.
 
-Filings of a season. Every other row of a form the domain reads (``FETCHED_FORMS``, whose
-documents ``fetch`` writes, and ``LISTED_FORMS``, which the measures list and nothing
-fetches) is dated by its own date: an ``8-K`` and a Form ``4`` by their ``reportDate`` (the
-event or the earliest transaction), which they must have and which may not be after their
-filing date; every other form by its filing date (a proxy statement's ``reportDate`` is its
-meeting's date, after its filing). Rule B places a filing dated D after the latest listed
+Filings of a season. Every other row of a form the domain reads (``FETCHED_FORMS``, the
+``8-K``, whose documents ``fetch`` writes, and ``LISTED_FORMS``, which a season's sheet lists
+and nothing fetches) is dated by its own date: an ``8-K`` by its ``reportDate`` (the event),
+which it must have and which may not be after its filing date; every other form by its filing
+date. No other form is read: a Form ``4``, a proxy statement or a beneficial owner's schedule
+is neither listed nor fetched. Rule B places a filing dated D after the latest listed
 season end P before D: when a later season is listed, the filing belongs to P; when P is the
 newest listed season, it belongs to P only when D is not after the filing date of P's own
 10-K or 10-Q, and is otherwise *pending*. Once EDGAR lists a later season, the same rule
@@ -62,9 +62,8 @@ number may appear only once among the recent rows, a 10-K or 10-Q may not report
 period after its filing date, ``items`` is printable ASCII of at most ``MAX_ITEMS``
 characters on every row, ``acceptanceDateTime`` is empty or a UTC time written
 ``YYYY-MM-DDTHH:MM:SS.fffZ``, and a ticker matching two entries with different CIKs is
-refused rather than resolved. A fetched form's primary document is a plain file name or,
-for a form EDGAR renders from XML, ``xsl...`` and ``/`` before it (``rendered_document``
-gives the raw file's name, which ``fetch`` requests). On an index page, the ``Document
+refused rather than resolved. A fetched form's primary document is a plain file name
+(``is_primary_document``), which ``fetch`` requests. On an index page, the ``Document
 Format Files`` table must end with its ``</table>`` (a page cut short is refused, not read
 for fewer exhibits), an exhibit's Seq is a whole number from 1 to 999999999 written in ASCII
 digits without a leading zero, its Type is ``EX-99`` alone or ``EX-99.`` followed by 1 to 16
@@ -110,39 +109,21 @@ RECENT_COLUMNS = (
 )
 MAX_ITEMS: Final = 200
 FORMS_SEEN_LIMIT = 200
-# The item an 8-K names when it furnishes results of operations: the earnings release.
+# The items an 8-K names when it furnishes results of operations (the earnings release), and
+# when it reports a material agreement or a direct financial obligation.
 ITEM_RESULTS: Final = "2.02"
-# The forms of a season whose documents fetch writes: every 8-K, the proxy statement, the
-# amendments of the beneficial owners' schedules and the insiders' Form 4.
-FETCHED_FORMS: Final = (
-    "8-K",
-    "DEF 14A",
-    "SC 13D/A",
-    "SC 13G/A",
-    "SCHEDULE 13D/A",
-    "SCHEDULE 13G/A",
-    "4",
-)
-# The forms of a season the measures list and nothing fetches.
+ITEMS_FINANCING: Final = ("1.01", "2.03")
+# The forms of a season whose documents fetch writes: every 8-K.
+FETCHED_FORMS: Final = ("8-K",)
+# The forms of a season its sheet lists and nothing fetches.
 NOTICES: Final = ("NT 10-K", "NT 10-Q")
 REGISTRATIONS: Final = ("S-3", "S-3ASR", "424B2", "424B3", "424B4", "424B5", "424B7")
-AMENDMENTS: Final = ("8-K/A", "4/A", "10-K/A", "10-Q/A")
+AMENDMENTS: Final = ("8-K/A", "10-K/A", "10-Q/A")
 LISTED_FORMS: Final = (*NOTICES, *REGISTRATIONS, *AMENDMENTS)
-HOLDER_FORMS: Final = ("SC 13D/A", "SC 13G/A", "SCHEDULE 13D/A", "SCHEDULE 13G/A")
 # The forms dated by their reportDate; every other one by its filing date.
-DATED_BY_REPORT: Final = ("8-K", "4")
+DATED_BY_REPORT: Final = ("8-K",)
 # A folder's form part: the form without spaces or slashes.
-FORM_TOKENS: Final = {
-    "10-K": "10-K",
-    "10-Q": "10-Q",
-    "8-K": "8-K",
-    "DEF 14A": "DEF14A",
-    "SC 13D/A": "SC13DA",
-    "SC 13G/A": "SC13GA",
-    "SCHEDULE 13D/A": "SCHEDULE13DA",
-    "SCHEDULE 13G/A": "SCHEDULE13GA",
-    "4": "4",
-}
+FORM_TOKENS: Final = {"10-K": "10-K", "10-Q": "10-Q", "8-K": "8-K"}
 # The filing index page's table of documents, its header and the exhibits read from it.
 INDEX_TABLE: Final = "Document Format Files"
 INDEX_COLUMNS: Final = ("Seq", "Description", "Document", "Type", "Size")
@@ -160,8 +141,6 @@ _CIK = re.compile(CIK_PATTERN, re.ASCII)
 _ACCESSION = re.compile(ACCESSION_PATTERN, re.ASCII)
 _ISO_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", re.ASCII)
 _ACCEPTED = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z", re.ASCII)
-# A document EDGAR renders from XML: its stylesheet's folder, then the raw file's name.
-_RENDERED = re.compile(r"xsl[A-Za-z0-9_]{1,40}/(?P<name>[A-Za-z0-9][A-Za-z0-9._-]{0,199})", re.ASCII)
 # The submissions JSON writes the CIK without its leading zeros, as text.
 _CIK_TEXT = re.compile(r"[0-9]{1,10}", re.ASCII)
 _CIK_LIMIT = 10**10
@@ -208,18 +187,6 @@ def _load_json(body: str) -> object:
 def is_primary_document(name: object) -> bool:
     """Whether ``name`` is a plain file name in a filing's archive folder (no path, no ``..``)."""
     return isinstance(name, str) and PRIMARY_DOCUMENT.fullmatch(name) is not None and ".." not in name
-
-
-def rendered_document(primary: str) -> str | None:
-    """The raw file a primary document names: itself when it is a plain file name, the file
-    after the stylesheet's folder when EDGAR renders it from XML (``xslF345X06/form4.xml``
-    gives ``form4.xml``, the XML in the filing's own folder); None for anything else."""
-    if is_primary_document(primary):
-        return primary
-    match = _RENDERED.fullmatch(primary)
-    if match is None or ".." in match["name"]:
-        return None
-    return match["name"]
 
 
 # --------------------------------------------------------------------------- company_tickers.json
@@ -528,11 +495,10 @@ class Dated:
 
     @property
     def document(self) -> str:
-        """The raw file of its primary document (``rendered_document``); a fetched filing has one."""
-        name = rendered_document(self.primary_document)
-        if name is None:
+        """Its primary document, a plain file name; a fetched filing has one."""
+        if not is_primary_document(self.primary_document):
             raise ValueError(f"{self.form} {self.accession}: no primary document")
-        return name
+        return self.primary_document
 
 
 @dataclass(frozen=True)
@@ -696,7 +662,7 @@ def _dated(submissions: Submissions) -> tuple[list[Dated], list[Skipped]]:
             day = row.period
         else:
             day = row.filed
-        if row.form in FETCHED_FORMS and rendered_document(row.primary_document) is None:
+        if row.form in FETCHED_FORMS and not is_primary_document(row.primary_document):
             skipped.append(
                 Skipped(
                     row.form, row.accession, row.filed, "its primaryDocument is no file fetch can request"

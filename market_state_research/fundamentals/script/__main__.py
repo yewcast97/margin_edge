@@ -1,19 +1,18 @@
 """Command line for the fundamentals pipeline; see the domain's PROCEDURE.md.
 
 For each season (a fiscal period, named by its end) in a window, the pipeline keeps the
-season's documents in data/raw/ (its 10-K or 10-Q, its 8-Ks with their exhibits, its proxy
-statement, the beneficial owners' schedules and the insiders' Form 4s, its earnings calls'
-transcripts) and the company's XBRL facts; their derived text and each season's
-mechanical comparison (measures.md) in data/formatted/; and the bot's readings of each
-season and the season's report of what changed against its baselines in data/reports/.
-fetch and plan take the window as --from and --to, New York calendar dates written
-YYYY-MM-DD that bound the season ends (both included): --to defaults to today and must not
-be after it, and --from defaults to the same day two years before --to and must not be after
---to; a refused window is one FUNDAMENTALS: line before any work. Only when the user asks,
-fetch --refresh requests the window's documents, facts, transcripts and calls list again,
-whatever raw/ holds, and rewrites nothing: an EDGAR document is compared with its stored
-file, and a transcript whose bytes changed is written beside the stored one; plan --refresh
-plans that fetch.
+season's documents in data/raw/ (its 10-K or 10-Q, its 8-Ks with their exhibits, its earnings
+calls' transcripts); their derived text and each season's sheet (season.md) in
+data/formatted/; and the bot's readings of each comparison of the season (the quarter against
+the season before, and for a 10-K season the year against the previous 10-K season), each over
+six aspects, with each comparison's report in data/reports/. fetch and plan take the window as
+--from and --to, New York calendar dates written YYYY-MM-DD that bound the season ends (both
+included): --to defaults to today and must not be after it, and --from defaults to the same day
+two years before --to and must not be after --to; a refused window is one FUNDAMENTALS: line
+before any work. Only when the user asks, fetch --refresh requests the window's documents,
+transcripts and calls list again, whatever raw/ holds, and rewrites nothing: an EDGAR document
+is compared with its stored file, and a transcript whose bytes changed is written beside the
+stored one; plan --refresh plans that fetch.
 
 fetch is the one command that uses the network, under two settings (from the environment
 or the ignored repository-root .env), which no other command reads and fetch never
@@ -21,9 +20,8 @@ prints: SEC_USER_AGENT (a name and an email address) for SEC EDGAR, and EARNINGS
 the user's own EarningsCalls.dev key, for the earnings calls' transcripts. Both are
 checked before the watchlist is read or any request is sent. Without tickers, fetch, plan
 and show read this domain's watchlist.json. The other commands work offline: they plan the
-next step, derive the texts and measures, check the bot's readings, render the season
-reports and show them. The clock is read in New York time, and every time printed is New
-York time.
+next step, derive the texts and sheets, check the bot's readings, render the reports and show
+them. The clock is read in New York time, and every time printed is New York time.
 """
 
 import argparse
@@ -84,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--refresh",
         action="store_true",
         help=(
-            "request the window's EDGAR documents, company facts, transcripts and calls list again, "
+            "request the window's EDGAR documents, transcripts and calls list again, "
             "whatever raw/ holds: an EDGAR document is compared with its stored file, never rewritten "
             "(verified or changed); a transcript whose bytes changed is written beside the stored one "
             "(refreshed)"
@@ -116,28 +114,28 @@ def build_parser() -> argparse.ArgumentParser:
         "fetch",
         [selection, window],
         "write each ticker's EDGAR submissions and, for each season of the window and the four before it, "
-        "the documents of its 10-K or 10-Q, 8-Ks, proxy statement, beneficial owners' schedules and Form 4s "
-        "that are not in raw/ yet and its company facts, then its earnings calls list from EarningsCalls.dev "
-        "when due and the transcripts of those seasons' calls (uses the network; needs SEC_USER_AGENT and "
-        "EARNINGSCALLS_API)",
+        "the documents of its 10-K or 10-Q and 8-Ks that are not in raw/ yet, then its earnings calls list "
+        "from EarningsCalls.dev when due and the transcripts of those seasons' calls (uses the network; "
+        "needs SEC_USER_AGENT and EARNINGSCALLS_API)",
     )
     command(
         "plan",
         [selection, window],
-        "list each season's documents, call, texts, measures, readings and report in the window and the next "
-        "action (read-only)",
+        "list each season's documents, call, texts, sheet and comparisons (readings and report) in the "
+        "window and the next action (read-only)",
     )
     derive_command = command(
         "derive",
         [storage],
-        "write the derived text of every document in raw/ and the measures.md of every season, each when it "
+        "write the derived text of every document in raw/ and the season.md of every season, each when it "
         "is missing or differs from its derivation",
     )
     derive_command.add_argument("ticker", metavar="TICKER")
     check_command = command(
         "check",
         [storage],
-        "check the bot's readings of each season against the documents' derived text (writes nothing)",
+        "check the bot's readings of each comparison of each season against the documents' derived text "
+        "(writes nothing)",
     )
     check_command.add_argument("ticker", metavar="TICKER")
     check_command.add_argument(
@@ -145,18 +143,21 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         type=file_path,
         metavar="READINGS_PATH",
-        help="default: every season's readings.md in reports/TICKER/; a draft lies in its season's folder",
+        help=(
+            "default: every season's readings_quarter.md and readings_year.md in reports/TICKER/; a draft "
+            "lies in its season's folder and names its comparison in its title"
+        ),
     )
     render_command = command(
         "render",
         [storage],
-        "write the report of every season whose readings pass and whose report is not current",
+        "write the report of every comparison whose readings pass and whose report is not current",
     )
     render_command.add_argument("ticker", metavar="TICKER")
     command(
         "show",
         [listed],
-        "print each ticker's newest season report (read-only)",
+        "print each ticker's newest season's reports (read-only)",
     )
     return parser
 

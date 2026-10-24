@@ -1,4 +1,4 @@
-"""script/text.py: derived text of HTML, plain text and XML.
+"""script/text.py: derived text of HTML and plain text.
 
 Quote normalisation and location are covered by ``test_quotes.py``. Everything here is
 pure string work: nothing touches the filesystem or the network.
@@ -13,7 +13,6 @@ from market_state_research.fundamentals.script.text import (
     html_text,
     plain_text,
     windows_1252,
-    xml_text,
 )
 
 LIGATURES = {
@@ -471,119 +470,3 @@ def test_html_text_is_deterministic_and_keeps_no_state_between_calls():
 )
 def test_html_output_has_only_spaces_and_line_feeds_and_one_final_line_feed(body):
     assert_derived_shape(html_text(body))
-
-
-# --------------------------------------------------------------------------- XML
-
-# A Schedule 13G amendment in EDGAR's XML form, cut to a few elements (the CIKs are synthetic).
-SCHEDULE_13G = b"""<?xml version="1.0" encoding="UTF-8"?>
-<edgarSubmission xmlns="http://www.sec.gov/edgar/schedule13g" xmlns:com="http://www.sec.gov/edgar/common">
-  <headerData>
-    <submissionType>SCHEDULE 13G/A</submissionType>
-    <filerInfo><filer><filerCredentials><cik>0001234567</cik></filerCredentials></filer></filerInfo>
-  </headerData>
-  <formData>
-    <coverPageHeader>
-      <securitiesClassTitle>Common Stock, par value $0.001 per share</securitiesClassTitle>
-      <issuerInfo><issuerCik>0000050863</issuerCik><issuerName>INTEL CORP</issuerName></issuerInfo>
-    </coverPageHeader>
-    <coverPageHeaderReportingPersonDetails>
-      <reportingPersonName>Example Holdings LLC</reportingPersonName>
-      <aggregateAmountOwned>291000000</aggregateAmountOwned>
-      <classPercent>6.7</classPercent>
-      <com:typeOfReportingPerson>IA</com:typeOfReportingPerson>
-    </coverPageHeaderReportingPersonDetails>
-  </formData>
-</edgarSubmission>
-"""
-
-
-def test_xml_text_is_a_line_per_element_holding_text_named_without_its_namespace():
-    assert xml_text(SCHEDULE_13G) == (
-        "submissionType: SCHEDULE 13G/A\n"
-        "cik: 0001234567\n"
-        "securitiesClassTitle: Common Stock, par value $0.001 per share\n"
-        "issuerCik: 0000050863\n"
-        "issuerName: INTEL CORP\n"
-        "reportingPersonName: Example Holdings LLC\n"
-        "aggregateAmountOwned: 291000000\n"
-        "classPercent: 6.7\n"
-        "typeOfReportingPerson: IA\n"
-    )
-
-
-def test_xml_text_collapses_whitespace_and_drops_elements_without_text():
-    body = "<root><a>  one \n\t two\r\n</a><b/><c>   </c><d></d><e>\u00a0</e></root>".encode()
-    assert xml_text(body) == "a: one two\n"
-
-
-def test_xml_text_reads_an_elements_text_before_its_children_in_document_order():
-    assert xml_text(b"<root>Item 4<a>Ownership</a><b><c>6.7</c></b></root>") == (
-        "root: Item 4\na: Ownership\nc: 6.7\n"
-    )
-
-
-def test_xml_text_keeps_the_text_after_a_child_element_as_its_parents():
-    assert xml_text(b"<p>Owned <b>6.7%</b> of the class</p>") == "p: Owned\nb: 6.7%\np: of the class\n"
-
-
-def test_xml_text_reads_references_and_character_data_as_text():
-    body = b"<root><a>R&amp;D &lt;b&gt; &#8217;s</a><b><![CDATA[x < y & z]]></b></root>"
-    assert xml_text(body) == "a: R&D <b> \u2019s\nb: x < y & z\n"
-
-
-def test_xml_text_drops_comments_and_processing_instructions():
-    assert xml_text(b"<root><!-- a note --><?render now?><a>kept</a></root>") == "a: kept\n"
-
-
-def test_xml_text_applies_the_line_normalisation():
-    body = "<root><a>manu\u00adfacturing \ufb01rst\u200b</a></root>".encode()
-    assert xml_text(body) == "a: manufacturing first\n"
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        pytest.param(b"<root/>", id="empty-root"),
-        pytest.param(b"<root>\n  <a/>\n  <b> </b>\n</root>", id="only-whitespace"),
-    ],
-)
-def test_xml_text_of_a_document_without_text_is_empty(body):
-    assert xml_text(body) == ""
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        pytest.param(b'<?xml version="1.0"?><!DOCTYPE root SYSTEM "root.dtd"><root>x</root>', id="doctype"),
-        pytest.param(b"<!doctype root><root>x</root>", id="doctype-lowercase"),
-        pytest.param(b'<!DOCTYPE root [<!ENTITY e "expanded">]><root>&e;</root>', id="entity"),
-        pytest.param(b"<root><![CDATA[<!ENTITY]]></root>", id="declaration-anywhere-in-the-bytes"),
-    ],
-)
-def test_xml_text_refuses_a_document_type_or_entity_declaration(body):
-    with pytest.raises(ValueError) as caught:
-        xml_text(body)
-    assert str(caught.value) == "the XML document declares a document type or an entity"
-
-
-@pytest.mark.parametrize(
-    ("body", "message"),
-    [
-        pytest.param(b"", "no element found: line 1, column 0", id="empty"),
-        pytest.param(b"<root>", "no element found: line 1, column 6", id="unclosed"),
-        pytest.param(b"<root></a>", "mismatched tag: line 1, column 8", id="mismatched"),
-        pytest.param(b"<a/><b/>", "junk after document element: line 1, column 4", id="two-roots"),
-        pytest.param(b"plain words", "syntax error: line 1, column 0", id="not-xml"),
-    ],
-)
-def test_xml_text_refuses_xml_that_is_not_well_formed(body, message):
-    with pytest.raises(ValueError) as caught:
-        xml_text(body)
-    assert str(caught.value) == f"the XML document is not well-formed: {message}"
-
-
-def test_xml_text_has_the_derived_shape_and_is_deterministic():
-    text = xml_text(SCHEDULE_13G)
-    assert_derived_shape(text)
-    assert xml_text(SCHEDULE_13G) == text

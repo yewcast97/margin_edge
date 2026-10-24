@@ -1,13 +1,13 @@
 """``workflow``: plan, derive, check, render and show over a raw tree built in a temporary directory.
 
 The raw tree is written by ``workflow.fetch`` over ``workflow_support``'s fake EDGAR and fake
-EarningsCalls.dev (five listed seasons, three of them in ``WINDOW``), or planted where ``fetch``
-writes; readings are ``workflow_support.readings_text``'s, every bot item at the level the
-rules require of it. Expected names, ``DOC_ID`` values, dates and messages are written out.
-Every file lives below pytest's ``tmp_path``.
+EarningsCalls.dev (five listed seasons, three of them in ``WINDOW``, whose four comparisons are
+``workflow_support.COMPARISONS``), or planted where ``fetch`` writes; readings are
+``workflow_support.readings_text``'s, every aspect ``na`` but the items a test gives. Expected
+names, ``DOC_ID`` values, dates and messages are written out. Every file lives below pytest's
+``tmp_path``.
 """
 
-import json
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -15,8 +15,8 @@ import pytest
 
 from market_state_research.common.layout import FileExists
 from market_state_research.fundamentals.script import workflow
+from market_state_research.fundamentals.script.aspects import ASPECTS
 from market_state_research.fundamentals.script.filings import Window
-from market_state_research.fundamentals.script.items import BOT_ITEMS
 from market_state_research.fundamentals.script.text import html_text
 
 from .calls_support import (
@@ -31,14 +31,16 @@ from .calls_support import (
     events_page,
 )
 from .edgar_support import (
-    CIK,
     OLD_TEN_K,
     OLD_TEN_Q,
     PROXY,
     RECENT,
+    RELEASE_GUIDANCE,
     TEN_K,
+    TEN_K_CAPEX,
     TEN_Q_1,
     TEN_Q_2,
+    TEN_Q_SUPPLY,
     TICKER,
     Row,
     submissions_json,
@@ -47,13 +49,13 @@ from .fake_earningscalls import provider
 from .support import NOW, TODAY, edt, est
 from .workflow_support import (
     CALLS_OF_SEASONS,
+    COMPARISONS,
     DEFAULT_WINDOW,
     DOC_IDS,
     QUOTE_FILING,
     RAW,
     WINDOW,
     Reading,
-    companyfacts_document,
     edgar,
     fetch,
     place,
@@ -68,25 +70,26 @@ from .workflow_support import (
     write_watchlist,
 )
 
+FY = date(2025, 12, 27)
 Q1 = date(2026, 3, 28)
 Q2 = date(2026, 6, 27)
 LATER = edt(2026, 10, 8, 7, 0)  # an hour after NOW, when the reports render() wrote at NOW are the newest
 SUBMISSIONS = "submissions_20261008T053002EDT.json"
-COMPANYFACTS = "companyfacts_20261008T053018EDT.json"
 CALLS_PAGE = "calls_20261008T053100EDT_1.json"
-REPORT = "report_20261008T060000EDT.md"
+TOKEN = "20261008T060000EDT"  # the reports render() writes at NOW
 WINDOW_JSON = {"from": "2025-12-01", "to": "2026-10-08"}
 WINDOW_SEASONS = ["2025-12-27", "2026-03-28", "2026-06-27"]
 SPAN_SEASONS = ["2024-12-28", "2025-09-27", *WINDOW_SEASONS]
+# The window's comparisons as plan's and render's reasons name them.
+NAMED = ["2025-12-27 quarter", "2025-12-27 year", "2026-03-28 quarter", "2026-06-27 quarter"]
 # Every document of the span in the order derive writes their texts: season by season, oldest
-# first; in each the 10-K or 10-Q, its filings' documents in date order, then its call.
+# first; in each the 10-K or 10-Q, its 8-Ks' documents in date order, then its call.
 ROLES = (
     "old_ten_k",
     "old_ten_q",
     "call_old_q",
     "ten_k",
     "eight_k_other",
-    "proxy",
     "ten_q_1",
     "eight_k_1",
     "exhibit_1",
@@ -103,7 +106,6 @@ KINDS = {
     "call_old_q": "call",
     "ten_k": "filing",
     "eight_k_other": "8-K",
-    "proxy": "proxy",
     "ten_q_1": "filing",
     "eight_k_1": "8-K",
     "exhibit_1": "exhibit",
@@ -120,7 +122,6 @@ SEASON_OF = {
     "call_old_q": "2025-09-27",
     "ten_k": "2025-12-27",
     "eight_k_other": "2025-12-27",
-    "proxy": "2025-12-27",
     "ten_q_1": "2026-03-28",
     "eight_k_1": "2026-03-28",
     "exhibit_1": "2026-03-28",
@@ -132,14 +133,26 @@ SEASON_OF = {
     "call_q2": "2026-06-27",
 }
 CALL_OF_ROLE = {"call_old_q": CALL_OLD_Q, "call_q1": CALL_Q1, "call_q2": CALL_Q2}
-# The bot's call items, which are "unavailable" while the season's call has no transcript.
-UNAVAILABLE = {
-    "i" + item.id.replace(".", "_"): Reading(
-        "none", "—" if item.baseline == "none" else "unavailable", "unavailable"
-    )
-    for item in BOT_ITEMS
-    if item.scope == "call"
+# The 8-K of 2026-07-30, filed after the last 10-Q: pending.
+PENDING_8K = {
+    "form": "8-K",
+    "accession": "0000050863-26-000066",
+    "dated": "2026-07-30",
+    "filed": "2026-08-03",
 }
+PENDING_8K = {**PENDING_8K, "items": "8.01"}
+# An item of the quarter ended 2026-06-27 against the quarter before, valid as written.
+SUPPLY = Reading(
+    "Supply of substrates and specialty chemicals",
+    DOC_IDS["ten_q_2"],
+    "tight during the quarter ended 2026-06-27",
+    DOC_IDS["ten_q_1"],
+    "tight during the quarter ended 2026-03-28",
+    "the same statement, of the next quarter",
+    (QUOTE_FILING, (TEN_Q_SUPPLY[0], DOC_IDS["ten_q_1"])),
+)
+# An item that breaks one rule: the 10-Q it names is quoted nowhere.
+UNQUOTED = Reading("Substrates", DOC_IDS["ten_q_2"], "tight")
 NOT_RAW = (
     "not a file or folder fetch writes in raw/{where} (see the domain's AGENTS.md, Runtime files); "
     "rename it with .rejected"
@@ -162,17 +175,26 @@ def seasons_of(planned: dict) -> dict[str, dict]:
     return {season["season"]: season for season in planned["seasons"]}
 
 
+def comparisons_of(planned: dict) -> dict[str, dict]:
+    """Every window comparison's entry of a ``plan``, by its season and kind (``2025-12-27 year``)."""
+    return {
+        f"{season['season']} {found['kind']}": found
+        for season in planned["seasons"]
+        for found in season.get("comparisons", ())
+    }
+
+
 def text_path(layout, role: str) -> Path:
     """A document's text file: ``formatted/INTC/{PERIOD}/{DOC_ID}.md``."""
     return layout.formatted(TICKER) / SEASON_OF[role] / f"{DOC_IDS[role]}.md"
 
 
-def measures_path(layout, season: str) -> Path:
-    return layout.formatted(TICKER) / season / "measures.md"
+def sheet_path(layout, season: str) -> Path:
+    return layout.formatted(TICKER) / season / "season.md"
 
 
-def report_path(layout, season: str, name: str = REPORT) -> Path:
-    return layout.reports(TICKER) / season / name
+def report_path(layout, season: str, kind: str = "quarter", token: str = TOKEN) -> Path:
+    return layout.reports(TICKER) / season / f"report_{kind}_{token}.md"
 
 
 def rejected(path: Path) -> Path:
@@ -181,35 +203,9 @@ def rejected(path: Path) -> Path:
 
 
 def rendered(layout) -> None:
-    """Fetch, derive, write the window's readings and render each season's report at ``NOW``."""
+    """Fetch, derive, write the window's readings and render each comparison's report at ``NOW``."""
     research(layout)
     workflow.render(layout, TICKER, NOW)
-
-
-def form4_xml(issuer: str = CIK) -> bytes:
-    """A Form 4 of one officer's sale of ``issuer``'s shares, in the subset ``form4`` reads."""
-    return f"""<?xml version="1.0"?>
-<ownershipDocument>
-<schemaVersion>X0609</schemaVersion>
-<documentType>4</documentType>
-<periodOfReport>2026-07-01</periodOfReport>
-<issuer><issuerCik>{issuer}</issuerCik><issuerTradingSymbol>INTC</issuerTradingSymbol></issuer>
-<reportingOwner>
-<reportingOwnerId><rptOwnerCik>0001234567</rptOwnerCik><rptOwnerName>Officer Example</rptOwnerName>
-</reportingOwnerId>
-<reportingOwnerRelationship><isOfficer>1</isOfficer><officerTitle>Chief Financial Officer</officerTitle>
-</reportingOwnerRelationship>
-</reportingOwner>
-<nonDerivativeTable><nonDerivativeTransaction>
-<transactionDate><value>2026-07-01</value></transactionDate>
-<transactionCoding><transactionFormType>4</transactionFormType><transactionCode>S</transactionCode>
-</transactionCoding>
-<transactionAmounts><transactionShares><value>1000</value></transactionShares>
-<transactionPricePerShare><value>20.50</value></transactionPricePerShare>
-<transactionAcquiredDisposedCode><value>D</value></transactionAcquiredDisposedCode></transactionAmounts>
-</nonDerivativeTransaction></nonDerivativeTable>
-</ownershipDocument>
-""".encode()
 
 
 # --------------------------------------------------------------------------- plan: the state
@@ -230,7 +226,6 @@ def test_an_empty_data_directory_plans_a_fetch_and_writes_nothing(layout):
                 "cik": None,
                 "entity_name": None,
                 "submissions": None,
-                "companyfacts": None,
                 "window": WINDOW_JSON,
                 "truncated": None,
                 "former_layout": [],
@@ -254,7 +249,7 @@ def test_a_fetched_window_plans_derive_and_states_each_span_season(layout):
     planned = entry(layout)
 
     assert planned["action"] == "derive"
-    assert planned["reason"] == "15 text files missing or out of date: " + ", ".join(
+    assert planned["reason"] == "14 text files missing or out of date: " + ", ".join(
         DOC_IDS[role] for role in ROLES
     )
     assert (planned["cik"], planned["entity_name"], planned["truncated"]) == (
@@ -263,7 +258,6 @@ def test_a_fetched_window_plans_derive_and_states_each_span_season(layout):
         False,
     )
     assert planned["submissions"] == str(layout.raw(TICKER) / SUBMISSIONS)
-    assert planned["companyfacts"] == str(layout.raw(TICKER) / COMPANYFACTS)
     assert planned["calls"] == {
         "events": {
             "path": str(layout.raw(TICKER) / CALLS_PAGE),
@@ -273,15 +267,7 @@ def test_a_fetched_window_plans_derive_and_states_each_span_season(layout):
         "due": None,
         "pending_calls": [],
     }
-    assert planned["pending_filings"] == [
-        {
-            "form": "4",
-            "accession": "0001209191-26-061234",
-            "dated": "2026-07-30",
-            "filed": "2026-08-03",
-            "items": "",
-        }
-    ]
+    assert planned["pending_filings"] == [PENDING_8K]
     assert (planned["former_layout"], planned["invalid_files"], planned["unlisted_files"]) == ([], [], [])
     assert (planned["skipped_filings"], planned["stray_files"], planned["stray_reports"]) == ([], [], [])
     seasons = seasons_of(planned)
@@ -324,14 +310,24 @@ def test_a_fetched_window_plans_derive_and_states_each_span_season(layout):
                 DOC_IDS[role] for role in ("ten_q_2", "eight_k_2", "exhibit_2_1", "exhibit_2_2", "call_q2")
             ],
         },
-        "companyfacts": {"status": "present", "reason": None},
-        "measures": {"path": str(measures_path(layout, "2026-06-27")), "status": "missing"},
-        "readings": {"path": str(readings_file(layout, Q2)), "status": "missing", "problems": 0},
-        "report": {"path": None, "status": "missing"},
+        "sheet": {"path": str(sheet_path(layout, "2026-06-27")), "status": "missing"},
+        "comparisons": [
+            {
+                "kind": "quarter",
+                "baseline": {"season": "2026-03-28", "form": "10-Q"},
+                "readings": {
+                    "path": str(readings_file(layout, Q2)),
+                    "status": "missing",
+                    "problems": 0,
+                    "unnamed_documents": None,
+                },
+                "report": {"path": None, "status": "missing"},
+            }
+        ],
     }
 
 
-def test_the_fiscal_years_season_holds_its_8_k_and_proxy_statement_and_shows_its_call_unavailable(layout):
+def test_the_fiscal_years_season_holds_its_8_k_its_two_comparisons_and_shows_its_call_unavailable(layout):
     fetch(layout)
 
     season = seasons_of(entry(layout))["2025-12-27"]
@@ -344,16 +340,9 @@ def test_the_fiscal_years_season_holds_its_8_k_and_proxy_statement_and_shows_its
             "filed": "2026-02-10",
             "items": "5.02,9.01",
             "raw": True,
-        },
-        {  # a proxy statement is dated by its filing date
-            "form": "DEF 14A",
-            "accession": "0001193125-26-112233",
-            "dated": "2026-03-27",
-            "filed": "2026-03-27",
-            "items": "",
-            "raw": True,
-        },
+        }
     ]
+    assert season["listed_only"] == []  # the proxy statement EDGAR lists is read by no one
     assert season["call"] == {
         "status": "unavailable",
         "due": "2026-01-30",  # no earnings release: the 10-K's filing date
@@ -362,24 +351,21 @@ def test_the_fiscal_years_season_holds_its_8_k_and_proxy_statement_and_shows_its
         "documents": [],
         "reason": None,
     }
-    assert season["texts"] == {
-        "documents": 3,
-        "stale": [DOC_IDS["ten_k"], DOC_IDS["eight_k_other"], DOC_IDS["proxy"]],
-    }
+    assert season["texts"] == {"documents": 2, "stale": [DOC_IDS["ten_k"], DOC_IDS["eight_k_other"]]}
+    assert [(found["kind"], found["baseline"]) for found in season["comparisons"]] == [
+        ("quarter", {"season": "2025-09-27", "form": "10-Q"}),
+        ("year", {"season": "2024-12-28", "form": "10-K"}),
+    ]
+    assert season["comparisons"][1]["readings"]["path"] == str(readings_file(layout, FY, "year"))
 
 
-def test_the_seasons_before_the_window_carry_no_measures_readings_or_report(layout):
+def test_the_seasons_before_the_window_carry_no_sheet_or_comparison(layout):
     fetch(layout)
 
     seasons = seasons_of(entry(layout))
 
     for day in ("2024-12-28", "2025-09-27"):
-        assert not {"measures", "readings", "report"} & set(seasons[day])
-    # The company facts hold no fact of the oldest 10-K, fetched long after it: never asked for again.
-    assert seasons["2024-12-28"]["companyfacts"] == {
-        "status": "absent",
-        "reason": "EDGAR's companyfacts, fetched 2026-10-08, holds no fact of the 10-K 0000050863-25-000009",
-    }
+        assert not {"sheet", "comparisons"} & set(seasons[day])
     assert seasons["2025-09-27"]["call"]["documents"] == [DOC_IDS["call_old_q"]]
 
 
@@ -391,6 +377,9 @@ def test_the_default_window_holds_every_listed_season_and_is_truncated(layout):
     assert planned["truncated"] is True  # it starts before the oldest filing filings.recent lists
     assert [season["in_window"] for season in planned["seasons"]] == [True] * 5
     assert planned["action"] == "derive"
+    # The oldest listed season's comparisons have no baseline listed.
+    oldest = seasons_of(planned)["2024-12-28"]["comparisons"]
+    assert [(found["kind"], found["baseline"]) for found in oldest] == [("quarter", None), ("year", None)]
 
 
 # --------------------------------------------------------------------------- plan: fetch
@@ -462,9 +451,6 @@ def test_an_invalid_submissions_file_is_listed_with_why(layout):
             "EX-99.2 q226cfocommentary.htm of the 8-K 0000050863-26-000062 dated 2026-07-23",
             id="exhibit",
         ),
-        pytest.param(
-            "proxy", "primary document of the DEF 14A 0001193125-26-112233 filed 2026-03-27", id="proxy"
-        ),
     ],
 )
 def test_a_span_document_not_in_raw_plans_a_fetch(layout, role, what):
@@ -486,7 +472,7 @@ def test_a_filing_not_in_raw_is_flagged_in_its_season(layout):
 
     seasons = seasons_of(entry(layout))
 
-    assert [item["raw"] for item in seasons["2025-12-27"]["filings"]] == [False, True]
+    assert [item["raw"] for item in seasons["2025-12-27"]["filings"]] == [False]
     assert seasons["2026-03-28"]["filing"]["raw"] is False
     assert seasons["2026-03-28"]["texts"]["documents"] == 3  # the 8-K, its exhibit and the call
 
@@ -502,7 +488,7 @@ def test_the_former_layout_plans_a_fetch_and_refuses_derive_check_render_and_sho
         "fetch",
         f"{calls_folder} is {FORMER}; 1 other folder too (see former_layout)",
     )
-    assert {season["report"]["status"] for season in planned["seasons"] if season["in_window"]} == {"stale"}
+    assert {found["report"]["status"] for found in comparisons_of(planned).values()} == {"stale"}
     for command in (workflow.derive, workflow.check, workflow.render):
         with pytest.raises(ValueError) as raised:
             command(layout, TICKER, LATER)
@@ -667,63 +653,6 @@ def test_a_season_listed_late_reports_the_filing_and_call_it_takes_as_moved(layo
     assert entry(layout)["action"] == "derive"
 
 
-def test_a_window_season_without_company_facts_plans_a_fetch(layout):
-    research(layout)
-    rejected(layout.raw(TICKER) / COMPANYFACTS)
-
-    planned = entry(layout)
-
-    reason = "no companyfacts file is in raw/; run fetch"
-    assert (planned["action"], planned["reason"], planned["companyfacts"]) == ("fetch", reason, None)
-    assert {season["companyfacts"]["status"] for season in planned["seasons"]} == {"missing"}
-
-
-def without_ten_q_2() -> str:
-    """INTC's company facts without any fact of the 10-Q for the quarter ended 2026-06-27."""
-    document = companyfacts_document()
-    for concept in document["facts"]["us-gaap"].values():
-        for unit, entries in concept["units"].items():
-            concept["units"][unit] = [fact for fact in entries if fact["accn"] != TEN_Q_2.accession]
-    return json.dumps(document)
-
-
-def test_company_facts_fetched_by_the_filing_date_without_it_are_waiting_and_block_nothing(layout):
-    research(layout)
-    rejected(layout.raw(TICKER) / COMPANYFACTS)
-    place(layout.raw(TICKER) / "companyfacts_20260724T180000EDT.json", without_ten_q_2())
-
-    planned = entry(layout)
-
-    reason = (
-        "the newest companyfacts, fetched 2026-07-24, on or before the 10-Q 0000050863-26-000064 was "
-        "filed, holds no fact of it: a later fetch brings them"
-    )
-    assert seasons_of(planned)["2026-06-27"]["companyfacts"] == {"status": "waiting", "reason": reason}
-    assert seasons_of(planned)["2026-03-28"]["companyfacts"] == {"status": "present", "reason": None}
-    # Every fetch asks for the facts again; the season's figures wait for them, and nothing else does.
-    assert (planned["action"], planned["reason"]) == (
-        "derive",
-        "measures.md missing or out of date for: 2025-12-27, 2026-03-28, 2026-06-27",
-    )
-
-
-def test_company_facts_fetched_after_the_filing_date_without_it_leave_it_absent(layout):
-    research(layout)
-    place(layout.raw(TICKER) / "companyfacts_20261008T055000EDT.json", without_ten_q_2())
-
-    planned = entry(layout)
-
-    assert seasons_of(planned)["2026-06-27"]["companyfacts"] == {
-        "status": "absent",
-        "reason": "EDGAR's companyfacts, fetched 2026-10-08, holds no fact of the 10-Q 0000050863-26-000064",
-    }
-    # Not asked for again: the newer facts change every window season's measures.md.
-    assert (planned["action"], planned["reason"]) == (
-        "derive",
-        "measures.md missing or out of date for: 2025-12-27, 2026-03-28, 2026-06-27",
-    )
-
-
 def test_a_window_calls_transcript_not_in_raw_plans_a_fetch(layout):
     research(layout)
     transcript = raw_file(layout, "transcript_q2")
@@ -736,7 +665,7 @@ def test_a_window_calls_transcript_not_in_raw_plans_a_fetch(layout):
     q2 = seasons_of(planned)["2026-06-27"]
     assert (q2["call"]["status"], q2["call"]["reason"], q2["call"]["documents"]) == ("missing", reason, [])
     assert q2["texts"]["documents"] == 4
-    assert q2["report"] == {"path": None, "status": "missing"}
+    assert q2["comparisons"][0]["report"] == {"path": None, "status": "missing"}
 
 
 def test_an_invalid_transcript_is_withdrawn_then_fetched_again(layout):
@@ -769,7 +698,7 @@ def test_an_invalid_transcript_is_withdrawn_then_fetched_again(layout):
 
     assert output["transcript_requests"] == 1
     assert transcript.read_bytes() == raw_bytes("transcript_q2")
-    # The same transcript: its text, the season's measures and its report stand.
+    # The same transcript: its text, the season's sheet and its reports stand.
     assert entry(layout, edt(2026, 10, 8, 8, 0))["action"] == "reuse"
 
 
@@ -864,7 +793,7 @@ def test_plan_with_refresh_plans_a_fetch_while_the_window_holds_a_listed_season(
 
 def test_a_text_of_a_span_season_missing_or_out_of_date_plans_derive(layout):
     rendered(layout)
-    text_path(layout, "old_ten_q").unlink()  # a season before the window: its baselines need it
+    text_path(layout, "old_ten_q").unlink()  # a season before the window: a comparison's baseline
     place(text_path(layout, "call_q2"), "edited\n")
 
     planned = entry(layout, LATER)
@@ -876,28 +805,35 @@ def test_a_text_of_a_span_season_missing_or_out_of_date_plans_derive(layout):
     assert seasons_of(planned)["2025-09-27"]["texts"]["stale"] == [DOC_IDS["old_ten_q"]]
     q2 = seasons_of(planned)["2026-06-27"]
     assert q2["texts"]["stale"] == [DOC_IDS["call_q2"]]
-    assert q2["report"]["status"] == "stale"
+    reports = {name: found["report"]["status"] for name, found in comparisons_of(planned).items()}
+    # The 10-K season's quarter compares it with the season ended 2025-09-27, whose text is gone.
+    assert reports == {
+        "2025-12-27 quarter": "stale",
+        "2025-12-27 year": "fresh",
+        "2026-03-28 quarter": "fresh",
+        "2026-06-27 quarter": "stale",
+    }
 
 
-def test_a_window_seasons_measures_missing_or_out_of_date_plan_derive(layout):
+def test_a_window_seasons_sheet_missing_or_out_of_date_plans_derive(layout):
     rendered(layout)
-    measures_path(layout, "2025-12-27").unlink()
-    place(measures_path(layout, "2026-06-27"), "edited\n")
-    measures_path(layout, "2025-09-27").unlink()  # before the window: never needed for a report
+    sheet_path(layout, "2025-12-27").unlink()
+    place(sheet_path(layout, "2026-06-27"), "edited\n")
+    sheet_path(layout, "2025-09-27").unlink()  # before the window: never needed for a report
 
     planned = entry(layout, LATER)
 
     assert (planned["action"], planned["reason"]) == (
         "derive",
-        "measures.md missing or out of date for: 2025-12-27, 2026-06-27",
+        "season.md missing or out of date for: 2025-12-27, 2026-06-27",
     )
     seasons = seasons_of(planned)
-    assert seasons["2025-12-27"]["measures"]["status"] == "missing"
-    assert seasons["2026-06-27"]["measures"] == {
-        "path": str(measures_path(layout, "2026-06-27")),
+    assert seasons["2025-12-27"]["sheet"]["status"] == "missing"
+    assert seasons["2026-06-27"]["sheet"] == {
+        "path": str(sheet_path(layout, "2026-06-27")),
         "status": "stale",
     }
-    assert seasons["2026-03-28"]["measures"]["status"] == "fresh"
+    assert seasons["2026-03-28"]["sheet"]["status"] == "fresh"
 
 
 def test_readings_missing_or_failing_plan_research(layout):
@@ -906,35 +842,38 @@ def test_readings_missing_or_failing_plan_research(layout):
     planned = entry(layout)
     assert (planned["action"], planned["reason"]) == (
         "research",
-        "readings missing or failing check: 2025-12-27 (missing), 2026-03-28 (missing), 2026-06-27 (missing)",
+        "readings missing or failing check: " + ", ".join(f"{name} (missing)" for name in NAMED),
     )
 
-    write_readings(layout, date(2025, 12, 27))
-    write_readings(layout, Q1)
-    two = readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "A rule broken twice in one item."))
-    write_readings(layout, Q2, two.replace("new: A rule", "new: A buy rule"))
+    for period, kind in COMPARISONS[:3]:
+        write_readings(layout, period, kind=kind)
+    broken = Reading(UNQUOTED.title, UNQUOTED.season, "a buy signal")  # unquoted, and advice wording
+    write_readings(layout, Q2, readings_text(Q2, supply=[broken]))
 
     planned = entry(layout)
 
     assert (planned["action"], planned["reason"]) == (
         "research",
-        "readings missing or failing check: 2026-06-27 (failing, 2 problems)",
+        "readings missing or failing check: 2026-06-27 quarter (failing, 2 problems)",
     )
-    assert seasons_of(planned)["2026-06-27"]["readings"] == {
+    assert comparisons_of(planned)["2026-06-27 quarter"]["readings"] == {
         "path": str(readings_file(layout, Q2)),
         "status": "failing",
         "problems": 2,
+        "unnamed_documents": [
+            DOC_IDS[role] for role in ("eight_k_2", "exhibit_2_1", "exhibit_2_2", "call_q2")
+        ],
     }
-    assert seasons_of(planned)["2026-03-28"]["readings"]["status"] == "valid"
+    assert comparisons_of(planned)["2026-03-28 quarter"]["readings"]["status"] == "valid"
 
 
 def test_a_failing_readings_reason_counts_one_problem_in_the_singular(layout):
     research(layout)
-    write_readings(layout, Q2, readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "No quote.")))
+    write_readings(layout, Q2, readings_text(Q2, supply=[UNQUOTED]))
 
     planned = entry(layout)
 
-    assert planned["reason"] == "readings missing or failing check: 2026-06-27 (failing, 1 problem)"
+    assert planned["reason"] == "readings missing or failing check: 2026-06-27 quarter (failing, 1 problem)"
 
 
 def test_passing_readings_lead_to_render_then_reuse(layout):
@@ -942,38 +881,37 @@ def test_passing_readings_lead_to_render_then_reuse(layout):
 
     planned = entry(layout)
 
-    assert (planned["action"], planned["reason"]) == (
-        "render",
-        "no current report for: 2025-12-27, 2026-03-28, 2026-06-27",
-    )
+    assert (planned["action"], planned["reason"]) == ("render", "no current report for: " + ", ".join(NAMED))
     for season in planned["seasons"][2:]:
-        assert (season["measures"]["status"], season["readings"]["status"]) == ("fresh", "valid")
-        assert season["report"] == {"path": None, "status": "missing"}
+        assert season["sheet"]["status"] == "fresh"
+        for found in season["comparisons"]:
+            assert found["readings"]["status"] == "valid"
+            assert found["report"] == {"path": None, "status": "missing"}
 
     workflow.render(layout, TICKER, NOW)
     planned = entry(layout, LATER)
 
     assert (planned["action"], planned["reason"]) == ("reuse", None)
-    assert [season["report"] for season in planned["seasons"][2:]] == [
-        {"path": str(report_path(layout, day)), "status": "fresh"} for day in WINDOW_SEASONS
-    ]
+    assert {name: found["report"] for name, found in comparisons_of(planned).items()} == {
+        f"{day} {kind}": {"path": str(report_path(layout, day.isoformat(), kind)), "status": "fresh"}
+        for day, kind in COMPARISONS
+    }
 
 
 def test_readings_changed_after_the_render_make_the_report_stale(layout):
     rendered(layout)
-    write_readings(
-        layout,
-        Q2,
-        readings_text(Q2, i1_1=Reading(DOC_IDS["exhibit_1"], "not disclosed", "not disclosed")),
-    )
+    write_readings(layout, Q2, readings_text(Q2, supply=[SUPPLY]))
 
     planned = entry(layout, LATER)
 
-    assert (planned["action"], planned["reason"]) == ("render", "no current report for: 2026-06-27")
-    assert seasons_of(planned)["2026-06-27"]["report"] == {
+    assert (planned["action"], planned["reason"]) == ("render", "no current report for: 2026-06-27 quarter")
+    assert comparisons_of(planned)["2026-06-27 quarter"]["report"] == {
         "path": str(report_path(layout, "2026-06-27")),
         "status": "stale",
     }
+    assert comparisons_of(planned)["2026-06-27 quarter"]["readings"]["unnamed_documents"] == [
+        DOC_IDS[role] for role in ("eight_k_2", "exhibit_2_1", "exhibit_2_2", "call_q2")
+    ]
 
 
 def test_a_report_named_after_now_is_not_read_yet(layout):
@@ -983,7 +921,7 @@ def test_a_report_named_after_now_is_not_read_yet(layout):
     planned = entry(layout, NOW)
 
     assert planned["action"] == "render"
-    assert {season["report"]["status"] for season in planned["seasons"][2:]} == {"missing"}
+    assert {found["report"]["status"] for found in comparisons_of(planned).values()} == {"missing"}
 
 
 def test_a_waiting_call_blocks_nothing_and_its_transcript_later_makes_the_report_stale(layout):
@@ -992,7 +930,7 @@ def test_a_waiting_call_blocks_nothing_and_its_transcript_later_makes_the_report
     page = events_page([call_row(call) for call in (CALL_Q1, CALL_OLD_Q, CALL_DROPPED)])
     fetch(
         layout,
-        edgar(rows=RECENT[1:]),  # the Form 4 of 2026-08-03 is not filed yet
+        edgar(rows=RECENT[1:]),  # the 8-K of 2026-07-30 is not filed yet
         calls=provider(page, (CALL_OLD_Q, CALL_Q1)),
         start=morning,
         calls_start=morning + timedelta(minutes=1),
@@ -1013,31 +951,27 @@ def test_a_waiting_call_blocks_nothing_and_its_transcript_later_makes_the_report
     }
 
     workflow.derive(layout, TICKER, later)
-    write_readings(layout, Q2, readings_text(Q2, **UNAVAILABLE))
+    write_readings(layout, Q2, readings_text(Q2, supply=[SUPPLY]))
     assert workflow.check(layout, TICKER, later)["readings"][0]["valid"] is True
     output = workflow.render(layout, TICKER, later)
 
-    path = report_path(layout, "2026-06-27", "report_20260727T070000EDT.md")
+    path = report_path(layout, "2026-06-27", token="20260727T070000EDT")
     assert output == {
         "ticker": TICKER,
-        "reports": [{"season": "2026-06-27", "path": str(path)}],
+        "reports": [{"season": "2026-06-27", "kind": "quarter", "path": str(path)}],
         "current": [],
         "skipped": [],
     }
     lines = path.read_text(encoding="utf-8").split("\n")
     assert lines[4].endswith(" Call: waiting as of the calls list of 2026-07-27.")
-    analysts = (
-        "| low | 8.5 Analysts on the call · distinct analysts asking questions | previous quarter 2026-03-28 "
-        "(10-Q) | unavailable | unavailable | — |"
+    assert lines[6] == (
+        f"The season's documents: {DOC_IDS['ten_q_2']}; {DOC_IDS['eight_k_2']}; {DOC_IDS['exhibit_2_1']}; "
+        f"{DOC_IDS['exhibit_2_2']}."
     )
-    assert analysts in lines
-    assert "note: the call has no transcript in raw/ (waiting)" in lines
-    opening = (
-        "| medium | 7.1 Opening topics | previous quarter 2026-03-28 (10-Q) | unavailable | unavailable | — |"
-    )
-    assert opening in lines
-    assert "| high | 7.4 Statement against the filing | none | — | unavailable | — |" in lines
-    assert seasons_of(entry(layout, edt(2026, 7, 27, 8, 0)))["2026-06-27"]["report"]["status"] == "fresh"
+    assert lines[8] == "Pending, dated after the season's 10-Q was filed: none."
+    assert comparisons_of(entry(layout, edt(2026, 7, 27, 8, 0)))["2026-06-27 quarter"]["report"][
+        "status"
+    ] == ("fresh")
 
     # A week later the list is asked for again and holds the call: the report no longer stands.
     week = edt(2026, 8, 3, 7, 0)
@@ -1052,16 +986,17 @@ def test_a_waiting_call_blocks_nothing_and_its_transcript_later_makes_the_report
         f"1 text file missing or out of date: {DOC_IDS['call_q2']}",
     )
     q2 = seasons_of(planned)["2026-06-27"]
-    assert (q2["call"]["status"], q2["measures"]["status"], q2["report"]["status"]) == (
+    assert (q2["call"]["status"], q2["sheet"]["status"], q2["comparisons"][0]["report"]["status"]) == (
         "transcript",
         "stale",
         "stale",
     )
     workflow.derive(layout, TICKER, after)
-    q2 = seasons_of(entry(layout, after))["2026-06-27"]
-    # Each call item's 'unavailable' is refused: on both lines of the seven with a baseline, on 7.4's new.
-    assert q2["readings"] == {"path": str(readings_file(layout, Q2)), "status": "failing", "problems": 15}
-    assert q2["report"]["status"] == "stale"
+    found = comparisons_of(entry(layout, after))["2026-06-27 quarter"]
+    # The readings stand; the call is a document of the season none of them names yet.
+    assert found["readings"]["status"] == "valid"
+    assert found["readings"]["unnamed_documents"][-1] == DOC_IDS["call_q2"]
+    assert found["report"]["status"] == "stale"
 
 
 # --------------------------------------------------------------------------- plan: what is left out
@@ -1074,15 +1009,7 @@ def test_pending_filings_and_calls_are_listed_when_the_window_reaches_the_newest
     planned = entry(layout)
     earlier = entry(layout, window=Window(date(2025, 12, 1), date(2026, 6, 26)))
 
-    assert planned["pending_filings"] == [
-        {
-            "form": "4",
-            "accession": "0001209191-26-061234",
-            "dated": "2026-07-30",
-            "filed": "2026-08-03",
-            "items": "",
-        }
-    ]
+    assert planned["pending_filings"] == [PENDING_8K]
     assert planned["calls"]["pending_calls"] == [
         {"id": CALL_Q3.id, "date": "2026-10-06", "fiscal_year": 2026, "fiscal_quarter": 3}
     ]
@@ -1091,8 +1018,10 @@ def test_pending_filings_and_calls_are_listed_when_the_window_reaches_the_newest
 
 def test_rows_rule_b_cannot_place_or_fetch_cannot_request_are_listed_as_skipped(layout):
     rows = (
-        Row("4", "0001209191-26-050002", date(2026, 7, 2), None, "xslF345X05/form4.xml"),
         Row("8-K", "0000050863-26-000070", date(2026, 8, 1), None, "intc-20260801.htm", "8.01"),
+        Row("8-K", "0000050863-26-000044", date(2026, 5, 1), date(2026, 4, 30), "a/b/c.htm", "7.01"),
+        # Forms no longer read: neither placed nor skipped.
+        Row("4", "0001209191-26-050002", date(2026, 7, 2), None, "xslF345X05/form4.xml"),
         Row("SC 13G/A", "0000950103-26-000001", date(2026, 2, 12), None, "a/b/c.htm"),
     )
     fetch(layout, edgar(rows=(*rows, *RECENT)))
@@ -1101,21 +1030,15 @@ def test_rows_rule_b_cannot_place_or_fetch_cannot_request_are_listed_as_skipped(
 
     assert planned["skipped_filings"] == [
         {
-            "form": "4",
-            "accession": "0001209191-26-050002",
-            "filed": "2026-07-02",
-            "reason": "its reportDate is empty",
-        },
-        {
             "form": "8-K",
             "accession": "0000050863-26-000070",
             "filed": "2026-08-01",
             "reason": "its reportDate is empty",
         },
         {
-            "form": "SC 13G/A",
-            "accession": "0000950103-26-000001",
-            "filed": "2026-02-12",
+            "form": "8-K",
+            "accession": "0000050863-26-000044",
+            "filed": "2026-05-01",
             "reason": "its primaryDocument is no file fetch can request",
         },
     ]
@@ -1130,6 +1053,9 @@ def test_forms_listed_only_appear_in_their_season_and_are_never_requested(layout
         Row(
             "8-K/A", "0000050863-26-000045", date(2026, 5, 2), date(2026, 4, 23), "intc-20260423a.htm", "2.02"
         ),
+        # Forms no longer read: neither listed nor fetched.
+        Row("4/A", "0001209191-26-055555", date(2026, 5, 6), date(2026, 4, 30), "xslF345X05/wk-form4a.xml"),
+        Row("DEF 14A", "0001193125-26-112299", date(2026, 5, 7), None, "d112299ddef14a.htm"),
     )
     output = fetch(layout, edgar(rows=(*rows, *RECENT)))  # the fake EDGAR serves none of them
 
@@ -1183,41 +1109,17 @@ def test_unlisted_filing_folders_and_transcripts_are_named_and_block_nothing(lay
     assert (planned["action"], planned["invalid_files"]) == ("reuse", [])
 
 
-def test_a_form_4_counts_in_raw_only_once_its_xml_reads(layout):
+def test_files_fetch_wrote_until_2026_10_24_are_unlisted_and_block_nothing(layout):
     rendered(layout)
-    # A newer listing holds a Form 4 dated in the season ended 2026-06-27, before its 10-Q was filed.
-    form4 = Row("4", "0001209191-26-050001", date(2026, 7, 2), date(2026, 7, 1), "xslF345X05/form4.xml")
-    place(layout.raw(TICKER) / "submissions_20261008T055000EDT.json", submissions_json(rows=(form4, *RECENT)))
-    xml = layout.raw(TICKER) / "2026-06-27/4_2026-07-01_0001209191-26-050001/form4.xml"
+    facts = place(layout.raw(TICKER) / "companyfacts_20261008T053018EDT.json", b"{}")
+    proxy = place(layout.raw(TICKER) / "2025-12-27/DEF14A_2026-03-27_0001193125-26-112233/d1.htm", "<p>x</p>")
+    form4 = place(layout.raw(TICKER) / "2026-06-27/4_2026-07-01_0001209191-26-050001/form4.xml", "<x/>")
+    schedule = place(layout.raw(TICKER) / "2026-03-28/SC13GA_2026-05-08_0000950103-26-004321/s.htm", "<p/>")
 
     planned = entry(layout, LATER)
 
-    what = "XML of the Form 4 0001209191-26-050001 dated 2026-07-01"
-    assert (planned["action"], planned["reason"]) == (
-        "fetch",
-        f"the {what} is not in raw/ ({xml}); run fetch",
-    )
-    assert [(item["form"], item["raw"]) for item in seasons_of(planned)["2026-06-27"]["filings"]] == [
-        ("4", False),
-        ("8-K", True),
-    ]
-
-    place(xml, form4_xml())
-    planned = entry(layout, LATER)
-    assert [item["raw"] for item in seasons_of(planned)["2026-06-27"]["filings"]] == [True, True]
-    assert (planned["action"], planned["reason"]) == (
-        "derive",
-        "measures.md missing or out of date for: 2026-06-27",
-    )
-    assert seasons_of(planned)["2026-06-27"]["texts"]["documents"] == 5  # a Form 4 is never quoted
-
-    place(xml, b"<ownershipDocument>")
-    planned = entry(layout, LATER)
-    assert [item["path"] for item in planned["invalid_files"]] == [str(xml)]
-    assert (planned["action"], planned["reason"]) == (
-        "fetch",
-        f"the {what} in raw/ is invalid (see invalid_files); rename it with .rejected and run fetch",
-    )
+    assert planned["unlisted_files"] == [str(facts), *(str(path.parent) for path in (proxy, schedule, form4))]
+    assert (planned["action"], planned["invalid_files"]) == ("reuse", [])
 
 
 def test_stray_formatted_and_report_files_are_listed_and_block_nothing(layout):
@@ -1236,7 +1138,18 @@ def test_stray_formatted_and_report_files_are_listed_and_block_nothing(layout):
 
 
 def test_a_season_the_newest_submissions_no_longer_list_is_left_out(layout):
-    rendered(layout)
+    research(layout)
+    capex = Reading(
+        "Capital expenditures planned for 2026",
+        DOC_IDS["ten_k"],
+        "approximately $20 billion in 2026",
+        DOC_IDS["old_ten_k"],
+        "approximately $20 billion in 2026",
+        "none",
+        ((TEN_K_CAPEX[0], DOC_IDS["ten_k"]), (TEN_K_CAPEX[0], DOC_IDS["old_ten_k"])),
+    )
+    write_readings(layout, FY, readings_text(FY, "year", capex=[capex]), kind="year")
+    workflow.render(layout, TICKER, NOW)
     # EDGAR's filings.recent has moved on: the 10-K for the fiscal year ended 2024-12-28 is gone.
     rows = tuple(row for row in RECENT if row is not OLD_TEN_K)
     place(layout.raw(TICKER) / "submissions_20261008T055000EDT.json", submissions_json(rows=rows))
@@ -1245,13 +1158,17 @@ def test_a_season_the_newest_submissions_no_longer_list_is_left_out(layout):
 
     assert planned["invalid_files"] == []  # its folder is older than every listed season
     assert list(seasons_of(planned)) == SPAN_SEASONS[1:]
-    assert planned["action"] == "derive"  # the seasons its baselines named are measured anew
+    assert planned["action"] == "derive"  # the 10-K season's sheet names its year baseline anew
     workflow.derive(layout, TICKER, LATER)
     planned = entry(layout, LATER)
-    # The fiscal year ended 2025-12-27 lost its baselines of a year ago: its readings name them.
+    # The fiscal year ended 2025-12-27 lost the baseline of its year: its readings name it.
+    assert comparisons_of(planned)["2025-12-27 year"]["baseline"] is None
     assert planned["action"] == "research"
-    assert planned["reason"].startswith("readings missing or failing check: 2025-12-27 (failing, ")
-    assert workflow.check(layout, TICKER, LATER)["readings"][0]["problems"][0]["message"] == (
+    assert planned["reason"].startswith("readings missing or failing check: 2025-12-27 year (failing, ")
+    (year,) = [
+        found for found in workflow.check(layout, TICKER, LATER)["readings"] if found["kind"] == "year"
+    ]
+    assert year["problems"][0]["message"] == (
         f"{DOC_IDS['old_ten_k']} is no document in raw/ (a DOC_ID of a text file in formatted/)"
     )
 
@@ -1274,7 +1191,7 @@ def test_plan_reads_the_watchlist_without_tickers_and_never_writes(layout, tmp_p
 # --------------------------------------------------------------------------- derive
 
 
-def test_derive_writes_every_documents_text_and_every_seasons_measures_once(layout):
+def test_derive_writes_every_documents_text_and_every_seasons_sheet_once(layout):
     fetch(layout)
 
     first = workflow.derive(layout, TICKER, NOW)
@@ -1290,9 +1207,8 @@ def test_derive_writes_every_documents_text_and_every_seasons_measures_once(layo
         }
         for role in ROLES
     ]
-    assert first["measures"] == [
-        {"season": day, "path": str(measures_path(layout, day)), "status": "published"}
-        for day in SPAN_SEASONS
+    assert first["sheets"] == [
+        {"season": day, "path": str(sheet_path(layout, day)), "status": "published"} for day in SPAN_SEASONS
     ]
     assert (first["stray_files"], first["stray_reports"]) == ([], [])
     for role in ROLES:
@@ -1303,36 +1219,34 @@ def test_derive_writes_every_documents_text_and_every_seasons_measures_once(layo
             assert written == html_text(raw_bytes(role).decode("utf-8"))
     for day in SPAN_SEASONS:
         assert (
-            measures_path(layout, day)
-            .read_text(encoding="utf-8")
-            .startswith(f"# {TICKER} · {day} · measures\n")
+            sheet_path(layout, day).read_text(encoding="utf-8").startswith(f"# {TICKER} · {day} · season\n")
         )
 
     second = workflow.derive(layout, TICKER, NOW)
 
-    assert {item["status"] for item in (*second["documents"], *second["measures"])} == {"exists"}
+    assert {item["status"] for item in (*second["documents"], *second["sheets"])} == {"exists"}
 
 
-def test_derive_rewrites_a_text_or_measures_that_differs_or_cannot_be_read(layout):
+def test_derive_rewrites_a_text_or_sheet_that_differs_or_cannot_be_read(layout):
     research(layout)
     expected = text_path(layout, "ten_k").read_text(encoding="utf-8")
-    measures = measures_path(layout, "2026-06-27").read_text(encoding="utf-8")
+    sheet = sheet_path(layout, "2026-06-27").read_text(encoding="utf-8")
     place(text_path(layout, "ten_k"), "edited\n")
     place(text_path(layout, "call_q2"), b"\xff\xfe")
-    place(measures_path(layout, "2026-06-27"), b"\xff\xfe")
-    place(measures_path(layout, "2026-03-28"), "edited\n")
+    place(sheet_path(layout, "2026-06-27"), b"\xff\xfe")
+    place(sheet_path(layout, "2026-03-28"), "edited\n")
 
     stale = seasons_of(entry(layout))
     output = workflow.derive(layout, TICKER, NOW)
 
     assert stale["2026-06-27"]["texts"]["stale"] == [DOC_IDS["call_q2"]]
-    assert stale["2026-06-27"]["measures"]["status"] == stale["2026-03-28"]["measures"]["status"] == "stale"
+    assert stale["2026-06-27"]["sheet"]["status"] == stale["2026-03-28"]["sheet"]["status"] == "stale"
     statuses = {item["doc_id"]: item["status"] for item in output["documents"]}
     assert (statuses[DOC_IDS["ten_k"]], statuses[DOC_IDS["call_q2"]]) == ("rewritten", "rewritten")
     assert {
         status for doc_id, status in statuses.items() if doc_id not in (DOC_IDS["ten_k"], DOC_IDS["call_q2"])
     } == {"exists"}
-    assert [item["status"] for item in output["measures"]] == [
+    assert [item["status"] for item in output["sheets"]] == [
         "exists",
         "exists",
         "exists",
@@ -1340,18 +1254,18 @@ def test_derive_rewrites_a_text_or_measures_that_differs_or_cannot_be_read(layou
         "rewritten",
     ]
     assert text_path(layout, "ten_k").read_text(encoding="utf-8") == expected
-    assert measures_path(layout, "2026-06-27").read_text(encoding="utf-8") == measures
+    assert sheet_path(layout, "2026-06-27").read_text(encoding="utf-8") == sheet
     assert entry(layout)["action"] == "render"
 
 
-def test_derive_writes_no_measures_for_a_season_whose_filing_is_not_in_raw(layout):
+def test_derive_writes_no_sheet_for_a_season_whose_filing_is_not_in_raw(layout):
     fetch(layout)
     raw_file(layout, "ten_q_2").unlink()
 
     output = workflow.derive(layout, TICKER, NOW)
 
-    assert [item["season"] for item in output["measures"]] == SPAN_SEASONS[:-1]
-    assert not measures_path(layout, "2026-06-27").exists()
+    assert [item["season"] for item in output["sheets"]] == SPAN_SEASONS[:-1]
+    assert not sheet_path(layout, "2026-06-27").exists()
     assert DOC_IDS["exhibit_2_1"] in [item["doc_id"] for item in output["documents"]]
     assert DOC_IDS["ten_q_2"] not in [item["doc_id"] for item in output["documents"]]
 
@@ -1359,36 +1273,33 @@ def test_derive_writes_no_measures_for_a_season_whose_filing_is_not_in_raw(layou
 # --------------------------------------------------------------------------- check
 
 
-def test_check_reads_every_seasons_readings_by_default(layout):
+def test_check_reads_every_comparisons_readings_by_default(layout):
     research(layout)
-    stub = place(readings_file(layout, date(2025, 9, 27)), f"# {TICKER} · 2025-09-27 · readings\n")
+    stub = place(readings_file(layout, date(2025, 9, 27)), f"# {TICKER} · 2025-09-27 · quarter readings\n")
 
     output = workflow.check(layout, TICKER, NOW)
 
     assert output["ticker"] == TICKER
-    assert [(item["path"], item["season"], item["valid"]) for item in output["readings"]] == [
-        (str(stub), "2025-09-27", False),  # before the window, yet read: it is a listed season's
-        (str(readings_file(layout, date(2025, 12, 27))), "2025-12-27", True),
-        (str(readings_file(layout, Q1)), "2026-03-28", True),
-        (str(readings_file(layout, Q2)), "2026-06-27", True),
+    assert [(item["path"], item["season"], item["kind"], item["valid"]) for item in output["readings"]] == [
+        (str(stub), "2025-09-27", "quarter", False),  # before the window, yet read: it is a listed season's
+        *((str(readings_file(layout, day, kind)), day.isoformat(), kind, True) for day, kind in COMPARISONS),
     ]
-    assert len(output["readings"][0]["problems"]) == len(BOT_ITEMS)  # one missing section each
+    assert len(output["readings"][0]["problems"]) == len(ASPECTS)  # one missing section each
     assert all(item["problems"] == [] for item in output["readings"][1:])
 
 
 def test_check_lists_every_problem_with_its_line(layout):
     research(layout)
-    text = readings_text(
-        Q2,
-        i3_6=Reading(
-            DOC_IDS["ten_q_1"],
-            "yellow",
-            quotes=(
-                ("Not a sentence of the 10-Q at all.", QUOTE_FILING[1]),
-                ("Too short.", QUOTE_FILING[1]),
-            ),
+    entry_ = Reading(
+        "Substrates",
+        DOC_IDS["ten_q_2"],
+        "tight",
+        quotes=(
+            ("Not a sentence of the 10-Q at all.", DOC_IDS["ten_q_2"]),
+            ("Too short.", DOC_IDS["ten_q_2"]),
         ),
     )
+    text = readings_text(Q2, supply=[entry_])
     write_readings(layout, Q2, text)
 
     (checked,) = [item for item in workflow.check(layout, TICKER, NOW)["readings"] if not item["valid"]]
@@ -1397,6 +1308,7 @@ def test_check_lists_every_problem_with_its_line(layout):
     assert checked == {
         "path": str(readings_file(layout, Q2)),
         "season": "2026-06-27",
+        "kind": "quarter",
         "valid": False,
         "problems": [
             {
@@ -1414,12 +1326,16 @@ def test_check_lists_every_problem_with_its_line(layout):
 def test_check_takes_a_draft_in_a_folder_named_after_its_season_anywhere(layout, tmp_path):
     research(layout)
     draft = place(tmp_path / "drafts" / "2026-06-27" / "draft.md", readings_text(Q2))
+    year = place(tmp_path / "drafts" / "2025-12-27" / "year.md", readings_text(FY, "year"))
 
-    output = workflow.check(layout, TICKER, NOW, [draft])
+    output = workflow.check(layout, TICKER, NOW, [draft, year])
 
     assert output == {
         "ticker": TICKER,
-        "readings": [{"path": str(draft), "season": "2026-06-27", "valid": True, "problems": []}],
+        "readings": [
+            {"path": str(draft), "season": "2026-06-27", "kind": "quarter", "valid": True, "problems": []},
+            {"path": str(year), "season": "2025-12-27", "kind": "year", "valid": True, "problems": []},
+        ],
     }
 
 
@@ -1454,15 +1370,16 @@ def test_readings_that_cannot_be_read_fail_without_echoing_them(layout, tmp_path
     (absent,) = workflow.check(layout, TICKER, NOW, [missing])["readings"]
 
     (problem,) = unreadable["problems"]
-    assert problem["line"] == 1
+    assert (problem["line"], unreadable["kind"]) == (1, "quarter")
     assert problem["message"].startswith("the readings cannot be read: ")
     assert "\\xff" not in problem["message"]
+    assert absent["kind"] is None
     assert absent["problems"] == [{"line": 1, "message": "the readings cannot be read: file not found"}]
 
 
 def test_readings_saved_with_a_byte_order_mark_and_crlf_line_ends_pass(layout):
     research(layout)
-    text = readings_text(Q2).replace("\n", "\r\n")
+    text = readings_text(Q2, supply=[SUPPLY]).replace("\n", "\r\n")
     readings_file(layout, Q2).write_bytes(b"\xef\xbb\xbf" + text.encode("utf-8"))
 
     output = workflow.check(layout, TICKER, NOW)
@@ -1472,13 +1389,26 @@ def test_readings_saved_with_a_byte_order_mark_and_crlf_line_ends_pass(layout):
 
 def test_a_text_file_missing_or_out_of_date_fails_the_readings_naming_its_document(layout):
     research(layout)
+    guidance = Reading(
+        "Next-quarter revenue guidance",
+        DOC_IDS["exhibit_2_1"],
+        "revenue of $12.6 billion to $13.6 billion",
+        DOC_IDS["exhibit_1"],
+        "revenue of $12.6 billion to $13.6 billion",
+        "none",
+        ((RELEASE_GUIDANCE[0], DOC_IDS["exhibit_2_1"]), (RELEASE_GUIDANCE[0], DOC_IDS["exhibit_1"])),
+    )
+    text = readings_text(Q2, guidance=[guidance])
+    write_readings(layout, Q2, text)
     text_path(layout, "exhibit_1").unlink()
 
     (checked,) = [item for item in workflow.check(layout, TICKER, NOW)["readings"] if not item["valid"]]
 
-    lines = readings_text(Q2).splitlines()
-    named = [number for number, line in enumerate(lines, 1) if line == f"baseline: {DOC_IDS['exhibit_1']}"]
-    assert len(named) == 7  # 1.1, 1.2, 1.4, 1.5, 1.6, 1.7 and 1.10 compare with the previous guidance
+    lines = text.splitlines()
+    named = [
+        lines.index(f"baseline: {DOC_IDS['exhibit_1']}") + 1,
+        lines.index(f"— {DOC_IDS['exhibit_1']}") + 1,
+    ]
     assert checked["season"] == "2026-06-27"
     assert checked["problems"] == [
         {
@@ -1502,60 +1432,59 @@ def test_check_writes_nothing(layout):
 # --------------------------------------------------------------------------- render
 
 
-def test_render_writes_the_report_of_every_season_whose_readings_pass(layout):
+def test_render_writes_the_report_of_every_comparison_whose_readings_pass(layout):
     research(layout)
 
     output = workflow.render(layout, TICKER, NOW)
 
     assert output == {
         "ticker": TICKER,
-        "reports": [{"season": day, "path": str(report_path(layout, day))} for day in WINDOW_SEASONS],
+        "reports": [
+            {"season": day.isoformat(), "kind": kind, "path": str(report_path(layout, day.isoformat(), kind))}
+            for day, kind in COMPARISONS
+        ],
         "current": [],
         "skipped": [],
     }
     lines = report_path(layout, "2026-06-27").read_text(encoding="utf-8").split("\n")
-    assert lines[:9] == [
-        f"# {TICKER} · 2026-06-27 · season report",
+    assert lines[:13] == [
+        f"# {TICKER} · 2026-06-27 · quarter report",
         "",
         "Generated 2026-10-08 06:00:00 EDT.",
         "",
         "Issuer: INTEL CORP (CIK 0000050863). Season: the 10-Q for the period ended 2026-06-27 (accession "
-        "0000050863-26-000064, filed 2026-07-24). Call: transcript as of the calls list of 2026-10-08.",
-        "Baselines: previous quarter 2026-03-28; same quarter last year none listed; previous 10-K "
-        "2025-12-27; previous proxy 2025-12-27.",
+        "0000050863-26-000064, filed 2026-07-24). Call: transcript (call 248001 of 2026-07-23).",
+        "Comparison: quarter: this season against the previous season, 2026-03-28 (10-Q).",
+        "The season's documents: "
+        + "; ".join(
+            DOC_IDS[role] for role in ("ten_q_2", "eight_k_2", "exhibit_2_1", "exhibit_2_2", "call_q2")
+        )
+        + ".",
+        "The baseline's documents: "
+        + "; ".join(DOC_IDS[role] for role in ("ten_q_1", "eight_k_1", "exhibit_1", "call_q1"))
+        + ".",
+        "Pending, dated after the season's 10-Q was filed: the 8-K 0000050863-26-000066 dated 2026-07-30.",
         "",
-        "68 items, every one listed by importance (22 high, 37 medium, 9 low): 15 read by Python, 51 by the "
-        "bot, 2 without a source.",
+        "0 items in 6 aspects; aspects without an item: Guidance, Capital expenditure, Upstream supply, "
+        "Downstream demand, Debt structure, Product roadmap.",
+        "",
+        "## Guidance",
+    ]
+    year = report_path(layout, "2025-12-27", "year").read_text(encoding="utf-8").split("\n")
+    assert year[0] == f"# {TICKER} · 2025-12-27 · year report"
+    assert year[4].endswith("Call: unavailable as of the calls list of 2026-10-08.")
+    assert year[5:9] == [
+        "Comparison: year: this 10-K season against the previous 10-K season, 2024-12-28.",
+        f"The season's documents: {DOC_IDS['ten_k']}; {DOC_IDS['eight_k_other']}.",
+        f"The baseline's documents: {DOC_IDS['old_ten_k']}.",
         "",
     ]
-    assert (
-        "| medium | 2.2 Gross and operating margins · operating margin (%) | previous quarter 2026-03-28 "
-        "(10-Q) | 5.15 | 11.18 | +6.03 pp |"
-    ) in lines
-    assert (
-        "| medium | 2.6 Net debt · net debt (USD) | previous quarter 2026-03-28 (10-Q) | 28,000,000,000 | "
-        "37,700,000,000 | +9,700,000,000 (+34.64%) |"
-    ) in lines
-    assert (
-        "| high | 9.5 Call cancelled · the season's call | previous four seasons: 2026-03-28, 2025-12-27, "
-        "2025-09-27, 2024-12-28 | transcript, unavailable, transcript, unavailable | transcript | — |"
-    ) in lines
-    ten_k = report_path(layout, "2025-12-27").read_text(encoding="utf-8").split("\n")
-    assert ten_k[4].endswith("Call: unavailable as of the calls list of 2026-10-08.")
-    assert ten_k[5] == (
-        "Baselines: previous quarter 2025-09-27; same quarter last year 2024-12-28; previous 10-K "
-        "2024-12-28; previous proxy none listed."
-    )
 
 
-def test_render_skips_a_season_that_cannot_render_and_names_the_current_ones(layout):
+def test_render_skips_a_comparison_that_cannot_render_and_names_the_current_ones(layout):
     rendered(layout)
-    write_readings(layout, Q1, readings_text(Q1, i3_3=Reading(DOC_IDS["ten_k"], "none", "No quote.")))
-    write_readings(
-        layout,
-        Q2,
-        readings_text(Q2, i1_1=Reading(DOC_IDS["exhibit_1"], "not disclosed", "not disclosed")),
-    )
+    write_readings(layout, Q1, readings_text(Q1, supply=[Reading("Substrates", DOC_IDS["ten_q_1"], "tight")]))
+    write_readings(layout, Q2, readings_text(Q2, supply=[SUPPLY]))
 
     output = workflow.render(layout, TICKER, LATER)
 
@@ -1564,11 +1493,18 @@ def test_render_skips_a_season_that_cannot_render_and_names_the_current_ones(lay
         "reports": [
             {
                 "season": "2026-06-27",
-                "path": str(report_path(layout, "2026-06-27", "report_20261008T070000EDT.md")),
+                "kind": "quarter",
+                "path": str(report_path(layout, "2026-06-27", token="20261008T070000EDT")),
             }
         ],
-        "current": ["2025-12-27"],
-        "skipped": [{"season": "2026-03-28", "reason": "the season's readings are failing (1 problem)"}],
+        "current": [{"season": "2025-12-27", "kind": "quarter"}, {"season": "2025-12-27", "kind": "year"}],
+        "skipped": [
+            {
+                "season": "2026-03-28",
+                "kind": "quarter",
+                "reason": "the season's quarter readings are failing (1 problem)",
+            }
+        ],
     }
     assert report_path(layout, "2026-06-27").is_file()  # the earlier report stays
 
@@ -1577,12 +1513,16 @@ def remove_text(layout) -> None:
     text_path(layout, "exhibit_2_1").unlink()
 
 
-def remove_measures(layout) -> None:
-    measures_path(layout, "2026-06-27").unlink()
+def remove_baseline_text(layout) -> None:
+    text_path(layout, "call_q1").unlink()
+
+
+def remove_sheet(layout) -> None:
+    sheet_path(layout, "2026-06-27").unlink()
 
 
 def break_readings(layout) -> None:
-    write_readings(layout, Q2, readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "No quote.")))
+    write_readings(layout, Q2, readings_text(Q2, supply=[UNQUOTED]))
 
 
 def remove_transcript(layout) -> None:
@@ -1593,14 +1533,21 @@ def remove_filing(layout) -> None:
     raw_file(layout, "ten_q_2").unlink()
 
 
+def remove_baseline_filing(layout) -> None:
+    raw_file(layout, "ten_q_1").unlink()
+
+
 @pytest.mark.parametrize(
     ("change", "reason"),
     [
         pytest.param(remove_text, "1 text file missing or out of date; run derive", id="text"),
         pytest.param(
-            remove_measures, "the season's measures.md is missing or out of date; run derive", id="measures"
+            remove_baseline_text, "1 text file missing or out of date; run derive", id="baseline-text"
         ),
-        pytest.param(break_readings, "the season's readings are failing (1 problem)", id="readings"),
+        pytest.param(
+            remove_sheet, "the season's season.md is missing or out of date; run derive", id="sheet"
+        ),
+        pytest.param(break_readings, "the season's quarter readings are failing (1 problem)", id="readings"),
         pytest.param(
             remove_transcript,
             "the transcript of the call 248001 (2026-07-23) is not in raw/ "
@@ -1613,9 +1560,15 @@ def remove_filing(layout) -> None:
             "({raw}/2026-06-27/10-Q_2026-06-27_0000050863-26-000064/intc-20260627.htm); run fetch",
             id="filing",
         ),
+        pytest.param(
+            remove_baseline_filing,
+            "the 10-Q 0000050863-26-000041 for the period ended 2026-03-28 is not in raw/ "
+            "({raw}/2026-03-28/10-Q_2026-03-28_0000050863-26-000041/intc-20260328.htm); run fetch",
+            id="baseline-filing",
+        ),
     ],
 )
-def test_render_refuses_when_no_season_with_readings_can_render(layout, change, reason):
+def test_render_refuses_when_no_comparison_with_readings_can_render(layout, change, reason):
     fetch(layout)
     workflow.derive(layout, TICKER, NOW)
     write_readings(layout, Q2)
@@ -1624,10 +1577,10 @@ def test_render_refuses_when_no_season_with_readings_can_render(layout, change, 
     with pytest.raises(ValueError) as raised:
         workflow.render(layout, TICKER, NOW)
 
-    assert str(raised.value) == f"{TICKER}: no report to write: 2026-06-27: " + reason.format(
+    assert str(raised.value) == f"{TICKER}: no report to write: 2026-06-27 quarter: " + reason.format(
         raw=layout.raw(TICKER)
     )
-    assert not layout.reports(TICKER).joinpath("2026-06-27", REPORT).exists()
+    assert not report_path(layout, "2026-06-27").exists()
 
 
 def test_render_refuses_while_no_season_has_readings(layout):
@@ -1646,7 +1599,12 @@ def test_render_writes_nothing_while_every_report_is_current(layout):
 
     output = workflow.render(layout, TICKER, est(2026, 11, 8, 6, 0))
 
-    assert output == {"ticker": TICKER, "reports": [], "current": WINDOW_SEASONS, "skipped": []}
+    assert output == {
+        "ticker": TICKER,
+        "reports": [],
+        "current": [{"season": day.isoformat(), "kind": kind} for day, kind in COMPARISONS],
+        "skipped": [],
+    }
     assert snapshot(layout.root) == before
 
 
@@ -1654,11 +1612,7 @@ def test_render_never_overwrites_a_report(layout):
     rendered(layout)
     first = report_path(layout, "2026-06-27")
     before = first.read_bytes()
-    write_readings(
-        layout,
-        Q2,
-        readings_text(Q2, i1_1=Reading(DOC_IDS["exhibit_1"], "not disclosed", "not disclosed")),
-    )
+    write_readings(layout, Q2, readings_text(Q2, supply=[SUPPLY]))
 
     with pytest.raises(FileExists):
         workflow.render(layout, TICKER, NOW)  # the same second: the same name
@@ -1669,7 +1623,8 @@ def test_render_never_overwrites_a_report(layout):
     assert later["reports"] == [
         {
             "season": "2026-06-27",
-            "path": str(report_path(layout, "2026-06-27", "report_20261008T060001EDT.md")),
+            "kind": "quarter",
+            "path": str(report_path(layout, "2026-06-27", token="20261008T060001EDT")),
         }
     ]
     assert first.read_bytes() == before
@@ -1685,7 +1640,7 @@ def test_a_report_rendered_later_is_the_same_but_for_its_generated_line(layout):
 
     (written,) = output["reports"]
     two = Path(written["path"]).read_text(encoding="utf-8").split("\n")
-    assert written["path"].endswith("2026-06-27/report_20261108T060000EST.md")
+    assert written["path"].endswith("2026-06-27/report_quarter_20261108T060000EST.md")
     assert [index for index, (a, b) in enumerate(zip(one, two, strict=True)) if a != b] == [2]
     assert two[2] == "Generated 2026-11-08 06:00:00 EST."
 
@@ -1696,14 +1651,19 @@ def test_names_and_lines_carry_new_york_time(layout):
     output = workflow.render(layout, TICKER, est(2026, 12, 31, 23, 30))
 
     path = output["reports"][-1]["path"]
-    assert path.endswith("2026-06-27/report_20261231T233000EST.md")
+    assert path.endswith("2026-06-27/report_quarter_20261231T233000EST.md")
     assert "\nGenerated 2026-12-31 23:30:00 EST.\n" in Path(path).read_text(encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- show
 
+SHOWN = (
+    f"{TICKER}: action research: readings missing or failing check: 2024-12-28 quarter (missing), "
+    "2024-12-28 year (missing), 2025-09-27 quarter (missing)."
+)
 
-def test_show_prints_each_tickers_action_and_newest_report_rendered_now(layout):
+
+def test_show_prints_each_tickers_action_and_newest_reports_rendered_now(layout):
     rendered(layout)
 
     shown = workflow.show(layout, [TICKER, "amd"], LATER)
@@ -1712,22 +1672,35 @@ def test_show_prints_each_tickers_action_and_newest_report_rendered_now(layout):
     stored = path.read_text(encoding="utf-8")
     now = stored.replace("Generated 2026-10-08 06:00:00 EDT.", "Generated 2026-10-08 07:00:00 EDT.")
     # The default window, two years to today, holds the seasons fetched as baselines too.
-    header = (
-        f"{TICKER}: action research: readings missing or failing check: 2024-12-28 (missing), 2025-09-27 "
-        f"(missing). Newest report: {path} (fresh).\n\n"
-    )
+    header = f"{SHOWN} Newest quarter report: {path} (fresh).\n\n"
     assert shown == f"{header}{now}\nAMD: action fetch: {NO_SUBMISSIONS}.\n\n{NO_REPORT}\n"
 
 
 def test_show_falls_back_to_the_newest_season_whose_report_renders(layout):
     rendered(layout)
-    write_readings(layout, Q2, readings_text(Q2, i3_3=Reading(DOC_IDS["ten_q_1"], "none", "No quote.")))
+    write_readings(layout, Q2, readings_text(Q2, supply=[UNQUOTED]))
 
     shown = workflow.show(layout, [TICKER], LATER)
 
     path = report_path(layout, "2026-03-28")
-    assert f" Newest report: {path} (fresh).\n\n# {TICKER} · 2026-03-28 · season report\n" in shown
-    assert "2026-06-27 · season report" not in shown
+    assert f" Newest quarter report: {path} (fresh).\n\n# {TICKER} · 2026-03-28 · quarter report\n" in shown
+    assert "2026-06-27 · quarter report" not in shown
+
+
+def test_show_prints_both_reports_of_a_10_k_season(layout):
+    rendered(layout)
+    write_readings(layout, Q2, readings_text(Q2, supply=[UNQUOTED]))
+    write_readings(layout, Q1, readings_text(Q1, supply=[Reading("Substrates", DOC_IDS["ten_q_1"], "tight")]))
+
+    shown = workflow.show(layout, [TICKER], LATER)
+
+    quarter, year = report_path(layout, "2025-12-27"), report_path(layout, "2025-12-27", "year")
+    failing = "2026-03-28 quarter (failing, 1 problem), 2026-06-27 quarter (failing, 1 problem)"
+    assert shown.startswith(
+        f"{SHOWN.removesuffix('.')}, {failing}. Newest quarter report: {quarter} (fresh). Newest year "
+        f"report: {year} (fresh).\n\n# {TICKER} · 2025-12-27 · quarter report\n"
+    )
+    assert f"\n## Evidence\n\nna\n\n# {TICKER} · 2025-12-27 · year report\n" in shown
 
 
 def test_show_names_a_season_never_rendered_without_a_report_file(layout):
@@ -1735,7 +1708,7 @@ def test_show_names_a_season_never_rendered_without_a_report_file(layout):
 
     shown = workflow.show(layout, [TICKER], NOW)
 
-    assert f" Newest report: none (missing).\n\n# {TICKER} · 2026-06-27 · season report\n" in shown
+    assert f" Newest quarter report: none (missing).\n\n# {TICKER} · 2026-06-27 · quarter report\n" in shown
 
 
 def test_show_renders_no_report_while_a_raw_file_is_invalid(layout):
@@ -1757,8 +1730,8 @@ def test_show_reads_the_watchlist_without_tickers(layout, tmp_path):
     assert shown.startswith(
         f"AMD: action fetch: {NO_SUBMISSIONS}.\n\n{NO_REPORT}\n\n{TICKER}: action research"
     )
-    assert f" Newest report: {report_path(layout, '2026-06-27')} (fresh).\n\n" in shown
-    assert shown.endswith("\nnote: the old values are newest first\n")
+    assert f" Newest quarter report: {report_path(layout, '2026-06-27')} (fresh).\n\n" in shown
+    assert shown.endswith("\n## Evidence\n\nna\n")
 
 
 def test_show_writes_nothing(layout):

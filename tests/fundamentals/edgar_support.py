@@ -8,10 +8,12 @@ newest filing first, the CIK as unpadded text, ``items`` as each row gives it);
 ``submissions_document`` returns the same body as a dict, for tests that break one field.
 ``RECENT`` is a default history for INTC with five periods: the 10-K for the fiscal year
 ended 2025-12-27 (no earnings release is listed for it; an 8-K naming items 5.02 and 9.01
-is, and must be ignored), the 10-Qs for the quarters ended 2026-03-28 and 2026-06-27,
-each with its Item 2.02 8-K dated and filed the day before the 10-Q (``RELEASES``), and
-an older 10-K and 10-Q, plus a proxy statement without a report date and a Form 4 whose
-primary document is a path.
+is, and is no release), the 10-Qs for the quarters ended 2026-03-28 and 2026-06-27, each
+with its Item 2.02 8-K dated and filed the day before the 10-Q (``RELEASES``), and an older
+10-K and 10-Q, plus a proxy statement without a report date, which the domain no longer
+reads, and an 8-K dated after the last 10-Q was filed, which Rule B leaves pending.
+``FORM_4`` is a Form 4 whose primary document is EDGAR's rendering of its XML, for the
+tests that list one: no form the domain reads.
 
 ``filing_index_html`` lays out an 8-K's filing index page as EDGAR serves it (verified on
 Intel's 8-K 0000050863-26-000155): the ``formHeader`` and ``formGrouping`` blocks with the
@@ -217,8 +219,12 @@ FORM_4 = Row(
     "4", "0001209191-26-061234", date(2026, 8, 3), date(2026, 7, 30), "xslF345X05/wk-form4_1754251234.xml"
 )
 PROXY = Row("DEF 14A", "0001193125-26-112233", date(2026, 3, 27), None, "d123456ddef14a.htm")
+# An 8-K dated after the 10-Q for the quarter ended 2026-06-27 was filed: pending.
+PENDING_8K = Row(
+    "8-K", "0000050863-26-000066", date(2026, 8, 3), date(2026, 7, 30), "intc-20260730.htm", "8.01"
+)
 RECENT = (  # newest first, as EDGAR lists them
-    FORM_4,
+    PENDING_8K,
     TEN_Q_2,
     EIGHT_K_Q2,
     TEN_Q_1,

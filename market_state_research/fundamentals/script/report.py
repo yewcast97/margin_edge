@@ -1,25 +1,26 @@
-"""A season's report: every item's old and new values, listed by importance, with its evidence.
+"""A comparison's report: every item the bot found of each aspect, its new and old values side by
+side with their difference, and the evidence they rest on.
 
-``render_report`` is a pure function of a season (its files, its Python items in
-``measures.md`` and the bot's passing readings) and the time it is generated: the same inputs
+``render_report`` is a pure function of a season (its files and the raw tree's listing), one of
+its comparisons, the bot's passing readings of it and the time it is generated: the same inputs
 give the same text but for the one ``Generated ...`` line, so ``same_report`` compares two
-reports apart from that line, and ``plan`` judges the newest report of a season fresh when it
-is the report rendered now. ``render`` writes it as ``reports/{T}/{PERIOD}/report_{TOKEN}.md``
-and never overwrites one.
+reports apart from that line, and ``plan`` judges the newest report of a comparison fresh when
+it is the report rendered now. ``render`` writes it as
+``reports/{T}/{PERIOD}/report_{KIND}_{TOKEN}.md`` and never overwrites one.
 
-The report states, under its title, the issuer, the season, its call and the seasons its
-baselines name, then how many items it lists by importance and by hand; then ``## Items``, one
-table of every item of the catalogue, none left out: the ``high`` items first, then ``medium``,
-then ``low`` (``items.by_importance``), in catalogue order within each, one row per comparison
-(a Python item may have several), each with its importance, item, baseline, old value, new
-value and change; then ``## Evidence``, per item in the same order, its rule and what its
-values rest on: the documents the bot read and its quotes, or Python's note. No threshold
-judges, marks or leaves out a row. Its fixed text passes ``readings.WORDING``.
+The report states, under its title, the issuer, the season and its call, the comparison (its
+kind and its baseline season), the documents of each side in ``raw/`` and, for the newest
+listed season, the filings and calls dated after its 10-K or 10-Q was filed, which Rule B
+places once the next season is listed; then how many items it lists and the aspects without
+one; then one section per aspect, in the aspects' order (``aspects.ASPECTS``): a table of its
+items in the readings' order, each row the item's title, its new value with the season's
+documents it rests on, its old value with the baseline's and the difference, or the line
+``na``; then ``## Evidence``, per item in the same order, the documents of each side and the
+quotes. No threshold, weight, score or rank applies, and no item is left out. Its fixed text
+passes ``readings.WORDING``.
 """
 
 import re
-from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Final
@@ -27,190 +28,154 @@ from typing import Final
 from market_state_research.common.layout import listed, name_instant, stamped
 from market_state_research.common.times import TOKEN_PATTERN, et_display, to_eastern
 
-from .documents import SeasonFiles
-from .filings import Season, Seasons
-from .items import IMPORTANCE, ITEMS, Baseline, Item, by_importance
-from .measures import NOTHING, Measures, Row, baseline_seasons
-from .readings import Readings
+from .aspects import ASPECTS, KINDS, Comparison, Kind
+from .documents import RawState, SeasonFiles
+from .readings import NA, NO_BASELINE, Item, Readings
+from .sheet import baseline_documents, call_line, season_name
 
 GENERATED: Final = "Generated "
 REPORT_PREFIX: Final = "report"
-NO_SOURCE: Final = "no source"
-HANDS: Final = {"python": "Python (measures.md)", "bot": "the bot (readings.md)", "none": "no source"}
-_REPORT_NAME = re.compile(rf"{REPORT_PREFIX}_(?P<token>{TOKEN_PATTERN})\.md", re.ASCII)
-
-
-@dataclass(frozen=True)
-class Entry:
-    """One item of the season as the report states it: its rows (one for a bot item or an item
-    without a source), what the bot's baseline line names (``none``), the quotes (text,
-    attribution) of a bot item and Python's note."""
-
-    item: Item
-    rows: tuple[Row, ...]
-    documents: str = "none"
-    quotes: tuple[tuple[str, str], ...] = ()
-    note: str = ""
-
-
-def _seasons(listing: Seasons, season: Season, kind: Baseline) -> str:
-    """The item's baseline as the report's table names it: the kind and its listed seasons."""
-    if kind == "none":
-        return "none"
-    found = baseline_seasons(listing, season, kind)
-    return f"{kind} " + (
-        ", ".join(f"{other.period} ({other.filing.form})" for other in found) or "none listed"
-    )
-
-
-def entries(
-    listing: Seasons, files: SeasonFiles, measures: Measures, readings: Readings
-) -> tuple[Entry, ...]:
-    """Every item of the catalogue, in catalogue order, from the Python items and the passing
-    readings."""
-    found: list[Entry] = []
-    for item in ITEMS:
-        baseline = _seasons(listing, files.season, item.baseline)
-        if item.who == "none":
-            found.append(Entry(item, (Row("", baseline, NO_SOURCE, NO_SOURCE, NOTHING),)))
-        elif item.who == "python":
-            computed = measures.reading(item.id)
-            found.append(Entry(item, computed.rows, note=computed.note))
-        else:
-            bot = readings.get(item.id)
-            if bot is None:
-                raise ValueError(f"the readings lack item {item.id}")
-            quotes = tuple(
-                (quote.text, quote.doc_id if quote.speaker is None else f"{quote.doc_id}, {quote.speaker}")
-                for quote in bot.quotes
-            )
-            row = Row("", baseline, bot.old or "", bot.new or "", NOTHING)
-            found.append(Entry(item, (row,), "; ".join(bot.baseline or ()) or "none", quotes))
-    return tuple(found)
-
-
-def ordered(found: Sequence[Entry]) -> tuple[Entry, ...]:
-    """``found`` in the report's order (``items.by_importance``)."""
-    by_item = {entry.item: entry for entry in found}
-    return tuple(by_item[item] for item in by_importance(tuple(by_item)))
-
-
-def counts_line(found: Sequence[Entry]) -> str:
-    """The report's line counting its items by importance and by hand."""
-    importance = [entry.item.importance for entry in found]
-    who = [entry.item.who for entry in found]
-    levels = ", ".join(f"{importance.count(level)} {level}" for level in IMPORTANCE)
-    return (
-        f"{len(found)} items, every one listed by importance ({levels}): {who.count('python')} read by "
-        f"Python, {who.count('bot')} by the bot, {who.count('none')} without a source."
-    )
+NONE: Final = "none"
+_REPORT_NAME = re.compile(
+    rf"{REPORT_PREFIX}_(?P<kind>{'|'.join(KINDS)})_(?P<token>{TOKEN_PATTERN})\.md", re.ASCII
+)
 
 
 def _cell(text: str) -> str:
     return text.replace("|", "\\|")
 
 
-def _table(found: Sequence[Entry]) -> list[str]:
-    lines = [
-        "| Importance | Item | Baseline | Old | New | Change |",
-        "| --- | --- | --- | --- | --- | --- |",
+def _side(value: str | None, documents: tuple[str, ...] | None) -> str:
+    """A value and the documents it rests on; ``na`` and ``no baseline`` stand alone."""
+    shown = value or NA
+    if shown in (NA, NO_BASELINE) or not documents:
+        return shown
+    return f"{shown} · {'; '.join(documents)}"
+
+
+def _comparison_line(found: Comparison) -> str:
+    if found.kind == "quarter":
+        against = "this season against the previous season"
+        baseline = None if found.baseline is None else season_name(found.baseline)
+    else:
+        against = "this 10-K season against the previous 10-K season"
+        baseline = None if found.baseline is None else str(found.baseline.period)
+    return f"Comparison: {found.kind}: {against}" + (
+        ": none is listed." if baseline is None else f", {baseline}."
+    )
+
+
+def _pending_line(raw: RawState, files: SeasonFiles) -> list[str]:
+    """The filings and calls dated after the newest listed season's 10-K or 10-Q was filed, for that
+    season's report alone."""
+    listing = raw.listing
+    if listing is None or not listing.seasons or listing.seasons[-1].period != files.day:
+        return []
+    found = [f"the {item.form} {item.accession} dated {item.dated}" for item in listing.pending]
+    found += [f"the call {event.id} of {event.day}" for event in raw.pending_calls]
+    form = files.season.filing.form
+    return [f"Pending, dated after the season's {form} was filed: {'; '.join(found) or NONE}."]
+
+
+def _counts_line(readings: Readings) -> str:
+    count = len(readings.items)
+    without = [
+        aspect.title
+        for aspect in ASPECTS
+        if (section := readings.section(aspect.key)) is None or not section.items
     ]
-    for entry in found:
-        for row in entry.rows:
-            item = entry.item.heading + (f" · {row.compared}" if row.compared else "")
-            cells = (entry.item.importance, item, row.baseline, row.old, row.new, row.change)
-            lines.append("| " + " | ".join(_cell(cell) for cell in cells) + " |")
+    noun = "item" if count == 1 else "items"
+    return f"{count} {noun} in {len(ASPECTS)} aspects; aspects without an item: {', '.join(without) or NONE}."
+
+
+def _table(items: tuple[Item, ...]) -> list[str]:
+    lines = ["| Item | New | Old | Difference |", "| --- | --- | --- | --- |"]
+    for item in items:
+        cells = (
+            item.title,
+            _side(item.new, item.season),
+            _side(item.old, item.baseline),
+            item.difference or NA,
+        )
+        lines.append("| " + " | ".join(_cell(cell) for cell in cells) + " |")
     return lines
 
 
-def _evidence(found: Sequence[Entry]) -> list[str]:
+def _aspects(readings: Readings) -> list[str]:
     lines: list[str] = []
-    for entry in found:
-        item = entry.item
+    for aspect in ASPECTS:
+        section = readings.section(aspect.key)
+        items = () if section is None else section.items
+        lines.extend([f"## {aspect.title}", "", *(_table(items) if items else [NA]), ""])
+    return lines
+
+
+def _evidence(readings: Readings) -> list[str]:
+    lines = ["## Evidence", ""]
+    if not readings.items:
+        return [*lines, NA]
+    for aspect, item in readings.items:
         lines.extend(
             [
-                f"### {item.heading}",
+                f"### {aspect.title} · {item.title}",
                 "",
-                f"importance: {item.importance}; read by {HANDS[item.who]}",
-                f"rule: {item.rule}",
+                f"season: {'; '.join(item.season or ()) or NONE}",
+                f"baseline: {'; '.join(item.baseline or ()) or NONE}",
             ]
         )
-        if item.who == "bot":
-            lines.append(f"baseline: {entry.documents}")
-        if entry.note:
-            lines.append(f"note: {entry.note}")
-        for text, attribution in entry.quotes:
-            lines.extend(["", f"> {text}", f"— {attribution}"])
+        for quote in item.quotes:
+            attribution = quote.doc_id if quote.speaker is None else f"{quote.doc_id}, {quote.speaker}"
+            lines.extend(["", f"> {quote.text}", f"— {attribution}"])
         lines.append("")
     return lines[:-1]
 
 
-def _baselines_line(listing: Seasons, files: SeasonFiles) -> str:
-    named = []
-    kinds: tuple[Baseline, ...] = (
-        "previous quarter",
-        "same quarter last year",
-        "previous 10-K",
-        "previous proxy",
-    )
-    for kind in kinds:
-        seasons = baseline_seasons(listing, files.season, kind)
-        named.append(f"{kind} {seasons[0].period if seasons else 'none listed'}")
-    return "Baselines: " + "; ".join(named) + "."
-
-
 def render_report(
-    ticker: str,
-    cik: str,
-    entity_name: str,
-    listing: Seasons,
-    files: SeasonFiles,
-    measures: Measures,
-    readings: Readings,
-    generated_at: datetime,
+    raw: RawState, files: SeasonFiles, found: Comparison, readings: Readings, generated_at: datetime
 ) -> str:
-    """The season's report (module docstring)."""
+    """The report of ``found``, a comparison of ``files``' season (module docstring)."""
     own = files.season.filing
-    found = ordered(entries(listing, files, measures, readings))
-    call = files.call
-    as_of = "" if call.as_of is None else f" as of the calls list of {call.as_of}"
+    season_documents = "; ".join(document.doc_id for document in files.documents) or NONE
+    baseline = "; ".join(baseline_documents(raw, found)) or f"{NONE} in raw/"
     lines = [
-        f"# {ticker} · {files.day} · season report",
+        f"# {raw.ticker} · {files.day} · {found.kind} report",
         "",
         f"{GENERATED}{et_display(to_eastern(generated_at, 'generated_at'))}.",
         "",
-        f"Issuer: {entity_name} (CIK {cik}). Season: the {own.form} for the period ended {own.period} "
-        f"(accession {own.accession}, filed {own.filed}). Call: {call.status}{as_of}.",
-        _baselines_line(listing, files),
+        f"Issuer: {raw.entity_name} (CIK {raw.cik}). Season: the {own.form} for the period ended "
+        f"{own.period} (accession {own.accession}, filed {own.filed}). {call_line(files.call)}",
+        _comparison_line(found),
+        f"The season's documents: {season_documents}.",
+        f"The baseline's documents: {baseline}.",
+        *_pending_line(raw, files),
         "",
-        counts_line(found),
+        _counts_line(readings),
         "",
-        "## Items",
-        "",
-        *_table(found),
-        "",
-        "## Evidence",
-        "",
-        *_evidence(found),
+        *_aspects(readings),
+        *_evidence(readings),
     ]
     return "\n".join(lines) + "\n"
 
 
-def report_name(moment: datetime) -> str:
-    """A report's file name: ``report_{TOKEN}.md``, the token naming ``moment``."""
-    return stamped(REPORT_PREFIX, moment, ".md")
+def report_name(kind: Kind, moment: datetime) -> str:
+    """A report's file name: ``report_{KIND}_{TOKEN}.md``, the token naming ``moment``."""
+    return stamped(f"{REPORT_PREFIX}_{kind}", moment, ".md")
 
 
-def report_files(directory: Path) -> list[Path]:
-    """The season's report files in ``directory``, whatever their token."""
-    return [path for path in listed(directory, ".md") if _REPORT_NAME.fullmatch(path.name)]
+def report_files(directory: Path, kind: Kind) -> list[Path]:
+    """The reports of ``kind`` in ``directory``, whatever their token."""
+    return [
+        path
+        for path in listed(directory, ".md")
+        if (match := _REPORT_NAME.fullmatch(path.name)) is not None and match["kind"] == kind
+    ]
 
 
-def newest_report(directory: Path, now: datetime) -> Path | None:
-    """The report whose token names the latest instant not after ``now``, or None."""
+def newest_report(directory: Path, kind: Kind, now: datetime) -> Path | None:
+    """The report of ``kind`` whose token names the latest instant not after ``now``, or None."""
     moment = to_eastern(now, "now")
     best: tuple[datetime, Path] | None = None
-    for path in report_files(directory):
+    for path in report_files(directory, kind):
         instant = name_instant(path.name)
         if instant is None or instant > moment:
             continue

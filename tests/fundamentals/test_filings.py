@@ -43,7 +43,6 @@ from market_state_research.fundamentals.script.filings import (
     parse_filing_index,
     parse_submissions,
     release_items,
-    rendered_document,
     select_seasons,
 )
 from market_state_research.fundamentals.script.text import html_text
@@ -72,6 +71,7 @@ from .edgar_support import (
     INDEX_HEADER,
     OLD_TEN_K,
     OLD_TEN_Q,
+    PENDING_8K,
     PROXY,
     Q1_EXHIBITS,
     Q2_EXHIBITS,
@@ -124,7 +124,7 @@ FULLWIDTH_ZERO = "０"  # FULLWIDTH DIGIT ZERO: a Unicode decimal digit that int
 PREFIX = f"submissions CIK{CIK}: "
 # Row indices of edgar_support.RECENT (newest first).
 (
-    FORM_4_ROW,
+    PENDING_ROW,
     LATEST_TEN_Q,
     Q2_RELEASE,
     FIRST_TEN_Q,
@@ -304,9 +304,9 @@ def filing(row: Row) -> Filing:
 
 
 def dated(row: Row) -> Dated:
-    """The filing ``row`` as Rule B dates it: an 8-K or a Form 4 by its report date, any other form
-    by its filing date."""
-    day = row.period if row.form in ("8-K", "4") else row.filed
+    """The filing ``row`` as Rule B dates it: an 8-K by its report date, any other form by its filing
+    date."""
+    day = row.period if row.form == "8-K" else row.filed
     assert day is not None
     return Dated(row.form, row.accession, row.filed, day, row.items, row.primary_document)
 
@@ -593,7 +593,10 @@ def test_parse_keeps_every_recent_row_in_edgar_order():
     parsed = parse_submissions(submissions_json(), CIK)
     assert parsed == Submissions(cik=CIK, entity_name=ENTITY_NAME, recent=tuple(map(parsed_row, RECENT)))
     assert parsed.recent[PROXY_ROW].period is None  # an empty reportDate
-    assert parsed.recent[FORM_4_ROW].primary_document == "xslF345X05/wk-form4_1754251234.xml"
+    assert parsed.recent[PENDING_ROW].primary_document == "intc-20260730.htm"
+    # Every row is read, whatever its form; which forms count is select_seasons' rule.
+    form4 = parse_submissions(submissions_json(rows=(FORM_4, *RECENT[1:])), CIK).recent[0]
+    assert form4.primary_document == "xslF345X05/wk-form4_1754251234.xml"
 
 
 def test_columns_and_keys_the_domain_does_not_read_are_ignored():
@@ -790,8 +793,8 @@ def test_filing_dates_must_be_iso_dates_on_every_row(value):
 
 @pytest.mark.parametrize("value", ["2026/07/23", "20260723", "2026-13-01", PRIVATE])
 def test_report_dates_must_be_iso_dates_or_empty_on_every_row(value):
-    assert failure(parse_submissions, with_cell("reportDate", FORM_4_ROW, value), CIK) == (
-        f"{PREFIX}filings.recent.reportDate[{FORM_4_ROW}] must be a YYYY-MM-DD date or empty"
+    assert failure(parse_submissions, with_cell("reportDate", PENDING_ROW, value), CIK) == (
+        f"{PREFIX}filings.recent.reportDate[{PENDING_ROW}] must be a YYYY-MM-DD date or empty"
     )
 
 
@@ -852,8 +855,8 @@ def test_the_items_column_is_read_and_kept_as_edgar_writes_it():
     assert parsed.recent[Q2_RELEASE].items == "2.02,9.01"
     assert parsed.recent[OTHER_8K].items == "5.02,9.01"
     assert parsed.recent[LATEST_TEN_Q].items == ""
-    spaced = parse_submissions(with_cell("items", FORM_4_ROW, " 2.02 , 9.01 "), CIK)
-    assert spaced.recent[FORM_4_ROW].items == " 2.02 , 9.01 "  # verbatim, never normalised
+    spaced = parse_submissions(with_cell("items", PENDING_ROW, " 2.02 , 9.01 "), CIK)
+    assert spaced.recent[PENDING_ROW].items == " 2.02 , 9.01 "  # verbatim, never normalised
     longest = parse_submissions(with_cell("items", Q2_RELEASE, "9" * 200), CIK)
     assert longest.recent[Q2_RELEASE].items == "9" * 200
 
@@ -871,7 +874,7 @@ def test_the_items_column_is_read_and_kept_as_edgar_writes_it():
         pytest.param(PRIVATE * 16, id="too-long"),
     ],
 )
-@pytest.mark.parametrize("index", [Q2_RELEASE, FORM_4_ROW, CURRENT_TEN_K])
+@pytest.mark.parametrize("index", [Q2_RELEASE, PENDING_ROW, CURRENT_TEN_K])
 def test_items_must_be_printable_ascii_on_every_row_and_are_never_echoed(value, index):
     assert failure(parse_submissions, with_cell("items", index, value), CIK) == (
         f"{PREFIX}filings.recent.items[{index}] must be printable ASCII of at most 200 characters"
@@ -881,7 +884,7 @@ def test_items_must_be_printable_ascii_on_every_row_and_are_never_echoed(value, 
 @pytest.mark.parametrize(
     ("column", "index", "value"),
     [
-        ("accessionNumber", FORM_4_ROW, PRIVATE),
+        ("accessionNumber", PENDING_ROW, PRIVATE),
         ("filingDate", CURRENT_TEN_K, PRIVATE),
         ("reportDate", Q2_RELEASE, PRIVATE),
         ("primaryDocument", FIRST_TEN_Q, f"../{PRIVATE}"),
@@ -909,17 +912,17 @@ def test_every_exact_10_k_and_10_q_is_a_season_oldest_first_with_its_filings():
         TEN_Q_PERIOD,
     ]
     by_season = {day: [item.accession for item in items] for day, items in placed(seasons).items()}
-    # The 8-K of 2026-02-09 and the proxy filed 2026-03-27 fall after the 10-K's period end and
-    # before the first quarter's; each release in its quarter; the Form 4 dated 2026-07-30 after
-    # the newest 10-Q was filed (2026-07-24) is pending.
+    # The 8-K of 2026-02-09 falls after the 10-K's period end and before the first quarter's (the
+    # proxy statement filed 2026-03-27 is no form the domain reads); each release in its quarter;
+    # the 8-K dated 2026-07-30, after the newest 10-Q was filed (2026-07-24), is pending.
     assert by_season == {
         date(2024, 12, 28): [],
         date(2025, 9, 27): [],
-        TEN_K_PERIOD: [EIGHT_K_OTHER.accession, PROXY.accession],
+        TEN_K_PERIOD: [EIGHT_K_OTHER.accession],
         date(2026, 3, 28): [EIGHT_K_Q1.accession],
         TEN_Q_PERIOD: [EIGHT_K_Q2.accession],
     }
-    assert [item.accession for item in seasons.pending] == [FORM_4.accession]
+    assert [item.accession for item in seasons.pending] == [PENDING_8K.accession]
     assert seasons.skipped == () and seasons.oldest_filed == OLD_TEN_K.filed
 
 
@@ -928,11 +931,11 @@ def test_the_seasons_from_hand_built_rows_are_exact_values():
         seasons=(
             Season(filing(OLD_TEN_K), ()),
             Season(filing(OLD_TEN_Q), ()),
-            Season(filing(TEN_K), (dated(EIGHT_K_OTHER), dated(PROXY))),
+            Season(filing(TEN_K), (dated(EIGHT_K_OTHER),)),
             Season(filing(TEN_Q_1), (dated(EIGHT_K_Q1),)),
             Season(filing(TEN_Q_2), (dated(EIGHT_K_Q2),)),
         ),
-        pending=(dated(FORM_4),),
+        pending=(dated(PENDING_8K),),
         skipped=(),
         oldest_filed=OLD_TEN_K.filed,
     )
@@ -1177,7 +1180,11 @@ def test_an_8_k_is_a_release_only_when_its_items_name_item_2_02_exactly(items, i
     assert len(season.releases) == int(is_release) and len(season.eight_ks) == 1
 
 
-def test_an_8_k_and_a_form_4_are_dated_by_their_report_date_every_other_form_by_its_filing_date():
+def test_an_8_k_is_dated_by_its_report_date_every_listed_form_by_its_filing_date_and_no_other_is_read():
+    agreement = Row("8-K", "0000050863-26-000086", date(2026, 2, 3), date(2026, 1, 30), "x.htm", "1.01")
+    notice = Row("NT 10-Q", "0000050863-26-000099", date(2026, 5, 7), None, "nt10q.htm")
+    shelf = Row("S-3ASR", "0000050863-26-000023", date(2026, 1, 23), None, "forms-3asr.htm")
+    amended = Row("10-K/A", "0000050863-26-000025", date(2026, 3, 2), date(2025, 12, 27), "intc-10ka.htm")
     proxy = Row("DEF 14A", "0000050863-26-000061", date(2026, 3, 23), date(2026, 5, 13), "proxy2026.htm")
     holder = Row(
         "SCHEDULE 13G/A",
@@ -1187,29 +1194,25 @@ def test_an_8_k_and_a_form_4_are_dated_by_their_report_date_every_other_form_by_
         "xslSCHEDULE_13G_X01/primary_doc.xml",
     )
     old_holder = Row("SC 13G/A", "0001104659-26-021208", date(2026, 2, 13), None, "tv01202-intelcorp.htm")
-    insider = Row("4", "0000050863-26-000086", date(2026, 2, 3), date(2026, 1, 30), "xslF345X05/form4.xml")
-    notice = Row("NT 10-Q", "0000050863-26-000099", date(2026, 5, 7), None, "nt10q.htm")
-    shelf = Row("S-3ASR", "0000050863-26-000023", date(2026, 1, 23), None, "forms-3asr.htm")
+    insider = Row("4", "0000050863-26-000087", date(2026, 2, 3), date(2026, 1, 30), "xslF345X05/form4.xml")
+    insider_amended = Row("4/A", "0000050863-26-000088", date(2026, 2, 4), date(2026, 1, 30), "f4a.htm")
     ignored = Row("13F-HR", "0000050863-26-000024", date(2026, 2, 14), None, "form13f.xml")
-    seasons = seasons_of(TEN_K, TEN_Q_1, TEN_Q_2, proxy, holder, old_holder, insider, notice, shelf, ignored)
+    rows = (agreement, notice, shelf, amended, proxy, holder, old_holder, insider, insider_amended, ignored)
+    seasons = seasons_of(TEN_K, TEN_Q_1, TEN_Q_2, *rows)
     found = {
         item.accession: (item.dated, season.period) for season in seasons.seasons for item in season.filings
     }
     assert found == {
-        proxy.accession: (
-            date(2026, 3, 23),
-            TEN_K_PERIOD,
-        ),  # its reportDate is the meeting's: after its filing
-        holder.accession: (date(2026, 1, 30), TEN_K_PERIOD),
-        old_holder.accession: (date(2026, 2, 13), TEN_K_PERIOD),
-        insider.accession: (date(2026, 1, 30), TEN_K_PERIOD),
+        agreement.accession: (date(2026, 1, 30), TEN_K_PERIOD),
         notice.accession: (date(2026, 5, 7), date(2026, 3, 28)),
         shelf.accession: (date(2026, 1, 23), TEN_K_PERIOD),
+        amended.accession: (date(2026, 3, 2), TEN_K_PERIOD),  # an amendment by its filing date too
     }
+    assert seasons.skipped == () and seasons.pending == ()
     season = seasons.get(TEN_K_PERIOD)
     assert season is not None
-    assert [item.form for item in season.fetched] == ["SCHEDULE 13G/A", "4", "SC 13G/A", "DEF 14A"]
-    assert [item.form for item in season.of_forms(("S-3ASR", "DEF 14A"))] == ["S-3ASR", "DEF 14A"]
+    assert [item.form for item in season.fetched] == ["8-K"]
+    assert [item.form for item in season.of_forms(("S-3ASR", "10-K/A"))] == ["S-3ASR", "10-K/A"]
 
 
 def test_an_item_2_02_8_k_without_its_event_date_makes_the_ticker_unsupported():
@@ -1226,39 +1229,27 @@ def test_an_item_2_02_8_k_without_its_event_date_makes_the_ticker_unsupported():
 
 def test_a_row_without_the_date_or_document_it_needs_is_skipped_and_listed():
     undated = eight_k(30, date(2026, 2, 10), None, "5.02,9.01")
-    late_form4 = Row("4", "0000050863-26-000087", date(2026, 2, 3), date(2026, 2, 4), "xslF345X05/form4.xml")
-    pathlike = Row("DEF 14A", "0000050863-26-000088", date(2026, 3, 1), None, "../proxy.htm")
-    seasons = seasons_of(undated, late_form4, pathlike, *RECENT)
+    late = eight_k(31, date(2026, 2, 3), date(2026, 2, 4), "8.01")
+    pathlike = Row("8-K", "0000050863-26-000088", date(2026, 3, 1), date(2026, 3, 1), "../x.htm", "7.01")
+    rendered = Row("8-K", "0000050863-26-000089", date(2026, 3, 2), date(2026, 3, 2), "xslF/x.xml", "7.01")
+    form4 = Row("4", "0000050863-26-000087", date(2026, 2, 3), date(2026, 2, 4), "xslF345X05/form4.xml")
+    seasons = seasons_of(undated, late, pathlike, rendered, form4, *RECENT)
     assert seasons.skipped == (
         Skipped("8-K", undated.accession, undated.filed, "its reportDate is empty"),
-        Skipped("4", late_form4.accession, late_form4.filed, "its reportDate is after the 4's filing date"),
+        Skipped("8-K", late.accession, late.filed, "its reportDate is after the 8-K's filing date"),
         Skipped(
-            "DEF 14A", pathlike.accession, pathlike.filed, "its primaryDocument is no file fetch can request"
+            "8-K", pathlike.accession, pathlike.filed, "its primaryDocument is no file fetch can request"
         ),
-    )
+        Skipped(
+            "8-K", rendered.accession, rendered.filed, "its primaryDocument is no file fetch can request"
+        ),
+    )  # a Form 4 is no form the domain reads: neither placed nor skipped
     assert placed(seasons) == placed(seasons_of(*RECENT))
 
 
-@pytest.mark.parametrize(
-    ("primary", "raw"),
-    [
-        ("intc-20260627.htm", "intc-20260627.htm"),
-        ("xslF345X06/form4.xml", "form4.xml"),
-        ("xslSCHEDULE_13G_X02/primary_doc.xml", "primary_doc.xml"),
-        ("wk-form4_1754251234.xml", "wk-form4_1754251234.xml"),
-        ("xslF345X06/../form4.xml", None),
-        ("other/form4.xml", None),
-        ("xslF345X06/sub/form4.xml", None),
-        ("", None),
-    ],
-)
-def test_a_rendered_primary_document_names_the_raw_file_in_the_filings_folder(primary, raw):
-    assert rendered_document(primary) == raw
-
-
-def test_a_dated_filing_names_its_raw_document():
-    item = dated(FORM_4)
-    assert item.document == "wk-form4_1754251234.xml" and item.fetched and not item.release
+def test_a_dated_filing_names_its_primary_document():
+    item = dated(PENDING_8K)
+    assert item.document == "intc-20260730.htm" and item.fetched and not item.release
     with pytest.raises(ValueError, match="no primary document"):
         _ = replace(item, primary_document="a/b/c").document
 
@@ -1277,12 +1268,12 @@ def test_a_filing_is_placed_in_the_latest_season_ending_before_its_date():
 
 def test_a_pending_filing_joins_its_season_once_a_later_one_is_listed():
     seasons = seasons_of(*PENDING_RECENT)
-    assert [item.accession for item in seasons.pending] == [FORM_4.accession, EIGHT_K_Q3.accession]
+    assert [item.accession for item in seasons.pending] == [PENDING_8K.accession, EIGHT_K_Q3.accession]
     later = seasons_of(*LATER_RECENT)
-    # The Form 4 of 2026-07-30 now belongs to the second quarter; the release of 2026-10-06 to the third.
+    # The 8-K of 2026-07-30 now belongs to the second quarter; the release of 2026-10-06 to the third.
     assert [item.accession for item in placed(later)[TEN_Q_PERIOD]] == [
         EIGHT_K_Q2.accession,
-        FORM_4.accession,
+        PENDING_8K.accession,
     ]
     assert [item.accession for item in placed(later)[date(2026, 9, 26)]] == [EIGHT_K_Q3.accession]
     assert later.pending == ()
@@ -1946,7 +1937,7 @@ def test_submissions_bodies_carry_edgar_columns_beyond_those_read():
     assert recent["items"] == [row.items for row in RECENT]
     assert json.loads(submissions_json())["cik"] == "50863"
     assert RECENT == (
-        FORM_4,
+        PENDING_8K,
         TEN_Q_2,
         EIGHT_K_Q2,
         TEN_Q_1,

@@ -1,6 +1,6 @@
-"""``workflow.fetch``: the ticker map, the submissions, each span season's EDGAR documents and the
-company facts in ``raw/``, then the ticker's calls list from EarningsCalls.dev when it is due and
-the transcripts of the span seasons' calls.
+"""``workflow.fetch``: the ticker map, the submissions and each span season's EDGAR documents in
+``raw/``, then the ticker's calls list from EarningsCalls.dev when it is due and the transcripts of
+the span seasons' calls.
 
 The span is the window's seasons and the four listed before them. Every request goes to
 ``workflow_support.edgar`` or ``fake_earningscalls.provider``, recording fakes of the HTTP layers
@@ -11,7 +11,6 @@ requests were made, in which order. ``raw/`` must hold exactly the bytes served,
 known before any code runs. Every file lives below pytest's ``tmp_path`` (the ``layout`` fixture).
 """
 
-import json
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -22,7 +21,6 @@ import pytest
 from market_state_research.fundamentals.script import workflow
 from market_state_research.fundamentals.script.client import (
     COMPANY_TICKERS_URL,
-    COMPANYFACTS_LIMIT,
     DOCUMENT_ACCEPT,
     DOCUMENT_LIMIT,
     INDEX_LIMIT,
@@ -91,9 +89,6 @@ from .workflow_support import (
     FetchClock,
     archive_document_url,
     client,
-    companyfacts_document,
-    companyfacts_json,
-    companyfacts_url,
     edgar,
     eight_k_html,
     fetch,
@@ -110,10 +105,8 @@ from .workflow_support import (
 )
 
 WINDOW_JSON = {"from": "2025-12-01", "to": "2026-10-08"}
-# The stamped files of a first fetch of WINDOW: EDGAR's second and eighteenth requests, then the
-# provider's first.
+# The stamped files of a first fetch of WINDOW: EDGAR's second request, then the provider's first.
 SUBMISSIONS = "submissions_20261008T053002EDT.json"
-COMPANYFACTS = "companyfacts_20261008T053018EDT.json"
 EVENTS = "calls_20261008T053100EDT_1.json"
 NO_CAPTURE = "no calls list from EarningsCalls.dev is in raw/; run fetch"
 REFRESH_REASON = "--refresh: the span's documents, transcripts and calls list are requested again"
@@ -143,10 +136,7 @@ SPAN = (
         "ten_k",
         TEN_K,
         True,
-        (
-            (EIGHT_K_OTHER, "2026-02-09", ("index_other", "eight_k_other")),
-            (PROXY, "2026-03-27", ("proxy",)),
-        ),
+        ((EIGHT_K_OTHER, "2026-02-09", ("index_other", "eight_k_other")),),
     ),
     ("ten_q_1", TEN_Q_1, True, ((EIGHT_K_Q1, "2026-04-23", ("index_1", "eight_k_1", "exhibit_1")),)),
     (
@@ -163,13 +153,13 @@ SPAN_CALLS = (
     ("transcript_q1", CALL_Q1, "2026-04-23", "2026-03-28", "call_q1"),
     ("transcript_q2", CALL_Q2, "2026-07-23", "2026-06-27", "call_q2"),
 )
-# The Form 4 of 2026-07-30, filed after the last 10-Q: pending.
-PENDING_FORM_4 = {
-    "form": "4",
-    "accession": "0001209191-26-061234",
+# The 8-K of 2026-07-30, filed after the last 10-Q: pending.
+PENDING_8K = {
+    "form": "8-K",
+    "accession": "0000050863-26-000066",
     "dated": "2026-07-30",
     "filed": "2026-08-03",
-    "items": "",
+    "items": "8.01",
 }
 
 
@@ -196,7 +186,7 @@ def tree(*roles: str, rows: Sequence[Row] = RECENT) -> dict[str, bytes]:
 
 def first_tree() -> dict[str, bytes]:
     """``raw/INTC/`` after a first fetch of WINDOW."""
-    return {**tree(*RAW), COMPANYFACTS: companyfacts_json().encode(), EVENTS: events_page()}
+    return {**tree(*RAW), EVENTS: events_page()}
 
 
 def before(role: str) -> tuple[str, ...]:
@@ -207,6 +197,11 @@ def before(role: str) -> tuple[str, ...]:
 def through(role: str) -> list[str]:
     """The URLs a first fetch requests up to ``role``'s, included."""
     return list(FETCH_URLS[: FETCH_URLS.index(role_url(role)) + 1])
+
+
+def after(role: str) -> list[str]:
+    """The URLs a first fetch requests after ``role``'s."""
+    return list(FETCH_URLS[FETCH_URLS.index(role_url(role)) + 1 :])
 
 
 def file_entry(layout, role: str, state: str) -> dict:
@@ -295,7 +290,6 @@ def unsupported_entry(ticker: str, reason: str, **values: object) -> dict:
         "cik": values.get("cik"),
         "entity_name": values.get("entity_name"),
         "submissions": values.get("submissions"),
-        "companyfacts": None,
         "window": WINDOW_JSON,
         "truncated": None,
         "seasons": [],
@@ -327,18 +321,13 @@ def test_a_first_fetch_writes_every_span_seasons_documents_as_served(layout):
         NOW,
     )
 
-    assert served.urls == [
-        COMPANY_TICKERS_URL,
-        submissions_url(),
-        *map(role_url, DOCUMENTS),
-        companyfacts_url(),
-    ]
+    assert served.urls == [COMPANY_TICKERS_URL, submissions_url(), *map(role_url, DOCUMENTS)]
     assert served.urls == list(FETCH_URLS)
     assert answering.urls == list(CALLS_URLS)
-    assert sleep.calls == [PACING] * 17
+    assert sleep.calls == [PACING] * 15
     assert calls_sleep.calls == [CALLS_PACING] * 3
     assert {key: value for key, value in result.items() if key != "tickers"} == {
-        "requests": 18,
+        "requests": 16,
         "user_agent": "set",
         "transcript_requests": 4,
         "api_key": "set",
@@ -354,11 +343,10 @@ def test_a_first_fetch_writes_every_span_seasons_documents_as_served(layout):
         "cik": CIK,
         "entity_name": ENTITY_NAME,
         "submissions": {"path": str(layout.raw(TICKER) / SUBMISSIONS), "status": "new"},
-        "companyfacts": {"path": str(layout.raw(TICKER) / COMPANYFACTS), "status": "new"},
         "window": WINDOW_JSON,
         "truncated": False,
         "seasons": season_entries(layout),
-        "pending_filings": [PENDING_FORM_4],
+        "pending_filings": [PENDING_8K],
         "skipped_filings": [],
         "calls": calls_entry(layout),
     }
@@ -387,7 +375,6 @@ def test_the_output_lists_its_keys_in_the_contracts_order(layout):
         "cik",
         "entity_name",
         "submissions",
-        "companyfacts",
         "window",
         "truncated",
         "seasons",
@@ -425,10 +412,9 @@ def test_every_request_names_the_user_agent_and_the_accepted_media(layout):
         (JSON_ACCEPT, JSON_LIMIT),  # the ticker map
         (JSON_ACCEPT, JSON_LIMIT),  # the submissions
         *(document, document, document),  # the 10-K, the 10-Q and the 10-K of the first three seasons
-        *(index, document, document),  # the 8-K of 2026-02-09 and the proxy statement
+        *(index, document),  # the 8-K of 2026-02-09
         *(document, index, document, document),  # the first quarter's 10-Q and its release
         *(document, index, document, document, document),  # the second quarter's
-        (JSON_ACCEPT, COMPANYFACTS_LIMIT),
     ]
     assert {headers["User-Agent"] for _, headers, _ in served.calls} == {"margin_edge tests@example.com"}
 
@@ -450,11 +436,10 @@ def test_fetching_again_requests_only_the_listings_and_writes_nothing(layout):
 
     again = fetch(layout, served, calls=answering, start=AGAIN, calls_start=CALLS_AGAIN)
 
-    assert served.urls == [COMPANY_TICKERS_URL, submissions_url(), companyfacts_url()]
+    assert served.urls == [COMPANY_TICKERS_URL, submissions_url()]
     assert answering.urls == []  # the list is not due again, and every transcript is in raw/
     (entry,) = again["tickers"]
     assert entry["submissions"] == {"path": str(layout.raw(TICKER) / SUBMISSIONS), "status": "reused"}
-    assert entry["companyfacts"] == {"path": str(layout.raw(TICKER) / COMPANYFACTS), "status": "reused"}
     assert entry["seasons"] == season_entries(layout, "reused")
     assert entry["calls"] == calls_entry(layout, "reused", "reused", None)
     assert raw_tree(layout) == stored
@@ -468,7 +453,7 @@ def test_an_existing_file_is_never_rewritten(layout):
     fetch(layout, served, start=AGAIN, calls_start=CALLS_AGAIN)
 
     assert altered.read_text(encoding="utf-8") == "edited by hand\n"
-    assert served.urls == [COMPANY_TICKERS_URL, submissions_url(), companyfacts_url()]
+    assert served.urls == [COMPANY_TICKERS_URL, submissions_url()]
 
 
 def test_a_file_renamed_rejected_is_requested_and_written_again(layout):
@@ -479,12 +464,7 @@ def test_a_file_renamed_rejected_is_requested_and_written_again(layout):
 
     again = fetch(layout, served, start=AGAIN, calls_start=CALLS_AGAIN)
 
-    assert served.urls == [
-        COMPANY_TICKERS_URL,
-        submissions_url(),
-        role_url("exhibit_2_1"),
-        companyfacts_url(),
-    ]
+    assert served.urls == [COMPANY_TICKERS_URL, submissions_url(), role_url("exhibit_2_1")]
     assert again["tickers"][0]["seasons"] == season_entries(layout, "reused", {"exhibit_2_1": "new"})
     assert stored.read_bytes() == withdrawn.read_bytes() == raw_bytes("exhibit_2_1")
 
@@ -541,8 +521,7 @@ def test_a_window_of_one_season_spans_it_and_the_four_seasons_before_it(layout):
         COMPANY_TICKERS_URL,
         submissions_url(),
         filing_url(OLDER_TEN_Q),
-        *map(role_url, ("old_ten_k", "old_ten_q", "ten_k", "index_other", "eight_k_other", "proxy")),
-        companyfacts_url(),
+        *map(role_url, ("old_ten_k", "old_ten_q", "ten_k", "index_other", "eight_k_other")),
     ]
     # The call of 2024-10-31 belongs to the season ended 2024-09-28 once that season is listed.
     assert answering.urls == [CALLS_URLS[0], transcript_url(CALL_DROPPED.id), CALLS_URLS[1]]
@@ -580,7 +559,7 @@ def test_the_window_admits_the_seasons_ending_on_its_from_and_to_dates(layout, w
         "2026-03-28",
     ]
     assert [season["season"] for season in entry["seasons"] if season["in_window"]] == admitted
-    assert served.urls == [*through("exhibit_1"), companyfacts_url()]
+    assert served.urls == through("exhibit_1")
     assert answering.urls == list(CALLS_URLS[:3])
     assert entry["pending_filings"] == []  # the window ends before the newest season end
 
@@ -589,7 +568,7 @@ def test_the_window_admits_the_seasons_ending_on_its_from_and_to_dates(layout, w
     ("window", "truncated", "pending"),
     [
         (Window(date(2025, 12, 28), date(2026, 3, 27)), False, []),
-        (Window(date(2026, 6, 28), TODAY), False, [PENDING_FORM_4]),
+        (Window(date(2026, 6, 28), TODAY), False, [PENDING_8K]),
         (Window(date(2025, 1, 31), date(2025, 9, 26)), False, []),
         (Window(date(2025, 1, 30), date(2025, 9, 26)), True, []),
     ],
@@ -605,11 +584,10 @@ def test_a_window_that_selects_no_season_fetches_only_the_submissions(layout, wi
 
     result = fetch(layout, served, window=window, calls=answering)
 
-    assert served.urls == [COMPANY_TICKERS_URL, submissions_url()]  # no document, no company facts
+    assert served.urls == [COMPANY_TICKERS_URL, submissions_url()]  # no document
     assert answering.urls == []  # no window season: nothing to ask the provider
     (entry,) = result["tickers"]
     assert (entry["truncated"], entry["seasons"], entry["pending_filings"]) == (truncated, [], pending)
-    assert entry["companyfacts"] is None
     assert entry["calls"] == {
         "status": "fetched",
         "reason": None,
@@ -681,7 +659,7 @@ def test_every_8_k_is_fetched_with_its_index_page_primary_document_and_ex_99_exh
         presentation_url,
         index_url(EIGHT_K_DEAL),
         filing_url(EIGHT_K_DEAL),
-        *FETCH_URLS[12:],
+        *after("exhibit_1"),
     ]
     root = layout.raw(TICKER) / "2026-03-28"
     fd, deal = root / "8-K_2026-05-01_0000050863-26-000050", root / "8-K_2026-06-01_0000050863-26-000055"
@@ -778,7 +756,6 @@ def test_an_index_page_in_raw_is_never_requested_again(layout):
         submissions_url(),
         role_url("exhibit_2_1"),
         role_url("exhibit_2_2"),
-        companyfacts_url(),
     ]
     (release,) = again["tickers"][0]["seasons"][4]["filings"]
     assert release["files"] == [
@@ -852,210 +829,16 @@ def test_an_index_page_that_cannot_be_parsed_aborts_and_writes_nothing_of_its_8_
     assert raw_tree(layout) == tree(*before("index_2"))
 
 
-# --------------------------------------------------------------------------- proxies and schedules
-
-
-def test_a_proxy_statement_is_placed_by_its_filing_date_not_its_meeting_date(layout):
-    meeting = replace(PROXY, period=date(2026, 5, 13))  # a DEF 14A's reportDate is its meeting's date
-    served = edgar(tuple(meeting if row is PROXY else row for row in RECENT))
-
-    result = fetch(layout, served)
-
-    assert served.urls == list(FETCH_URLS)
-    assert result["tickers"][0]["seasons"][2]["filings"][1] == {
-        "form": "DEF 14A",
-        "accession": "0001193125-26-112233",
-        "dated": "2026-03-27",
-        "filed": "2026-03-27",
-        "items": "",
-        "files": [file_entry(layout, "proxy", "new")],
-    }
-    assert raw_file(layout, "proxy").read_bytes() == raw_bytes("proxy")
-
-
-# A beneficial owner's amended schedule under each of EDGAR's spellings: the older one's primary
-# document is HTML, the newer one's a rendering of the XML in the filing's folder.
-SC_13G_A = Row("SC 13G/A", "0000950103-26-004321", date(2026, 5, 8), date(2026, 3, 31), "dp123456_sc13ga.htm")
-SCHEDULE_13G_A = Row(
-    "SCHEDULE 13G/A",
-    "0001104659-26-054321",
-    date(2026, 5, 12),
-    date(2026, 3, 31),
-    "xslSCHEDULE_13G_X02/primary_doc.xml",
-)
-SC_13G_A_BODY = b"<html><body><p>Amendment No. 3 to Schedule 13G.</p></body></html>"
-SCHEDULE_13G_A_BODY = (
-    b'<?xml version="1.0"?><edgarSubmission><formData><coverPageHeader><issuerInfo>'
-    b"<issuerCik>0000050863</issuerCik></issuerInfo></coverPageHeader></formData></edgarSubmission>"
-)
-
-
-def test_both_spellings_of_an_amended_schedule_are_fetched_by_their_raw_documents(layout):
-    served = edgar((SCHEDULE_13G_A, SC_13G_A, *RECENT))
-    html_url = archive_document_url(SC_13G_A.accession, "dp123456_sc13ga.htm")
-    xml_url = archive_document_url(SCHEDULE_13G_A.accession, "primary_doc.xml")  # not the rendering
-    served.responses[html_url] = ok(SC_13G_A_BODY, HTML_TYPE)
-    served.responses[xml_url] = ok(SCHEDULE_13G_A_BODY, "text/xml")
-
-    result = fetch(layout, served)
-
-    assert served.urls == [*through("exhibit_1"), html_url, xml_url, *FETCH_URLS[12:]]
-    older = "2026-03-28/SC13GA_2026-05-08_0000950103-26-004321/dp123456_sc13ga.htm"
-    newer = "2026-03-28/SCHEDULE13GA_2026-05-12_0001104659-26-054321/primary_doc.xml"
-    assert result["tickers"][0]["seasons"][3]["filings"][1:] == [
-        {
-            "form": "SC 13G/A",
-            "accession": "0000950103-26-004321",
-            "dated": "2026-05-08",
-            "filed": "2026-05-08",
-            "items": "",
-            "files": [
-                {
-                    "path": str(layout.raw(TICKER) / older),
-                    "doc_id": "SC13GA_2026-05-08_0000950103-26-004321_dp123456_sc13ga",
-                    "status": "new",
-                }
-            ],
-        },
-        {
-            "form": "SCHEDULE 13G/A",
-            "accession": "0001104659-26-054321",
-            "dated": "2026-05-12",
-            "filed": "2026-05-12",
-            "items": "",
-            "files": [
-                {
-                    "path": str(layout.raw(TICKER) / newer),
-                    "doc_id": "SCHEDULE13GA_2026-05-12_0001104659-26-054321_primary_doc",
-                    "status": "new",
-                }
-            ],
-        },
-    ]
-    written = raw_tree(layout)
-    assert (written[older], written[newer]) == (SC_13G_A_BODY, SCHEDULE_13G_A_BODY)
-
-
-# --------------------------------------------------------------------------- Form 4
-
-# An insider's Form 4 of the season ended 2026-03-28, listed as EDGAR's rendering of its XML.
-FORM_4_IN_SEASON = Row(
-    "4", "0001209191-26-050505", date(2026, 5, 4), date(2026, 4, 30), "xslF345X06/form4.xml"
-)
-FORM_4_URL = archive_document_url("0001209191-26-050505", "form4.xml")
-FORM_4_PATH = "2026-03-28/4_2026-04-30_0001209191-26-050505/form4.xml"
-OTHER_ISSUER = "0001234567"
-
-
-def form4_xml(issuer: str = CIK, document_type: str = "4") -> bytes:
-    """A Form 4 laid out as EDGAR keeps it: an officer's sale of ``issuer``'s shares."""
-    return f"""<?xml version="1.0"?>
-<ownershipDocument>
-    <schemaVersion>X0609</schemaVersion>
-    <documentType>{document_type}</documentType>
-    <periodOfReport>2026-04-30</periodOfReport>
-    <issuer>
-        <issuerCik>{issuer}</issuerCik>
-        <issuerName>Example Issuer</issuerName>
-        <issuerTradingSymbol>EXMP</issuerTradingSymbol>
-    </issuer>
-    <reportingOwner>
-        <reportingOwnerId>
-            <rptOwnerCik>0001999999</rptOwnerCik>
-            <rptOwnerName>Officer Example</rptOwnerName>
-        </reportingOwnerId>
-        <reportingOwnerRelationship>
-            <isOfficer>1</isOfficer>
-            <officerTitle>Chief Financial Officer</officerTitle>
-        </reportingOwnerRelationship>
-    </reportingOwner>
-    <nonDerivativeTable>
-        <nonDerivativeTransaction>
-            <transactionDate><value>2026-04-30</value></transactionDate>
-            <transactionCoding>
-                <transactionFormType>4</transactionFormType>
-                <transactionCode>S</transactionCode>
-            </transactionCoding>
-            <transactionAmounts>
-                <transactionShares><value>10000</value></transactionShares>
-                <transactionPricePerShare><value>24.50</value></transactionPricePerShare>
-                <transactionAcquiredDisposedCode><value>D</value></transactionAcquiredDisposedCode>
-            </transactionAmounts>
-        </nonDerivativeTransaction>
-    </nonDerivativeTable>
-</ownershipDocument>
-""".encode()
-
-
-def test_a_form_4s_xml_is_fetched_at_its_raw_files_path(layout):
-    served = edgar((FORM_4_IN_SEASON, *RECENT))
-    served.responses[FORM_4_URL] = ok(form4_xml(), "text/xml")
-
-    result = fetch(layout, served)
-
-    assert served.urls == [*through("exhibit_1"), FORM_4_URL, *FETCH_URLS[12:]]
-    assert result["tickers"][0]["seasons"][3]["filings"][1] == {
-        "form": "4",
-        "accession": "0001209191-26-050505",
-        "dated": "2026-04-30",
-        "filed": "2026-05-04",
-        "items": "",
-        "files": [{"path": str(layout.raw(TICKER) / FORM_4_PATH), "doc_id": None, "status": "new"}],
-    }
-    assert raw_tree(layout)[FORM_4_PATH] == form4_xml()
-
-
-def test_a_form_4_of_another_issuer_is_written_too(layout):
-    served = edgar((FORM_4_IN_SEASON, *RECENT))
-    served.responses[FORM_4_URL] = ok(form4_xml(OTHER_ISSUER), "text/xml")
-
-    result = fetch(layout, served)
-
-    (form4,) = result["tickers"][0]["seasons"][3]["filings"][1]["files"]
-    assert form4["status"] == "new"
-    assert raw_tree(layout)[FORM_4_PATH] == form4_xml(OTHER_ISSUER)
-
-
-@pytest.mark.parametrize(
-    ("body", "problem"),
-    [
-        (
-            f'<?xml version="1.0"?><!DOCTYPE ownershipDocument [<!ENTITY owner "{MARKER}">]>'
-            "<ownershipDocument>&owner;</ownershipDocument>".encode(),
-            "Form 4: the XML declares a document type or an entity",
-        ),
-        (
-            f"<html><body><p>{MARKER}</p></body></html>".encode(),
-            "Form 4: the root element must be ownershipDocument",
-        ),
-        (form4_xml(document_type="5"), "Form 4: documentType must be 4"),
-        (form4_xml(issuer=MARKER), "Form 4: issuer/issuerCik must be ten digits"),
-    ],
-    ids=["entity", "html", "document-type", "issuer"],
-)
-def test_a_form_4_that_does_not_read_aborts_the_run_before_it_is_written(layout, body, problem):
-    served = edgar((FORM_4_IN_SEASON, *RECENT))
-    served.responses[FORM_4_URL] = ok(body, "text/xml")
-
-    with pytest.raises(ValueError) as raised:
-        fetch(layout, served)
-
-    assert str(raised.value) == f"GET {FORM_4_URL}: {problem}"
-    assert MARKER not in str(raised.value)
-    assert served.urls == [*through("exhibit_1"), FORM_4_URL]
-    assert raw_tree(layout) == tree(*before("ten_q_2"), rows=(FORM_4_IN_SEASON, *RECENT))
-
-
 # --------------------------------------------------------------------------- what is never fetched
 
-# Forms the measures list and nothing fetches (one filed after the last 10-Q: pending), then forms
-# the domain does not read at all.
+# Forms a season's sheet lists and nothing fetches (one filed after the last 10-Q: pending), then
+# forms the domain does not read at all: the insiders' Form 4s, proxy statements and beneficial
+# owners' schedules among them.
 LISTED_ONLY = (
     Row("S-3ASR", "0001193125-26-200001", date(2026, 8, 15), None, "d200001ds3asr.htm"),
     Row("10-Q/A", "0000050863-26-000071", date(2026, 6, 3), date(2026, 3, 28), "intc-20260328a.htm"),
     Row("424B5", "0001193125-26-150002", date(2026, 6, 2), None, "d150002d424b5.htm"),
     Row("NT 10-Q", "0000050863-26-000045", date(2026, 5, 7), date(2026, 3, 28), "ntq.htm"),
-    Row("4/A", "0001209191-26-055555", date(2026, 5, 6), date(2026, 4, 30), "xslF345X05/wk-form4a.xml"),
     Row(
         "8-K/A",
         "0000050863-26-000070",
@@ -1068,7 +851,18 @@ LISTED_ONLY = (
 NOT_READ = (
     Row("S-8", "0000050863-26-000025", date(2026, 2, 21), None, "s8.htm"),
     Row("3", "0001209191-26-033333", date(2026, 2, 20), date(2026, 2, 18), "xslF345X02/wk-form3.xml"),
+    Row("4", "0001209191-26-050505", date(2026, 5, 4), date(2026, 4, 30), "xslF345X06/form4.xml"),
+    Row("4/A", "0001209191-26-055555", date(2026, 5, 6), date(2026, 4, 30), "xslF345X05/wk-form4a.xml"),
     Row("SC 13G", "0000950103-26-001111", date(2026, 2, 14), None, "sc13g.htm"),
+    Row("SC 13G/A", "0000950103-26-004321", date(2026, 5, 8), date(2026, 3, 31), "dp123456_sc13ga.htm"),
+    Row(
+        "SCHEDULE 13G/A",
+        "0001104659-26-054321",
+        date(2026, 5, 12),
+        date(2026, 3, 31),
+        "xslSCHEDULE_13G_X02/primary_doc.xml",
+    ),
+    Row("DEF 14A", "0001193125-26-112299", date(2026, 3, 30), date(2026, 5, 13), "d112299ddef14a.htm"),
     Row("DEFA14A", "0001193125-26-112234", date(2026, 3, 27), None, "d123456ddefa14a.htm"),
 )
 
@@ -1082,7 +876,7 @@ def test_forms_listed_but_never_fetched_and_forms_not_read_are_never_requested(l
     (entry,) = result["tickers"]
     assert entry["seasons"] == season_entries(layout)
     assert entry["pending_filings"] == [
-        PENDING_FORM_4,
+        PENDING_8K,
         {
             "form": "S-3ASR",
             "accession": "0001193125-26-200001",
@@ -1094,18 +888,16 @@ def test_forms_listed_but_never_fetched_and_forms_not_read_are_never_requested(l
     assert entry["skipped_filings"] == []
 
 
-# Filings Rule B leaves pending, after the 10-Q filed 2026-07-24: a proxy statement (by its filing
-# date) and the next quarter's earnings release, beside the Form 4 of RECENT.
-LATE_PROXY = Row(
-    "DEF 14A", "0001193125-26-210001", date(2026, 8, 10), date(2026, 9, 24), "d210001ddef14a.htm"
-)
+# Filings Rule B leaves pending, after the 10-Q filed 2026-07-24: a prospectus (by its filing date)
+# and the next quarter's earnings release, beside the 8-K of RECENT.
+LATE_PROSPECTUS = Row("424B5", "0001193125-26-210001", date(2026, 8, 10), None, "d210001d424b5.htm")
 RELEASE_Q3 = Row(
     "8-K", "0000050863-26-000089", date(2026, 10, 6), date(2026, 10, 6), "intc-20261006.htm", "2.02,9.01"
 )
 PENDING = [
-    PENDING_FORM_4,
+    PENDING_8K,
     {
-        "form": "DEF 14A",
+        "form": "424B5",
         "accession": "0001193125-26-210001",
         "dated": "2026-08-10",
         "filed": "2026-08-10",
@@ -1126,12 +918,12 @@ PENDING = [
     [
         (TODAY, PENDING, FETCH_URLS),
         (date(2026, 6, 27), PENDING, FETCH_URLS),
-        (date(2026, 6, 26), [], (*FETCH_URLS[:12], companyfacts_url())),
+        (date(2026, 6, 26), [], through("exhibit_1")),
     ],
     ids=["to-today", "to-the-newest-season-end", "to-the-day-before-it"],
 )
 def test_pending_filings_are_listed_and_none_of_their_documents_is_requested(layout, to, pending, urls):
-    served = edgar((RELEASE_Q3, LATE_PROXY, *RECENT))  # serves none of the pending filings' documents
+    served = edgar((RELEASE_Q3, LATE_PROSPECTUS, *RECENT))  # serves none of the pending filings' documents
 
     result = fetch(layout, served, window=Window(WINDOW.start, to))
 
@@ -1142,9 +934,9 @@ def test_pending_filings_are_listed_and_none_of_their_documents_is_requested(lay
 
 # Rows Rule B cannot place or fetch cannot request, in EDGAR's order (newest first).
 SKIPPED = (
-    Row("4", "0001209191-26-066666", date(2026, 5, 2), date(2026, 5, 9), "xslF345X06/form4.xml"),
+    Row("8-K", "0000050863-26-000046", date(2026, 5, 2), date(2026, 5, 9), "intc-20260509x.htm", "8.01"),
     Row("8-K", "0000050863-26-000044", date(2026, 5, 1), None, "intc-20260501x.htm", "5.02,9.01"),
-    Row("DEF 14A", "0001193125-26-120000", date(2026, 4, 2), None, "proxy/d120000ddef14a.htm"),
+    Row("8-K", "0000050863-26-000043", date(2026, 4, 2), date(2026, 4, 1), "x/intc-20260401x.htm", "7.01"),
 )
 
 
@@ -1157,10 +949,10 @@ def test_rows_that_cannot_be_placed_or_requested_are_listed_as_skipped(layout):
     (entry,) = result["tickers"]
     assert entry["skipped_filings"] == [
         {
-            "form": "4",
-            "accession": "0001209191-26-066666",
+            "form": "8-K",
+            "accession": "0000050863-26-000046",
             "filed": "2026-05-02",
-            "reason": "its reportDate is after the 4's filing date",
+            "reason": "its reportDate is after the 8-K's filing date",
         },
         {
             "form": "8-K",
@@ -1169,8 +961,8 @@ def test_rows_that_cannot_be_placed_or_requested_are_listed_as_skipped(layout):
             "reason": "its reportDate is empty",
         },
         {
-            "form": "DEF 14A",
-            "accession": "0001193125-26-120000",
+            "form": "8-K",
+            "accession": "0000050863-26-000043",
             "filed": "2026-04-02",
             "reason": "its primaryDocument is no file fetch can request",
         },
@@ -1228,7 +1020,6 @@ def test_a_filing_a_later_listing_places_in_another_season_is_written_again_ther
         index_url(EIGHT_K_APRIL),
         filing_url(EIGHT_K_APRIL),
         *map(role_url, ("index_1", "eight_k_1", "exhibit_1")),
-        companyfacts_url(),
     ]
     placed = layout.raw(TICKER) / "2026-03-28" / "8-K_2026-04-01_0000050863-26-000030"
     assert (placed / "0000050863-26-000030-index.htm").read_bytes() == filing_index_html(
@@ -1241,69 +1032,6 @@ def test_a_filing_a_later_listing_places_in_another_season_is_written_again_ther
         "with .rejected and run fetch"
     )
     assert (stored, moved) in season_documents(layout, TICKER, later + timedelta(minutes=5)).invalid_files
-
-
-# --------------------------------------------------------------------------- company facts
-
-
-def test_the_company_facts_are_written_again_only_when_their_bytes_changed(layout):
-    fetch(layout)
-    same = fetch(layout, start=AGAIN, calls_start=CALLS_AGAIN)
-    assert same["tickers"][0]["companyfacts"] == {
-        "path": str(layout.raw(TICKER) / COMPANYFACTS),
-        "status": "reused",
-    }
-    respaced = json.dumps(companyfacts_document(), separators=(",", ": ")).encode()  # the same facts
-    served = edgar()
-    served.responses[companyfacts_url()] = ok(respaced, JSON_TYPE)
-
-    changed = fetch(layout, served, start=LATER, calls_start=CALLS_LATER)
-
-    newer = layout.raw(TICKER) / "companyfacts_20261008T054503EDT.json"
-    assert changed["tickers"][0]["companyfacts"] == {"path": str(newer), "status": "new"}
-    assert newer.read_bytes() == respaced
-    assert (layout.raw(TICKER) / COMPANYFACTS).read_bytes() == companyfacts_json().encode()  # kept
-
-
-@pytest.mark.parametrize(
-    ("body", "problem"),
-    [
-        (b'{"cik": 320193, "entityName": "APPLE INC", "facts": {}}', "cik is not the requested CIK"),
-        (b"\xff{}", "the body is not UTF-8"),
-        (b'{"cik": 50863, "cik": 50863}', "invalid JSON: an object repeats a key"),
-        (
-            json.dumps(
-                {
-                    "cik": 50863,
-                    "entityName": ENTITY_NAME,
-                    "facts": {
-                        "us-gaap": {
-                            "Goodwill": {
-                                "units": {
-                                    "USD": [{"end": "2026-06-27", "val": MARKER, "accn": TEN_Q_2.accession}]
-                                }
-                            }
-                        }
-                    },
-                }
-            ).encode(),
-            "facts.us-gaap.Goodwill.units.USD[0].val must be a number",
-        ),
-    ],
-    ids=["another-company", "not-utf8", "repeated-key", "value"],
-)
-def test_company_facts_that_do_not_read_abort_the_run_before_they_are_written(layout, body, problem):
-    served, answering = edgar(), FakeEarningsCalls()
-    served.responses[companyfacts_url()] = ok(body, JSON_TYPE)
-
-    with pytest.raises(ValueError) as raised:
-        fetch(layout, served, calls=answering)
-
-    assert str(raised.value) == f"GET {companyfacts_url()}: companyfacts CIK{CIK}: {problem}"
-    assert MARKER not in str(raised.value)
-    assert served.urls == list(FETCH_URLS)
-    assert answering.calls == []  # the run ends before the calls
-    assert raw_tree(layout) == tree(*DOCUMENTS)
 
 
 # --------------------------------------------------------------------------- refresh
@@ -1320,12 +1048,11 @@ def test_refresh_requests_every_span_document_and_transcript_again_and_rewrites_
 
     again = fetch(layout, served, calls=answering, start=AGAIN, calls_start=CALLS_AGAIN, refresh=True)
 
-    assert served.urls == list(FETCH_URLS)  # the ticker map, the submissions, every document, the facts
+    assert served.urls == list(FETCH_URLS)  # the ticker map, the submissions, every document
     assert answering.urls == list(CALLS_URLS)  # the calls list, then every span call's transcript
-    assert (again["refresh"], again["requests"], again["transcript_requests"]) == (True, 18, 4)
+    assert (again["refresh"], again["requests"], again["transcript_requests"]) == (True, 16, 4)
     (entry,) = again["tickers"]
     assert entry["submissions"] == {"path": str(layout.raw(TICKER) / SUBMISSIONS), "status": "reused"}
-    assert entry["companyfacts"] == {"path": str(layout.raw(TICKER) / COMPANYFACTS), "status": "reused"}
     assert entry["seasons"] == season_entries(layout, "verified")
     assert entry["calls"] == {
         **calls_entry(layout, transcripts="verified"),
@@ -1502,7 +1229,7 @@ def test_tickers_are_normalised_and_each_fetched_once(layout):
     result = fetch(layout, None, "intc", "INTC")
 
     assert [entry["ticker"] for entry in result["tickers"]] == [TICKER]
-    assert result["requests"] == 18
+    assert result["requests"] == 16
 
 
 def test_an_invalid_ticker_is_refused_before_any_request(layout):
@@ -1597,7 +1324,7 @@ def test_an_http_error_aborts_the_run_and_keeps_what_was_written_before_it(layou
     assert raw_tree(layout) == tree(*before("exhibit_2_1"))
 
 
-@pytest.mark.parametrize("role", ["proxy", "ten_q_2", "index_2", "exhibit_2_1"])
+@pytest.mark.parametrize("role", ["eight_k_other", "ten_q_2", "index_2", "exhibit_2_1"])
 def test_a_document_cut_short_aborts_the_run_and_a_later_fetch_writes_it(layout, role):
     served = edgar()
     full = served.responses[role_url(role)]
@@ -1620,7 +1347,7 @@ def test_a_document_cut_short_aborts_the_run_and_a_later_fetch_writes_it(layout,
     fetch(layout, later, start=AGAIN, calls_start=CALLS_AGAIN)
 
     missing = DOCUMENTS[DOCUMENTS.index(role) :]
-    assert later.urls == [COMPANY_TICKERS_URL, submissions_url(), *map(role_url, missing), companyfacts_url()]
+    assert later.urls == [COMPANY_TICKERS_URL, submissions_url(), *map(role_url, missing)]
     assert season_files(layout) == {RAW[name]: raw_bytes(name) for name in RAW}
 
 
@@ -1765,7 +1492,6 @@ def test_a_season_listed_later_brings_its_release_and_its_call(layout):
         COMPANY_TICKERS_URL,
         submissions_url(),
         *map(role_url, ("ten_q_2", "index_2", "eight_k_2", "exhibit_2_1", "exhibit_2_2")),
-        companyfacts_url(),
     ]
     assert answering.urls == [CALLS_URLS[0], CALLS_URLS[3]]
     (entry,) = result["tickers"]
@@ -1828,9 +1554,6 @@ def test_the_request_limit_stops_the_calls_and_the_run_goes_on_with_edgar_alone(
         NVIDIA_TEN_Q.accession, NVIDIA_TEN_Q.primary_document, cik=NVIDIA_CIK
     )
     served.responses[nvidia_document] = ok(b"<p>A quarterly report.</p>", HTML_TYPE)
-    served.responses[companyfacts_url(NVIDIA_CIK)] = ok(
-        b'{"cik": 1045810, "entityName": "NVIDIA CORP", "facts": {}}', JSON_TYPE
-    )
     limit = b'{"error": "Monthly request limit reached; it resets on 2026-11-01"}'
     answering = provider(transcripts=CALLS_OF_SEASONS)
     answering.responses[transcript_url(CALL_Q2.id)] = provider_status(429, "Too Many Requests", limit)
@@ -1856,7 +1579,7 @@ def test_the_request_limit_stops_the_calls_and_the_run_goes_on_with_edgar_alone(
         "transcripts": [],
         "pending_calls": [],
     }
-    assert served.urls[-3:] == [submissions_url(NVIDIA_CIK), nvidia_document, companyfacts_url(NVIDIA_CIK)]
+    assert served.urls[-2:] == [submissions_url(NVIDIA_CIK), nvidia_document]
 
 
 def test_a_calls_page_that_does_not_read_aborts_the_run_and_writes_nothing_of_it(layout):
@@ -1866,10 +1589,7 @@ def test_a_calls_page_that_does_not_read_aborts_the_run_and_writes_nothing_of_it
         fetch(layout, calls=answering)
 
     assert str(raised.value) == f"GET {CALLS_URLS[0]}: calls list page 1: a call's stock_symbol is not INTC"
-    assert raw_tree(layout) == {
-        **tree(*DOCUMENTS),
-        COMPANYFACTS: companyfacts_json().encode(),
-    }  # EDGAR's stay
+    assert raw_tree(layout) == tree(*DOCUMENTS)  # EDGAR's stay
 
 
 def test_a_transcript_that_does_not_read_aborts_the_run_and_keeps_what_was_written(layout):
@@ -1884,7 +1604,6 @@ def test_a_transcript_that_does_not_read_aborts_the_run_and_keeps_what_was_writt
     )
     assert raw_tree(layout) == {
         **tree(*DOCUMENTS, "transcript_old_q", "transcript_q1"),
-        COMPANYFACTS: companyfacts_json().encode(),
         EVENTS: events_page(),
     }
 

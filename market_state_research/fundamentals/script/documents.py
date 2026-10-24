@@ -5,7 +5,6 @@ The raw tree of a ticker ``T`` (``common.layout.DataLayout.raw``) holds, verbati
 
 - ``submissions_{TOKEN}.json``: EDGAR's submissions JSON, written only when its body differs
   from the newest one's; the newest lists the seasons on every read;
-- ``companyfacts_{TOKEN}.json``: EDGAR's XBRL company facts (``facts``), likewise;
 - ``calls_{TOKEN}_{PAGE}.json``: one page of the ticker's earnings calls as EarningsCalls.dev
   listed them (``earningscalls``); the pages of one request share the New York time ``fetch``
   read the first one and form one *capture*, and the newest capture's time is when the
@@ -15,9 +14,7 @@ The raw tree of a ticker ``T`` (``common.layout.DataLayout.raw``) holds, verbati
     the form without spaces or slashes (``filings.FORM_TOKENS``) and ``DATE`` the date Rule B
     places it by (the period end for the season's own 10-K or 10-Q): a 10-K's or 10-Q's
     primary document; an 8-K's filing index page ``{ACCESSION}-index.htm``, its primary
-    document and the ``EX-99`` exhibits the page lists; a proxy statement's or a beneficial
-    owner's schedule's primary document (an XML one under the raw file's own name,
-    ``filings.rendered_document``); a Form 4's XML;
+    document and the ``EX-99`` exhibits the page lists;
   - ``transcript_{ID}.json``: the transcript of the call ``ID`` Rule B places in the season,
     as EarningsCalls.dev served it, written once; ``fetch --refresh`` writes a copy whose
     bytes differ from the newest one's beside it as ``transcript_{ID}_{TOKEN}.json``.
@@ -25,25 +22,25 @@ The raw tree of a ticker ``T`` (``common.layout.DataLayout.raw``) holds, verbati
 Nothing a later read needs lives only in a name: the newest submissions file lists the
 seasons and places every filing by Rule B (``filings.select_seasons``) on every read; an
 8-K's exhibits come from its index page, parsed again on every read; the newest capture
-lists the calls, each placed in a season by Rule B on its New York date; a Form 4's issuer
-and transactions come from its XML (``form4``). A file is kept where Rule B placed it when
-``fetch`` wrote it; a read that places it in another season, or leaves it pending, reports
-it *moved*: an invalid file, which the bot renames with ``.rejected`` so that ``fetch`` writes
-it again in its season.
+lists the calls, each placed in a season by Rule B on its New York date. A file is kept where
+Rule B placed it when ``fetch`` wrote it; a read that places it in another season, or leaves it
+pending, reports it *moved*: an invalid file, which the bot renames with ``.rejected`` so that
+``fetch`` writes it again in its season.
 
 Every read validates what it reads: the newest submissions file through
-``filings.parse_submissions``; the newest company facts through ``facts.read_companyfacts``;
-each 8-K's index page through ``filings.parse_filing_index`` (one that does not parse is an
-invalid file, and its exhibits are unknown); each Form 4 through ``form4.parse_form4``; each
-document as a regular file within its size limit; every page of the newest capture
+``filings.parse_submissions``; each 8-K's index page through ``filings.parse_filing_index``
+(one that does not parse is an invalid file, and its exhibits are unknown); each document as a
+regular file within its size limit; every page of the newest capture
 (``earningscalls.parse_events_page``, then ``check_capture``); and the newest copy of the
 transcript of every call the capture places in a listed season (``parse_transcript``). Every
 entry of ``raw/{T}/`` and of a season folder that ``fetch`` does not write, an entry that is
 not a regular file where a file belongs, and a file where a folder belongs are invalid too,
-but for three kinds left out: a name ending in ``.rejected`` (withdrawn by the bot), a
-season folder older than the oldest listed season (``filings.recent`` no longer lists it),
-and a filing folder or transcript whose accession or call the newest listing does not hold
-(*unlisted*). ``raw/{T}/edgar/`` and ``raw/{T}/calls/`` are the *former layout* (until
+but for the kinds left out: a name ending in ``.rejected`` (withdrawn by the bot), a season
+folder older than the oldest listed season (``filings.recent`` no longer lists it), and
+the *unlisted*: a filing folder or transcript whose accession or call the newest listing does
+not hold, among them the folders of the forms no longer read (``RETIRED_FORMS``), and the
+company facts at the top of ``raw/{T}/`` (``RETIRED_PREFIX``), both of which ``fetch`` wrote
+until 2026-10-24. ``raw/{T}/edgar/`` and ``raw/{T}/calls/`` are the *former layout* (until
 2026-10-23), never read: the bot renames each with ``.rejected`` and ``fetch`` writes the
 window again. Invalid files are listed (``RawState.invalid_files``) and never repaired.
 
@@ -51,9 +48,8 @@ A document's ``DOC_ID`` names its derived text ``formatted/{T}/{PERIOD}/{DOC_ID}
 (``Document.text_name``) and is how a reading cites it: an EDGAR document's folder name,
 ``_`` and its file name without the extension
 (``10-Q_2026-06-27_0000050863-26-000157_intc-20260627``); a call's ``call_{PERIOD}_{ID}``.
-Two ``DOC_ID``s that differ only in letter case collide. A filing index page, a Form 4's XML,
-the company facts and a capture are read by Python and quoted by no one: they have no
-``DOC_ID``.
+Two ``DOC_ID``s that differ only in letter case collide. A filing index page and a capture are
+read by Python and quoted by no one: they have no ``DOC_ID``.
 
 The sentence rule reads an EDGAR document whose name ends in ``.txt`` (any case) in layout
 mode (``layout_mode``), every other document, a call included, in block mode.
@@ -80,7 +76,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from market_state_research.common.layout import REJECTED_SUFFIX, DataLayout, stamped
 from market_state_research.common.times import TOKEN_PATTERN, parse_timestamp_token, to_eastern
 
-from .client import COMPANYFACTS_LIMIT, DOCUMENT_LIMIT, INDEX_LIMIT, JSON_LIMIT, decode_document
+from .aspects import BASELINE_SEASONS
+from .client import DOCUMENT_LIMIT, INDEX_LIMIT, JSON_LIMIT, decode_document
 from .earningscalls import (
     BODY_LIMIT,
     MAX_ID,
@@ -93,7 +90,6 @@ from .earningscalls import (
     parse_events_page,
     parse_transcript,
 )
-from .facts import CompanyFacts, read_companyfacts
 from .filings import (
     FORM_TOKENS,
     PENDING,
@@ -107,17 +103,19 @@ from .filings import (
     parse_submissions,
     select_seasons,
 )
-from .form4 import Form4, parse_form4
-from .items import BASELINE_SEASONS
-from .text import html_text, plain_text, windows_1252, xml_text
+from .text import html_text, plain_text, windows_1252
 
 SUBMISSIONS_PREFIX = "submissions_"
-COMPANYFACTS_PREFIX = "companyfacts_"
 CALLS_PREFIX = "calls_"
 JSON_SUFFIX = ".json"
 TRANSCRIPT_PREFIX = "transcript_"
 INDEX_SUFFIX = "-index.htm"
 FORMER_LAYOUT = ("edgar", "calls")
+# What fetch wrote until 2026-10-24 and no longer writes, left out as unlisted: the company facts
+# at the top of raw/{T}/ and the folders of the forms no longer read (Form 4, the proxy statement,
+# the beneficial owners' schedule amendments) in a season folder.
+RETIRED_PREFIX = "companyfacts"
+RETIRED_FORMS = ("4", "DEF14A", "SC13DA", "SC13GA", "SCHEDULE13DA", "SCHEDULE13GA")
 # Days after a season's due date from which a calls list that places no call in the season
 # shows it unavailable, and after which an unchanged verdict is asked for again.
 CALL_WAIT = 7
@@ -151,15 +149,6 @@ INVALID_CAPTURE = (
     "the newest calls list in raw/ is invalid (see invalid_files); rename its pages with .rejected and "
     "run fetch"
 )
-NO_FACTS = "no companyfacts file is in raw/; run fetch"
-INVALID_FACTS = (
-    "the newest companyfacts file is invalid (see invalid_files); rename it with .rejected and run fetch"
-)
-FACTS_WAITING = (
-    "the newest companyfacts, fetched {fetched}, on or before the {form} {accession} was filed, holds no "
-    "fact of it: a later fetch brings them"
-)
-FACTS_ABSENT = "EDGAR's companyfacts, fetched {fetched}, holds no fact of the {form} {accession}"
 TRANSCRIPT_MISSING = "the transcript of the call {id} ({day}) is not in raw/ ({path}); run fetch"
 TRANSCRIPT_INVALID = (
     "the transcript of the call {id} ({day}) in raw/ is invalid (see invalid_files); rename it with "
@@ -170,29 +159,20 @@ NOT_LISTED_YET = (
     "that lists none shows it unavailable"
 )
 
-DocumentKind = Literal["filing", "8-K", "exhibit", "proxy", "holder", "call"]
+DocumentKind = Literal["filing", "8-K", "exhibit", "call"]
 CallStatus = Literal["transcript", "unavailable", "waiting", "missing"]
-FactsStatus = Literal["present", "missing", "waiting", "absent"]
 
 _SEASON_NAME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", re.ASCII)
 _FILING_NAME = re.compile(
-    rf"(?P<form>{'|'.join(re.escape(token) for token in FORM_TOKENS.values())})_"
+    rf"(?P<form>{'|'.join(re.escape(token) for token in (*FORM_TOKENS.values(), *RETIRED_FORMS))})_"
     r"(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})_(?P<accession>[0-9]{10}-[0-9]{2}-[0-9]{6})",
     re.ASCII,
 )
-_STAMPED = re.compile(rf"(?P<prefix>submissions|companyfacts)_(?P<token>{TOKEN_PATTERN})\.json", re.ASCII)
+_STAMPED = re.compile(rf"(?P<prefix>submissions|{RETIRED_PREFIX})_(?P<token>{TOKEN_PATTERN})\.json", re.ASCII)
 _CALLS_NAME = re.compile(rf"calls_(?P<token>{TOKEN_PATTERN})_(?P<page>[1-9][0-9]?)\.json", re.ASCII)
 _TRANSCRIPT_NAME = re.compile(
     rf"transcript_(?P<id>[1-9][0-9]{{0,11}})(?:_(?P<token>{TOKEN_PATTERN}))?\.json", re.ASCII
 )
-_KINDS: Mapping[str, DocumentKind] = {
-    "8-K": "8-K",
-    "DEF 14A": "proxy",
-    "SC 13D/A": "holder",
-    "SC 13G/A": "holder",
-    "SCHEDULE 13D/A": "holder",
-    "SCHEDULE 13G/A": "holder",
-}
 
 
 class _SubmissionsHead(BaseModel):
@@ -206,8 +186,7 @@ class _SubmissionsHead(BaseModel):
 @dataclass(frozen=True)
 class Document:
     """One document of a season that the bot reads and quotes: a 10-K or 10-Q (``filing``), an
-    8-K's primary document (``8-K``), an exhibit, a proxy statement (``proxy``), a beneficial
-    owner's schedule (``holder``) or a call.
+    8-K's primary document (``8-K``), an exhibit or a call.
 
     ``label`` names it for people; ``form``, ``accession`` and ``filed`` are its filing's (None
     for a call); ``title`` and ``call`` are a call's: its transcript's title and the call the
@@ -242,10 +221,9 @@ class Needed:
 
 @dataclass(frozen=True)
 class FilingFiles:
-    """One filing of a season whose documents ``fetch`` writes: its listing row, its folder, the
-    files it needs (an 8-K's exhibits are known once its index page parses: ``index_valid``),
-    its quotable documents in ``raw/`` and, for a Form 4, its XML read (None while it is not in
-    ``raw/`` or does not parse)."""
+    """One 8-K of a season, whose documents ``fetch`` writes: its listing row, its folder, the
+    files it needs (its exhibits are known once its index page parses: ``index_valid``) and its
+    quotable documents in ``raw/``."""
 
     item: Dated
     folder: Path
@@ -253,7 +231,6 @@ class FilingFiles:
     index_valid: bool
     exhibits: tuple[ExhibitRow, ...]
     documents: tuple[Document, ...]
-    form4: Form4 | None = None
 
 
 @dataclass(frozen=True)
@@ -294,7 +271,7 @@ class CallState:
 @dataclass(frozen=True)
 class SeasonFiles:
     """The raw files of one listed season: its folder, its 10-K or 10-Q (None while not in
-    ``raw/``), the filings ``fetch`` writes, its earnings call and the invalid paths among them."""
+    ``raw/``), the 8-Ks ``fetch`` writes, its earnings call and the invalid paths among them."""
 
     season: Season
     folder: Path
@@ -336,10 +313,6 @@ class SeasonFiles:
         documents.extend(self.call.documents)
         return tuple(documents)
 
-    def form4s(self) -> tuple[tuple[str, Form4], ...]:
-        """Each Form 4 of the season read from ``raw/``, by accession."""
-        return tuple((files.item.accession, files.form4) for files in self.filings if files.form4 is not None)
-
 
 def due_date(season: Season) -> date:
     """The date a season's call is expected by: its latest release's date, else the filing date
@@ -351,10 +324,10 @@ def due_date(season: Season) -> date:
 @dataclass(frozen=True)
 class RawState:
     """What one ticker's ``raw/`` tree holds: the seasons the newest submissions file lists,
-    oldest first, with their files, or ``reason`` why none is listed; the newest valid company
-    facts and calls capture; the pending calls; what is left out (``unlisted``, the former
-    layout); the newest copy of each call's transcript by call id (``transcript_files``,
-    whatever its validity: the file ``fetch`` keeps or compares); and every invalid file."""
+    oldest first, with their files, or ``reason`` why none is listed; the newest valid calls
+    capture; the pending calls; what is left out (``unlisted``, the former layout); the newest
+    copy of each call's transcript by call id (``transcript_files``, whatever its validity: the
+    file ``fetch`` keeps or compares); and every invalid file."""
 
     ticker: str
     submissions: Path | None
@@ -363,9 +336,6 @@ class RawState:
     reason: str | None
     listing: Seasons | None
     seasons: tuple[SeasonFiles, ...]
-    companyfacts: Path | None
-    facts: CompanyFacts | None
-    facts_problem: str | None
     capture: Capture | None
     capture_problem: str | None
     pending_calls: tuple[CallEvent, ...]
@@ -399,23 +369,6 @@ class RawState:
         if not self.seasons or window.end < self.seasons[-1].day:
             return ()
         return self.pending_calls
-
-    def facts_status(self, files: SeasonFiles) -> tuple[FactsStatus, str | None]:
-        """Whether the newest company facts hold the season's 10-K or 10-Q: ``present``;
-        ``missing`` (no valid file: ``fetch`` writes one); ``waiting`` (fetched on or before the
-        filing's date, so without it: every ``fetch`` asks again); ``absent`` (fetched after it
-        and still without it: its figures are not computable); with the reason."""
-        if self.facts is None or self.companyfacts is None:
-            return "missing", self.facts_problem or NO_FACTS
-        own = files.season.filing
-        if own.accession in self.facts.accessions:
-            return "present", None
-        fetched = _token_instant(self.companyfacts)
-        fetched_day = None if fetched is None else fetched.date()
-        details = {"fetched": str(fetched_day), "form": own.form, "accession": own.accession}
-        if fetched_day is None or fetched_day <= own.filed:
-            return "waiting", FACTS_WAITING.format(**details)
-        return "absent", FACTS_ABSENT.format(**details)
 
     def events_due(self, window: Window, now: datetime) -> str | None:
         """Why ``fetch`` should ask EarningsCalls.dev for the calls list now, or None.
@@ -495,11 +448,6 @@ def layout_mode(document: Document) -> bool:
     whose name ends in ``.txt`` (any case), whose lines wrap where the page ran out. HTML, iXBRL
     and XML documents and a call's text break at their blocks."""
     return document.kind != "call" and document.path.name.lower().endswith(".txt")
-
-
-def _token_instant(path: Path) -> datetime | None:
-    match = _STAMPED.fullmatch(path.name)
-    return None if match is None else parse_timestamp_token(match["token"])
 
 
 # --------------------------------------------------------------------------- files
@@ -582,10 +530,10 @@ class _Top:
     """What the top of ``raw/{T}/`` holds, sorted by kind."""
 
     submissions: dict[datetime, Path] = field(default_factory=dict)
-    companyfacts: dict[datetime, Path] = field(default_factory=dict)
     captures: dict[datetime, dict[int, Path]] = field(default_factory=dict)
     seasons: dict[date, Path] = field(default_factory=dict)
     former: list[Path] = field(default_factory=list)
+    retired: list[Path] = field(default_factory=list)
 
 
 def _entries(directory: Path) -> Iterator[Path]:
@@ -631,7 +579,7 @@ def _top(raw: Path, now: datetime, invalid: list[tuple[Path, str]]) -> _Top:
             elif stamped_name is not None and stamped_name["prefix"] == "submissions":
                 found.submissions[instant] = path
             else:
-                found.companyfacts[instant] = path
+                found.retired.append(path)
             continue
         if _SEASON_NAME.fullmatch(name):
             try:
@@ -823,32 +771,6 @@ def _eight_k(
     return FilingFiles(item, folder, tuple(needed), valid, exhibits, tuple(documents))
 
 
-def _single(season: date, item: Dated, folder: Path, invalid: list[tuple[Path, str]]) -> FilingFiles:
-    """A filing of one primary document: a proxy statement, a schedule or a Form 4."""
-    path = folder / item.document
-    present = _present(path, DOCUMENT_LIMIT, invalid)
-    if item.form == "4":
-        form4 = None
-        if present:
-            try:
-                form4 = parse_form4(read_raw(path, DOCUMENT_LIMIT))
-            except ValueError as error:
-                invalid.append((path, str(error)))
-        what = f"XML of the Form 4 {item.accession} dated {item.dated}"
-        return FilingFiles(item, folder, (Needed(what, path, form4 is not None),), True, (), (), form4)
-    what = f"primary document of the {item.form} {item.accession} filed {item.filed}"
-    needed = (Needed(what, path, present),)
-    documents: tuple[Document, ...] = ()
-    if present:
-        label = f"{item.form} filed {item.filed} ({item.document})"
-        documents = (
-            _filing_document(
-                _KINDS[item.form], season, folder.name, path, label, item.form, item.accession, item.filed
-            ),
-        )
-    return FilingFiles(item, folder, needed, True, (), documents)
-
-
 def _season_files(
     raw: Path,
     cik: str,
@@ -870,13 +792,12 @@ def _season_files(
         filing = _filing_document(
             "filing", season.period, own_folder, filing_path, label, own.form, own.accession, own.filed
         )
-    filings: list[FilingFiles] = []
-    for item in season.fetched:
-        item_folder = folder / filing_folder(item.form, item.dated, item.accession)
-        if item.form == "8-K":
-            filings.append(_eight_k(cik, season.period, item, item_folder, invalid))
-        else:
-            filings.append(_single(season.period, item, item_folder, invalid))
+    filings = [
+        _eight_k(
+            cik, season.period, item, folder / filing_folder(item.form, item.dated, item.accession), invalid
+        )
+        for item in season.fetched
+    ]
     paths = frozenset(path for path, _ in invalid)
     call = _call_state(season, placed, capture, capture_problem, transcripts, transcript_files, folder, paths)
     return SeasonFiles(season, folder, filing_path, filing, tuple(filings), call, paths)
@@ -964,12 +885,12 @@ def _accessions(listing: Seasons) -> dict[str, tuple[str, Season | str]]:
 
 def season_documents(layout: DataLayout, ticker: str, now: datetime) -> RawState:
     """Read ``ticker``'s raw tree: the seasons its newest submissions file lists, each with its
-    files and its call, the newest company facts and calls capture, and every invalid file
-    with the reason (module docstring).
+    files and its call, the newest calls capture, and every invalid file with the reason (module
+    docstring).
 
     Without a submissions file, or with one that does not parse or whose seasons
-    ``filings.select_seasons`` refuses, no season is listed and ``reason`` says why; the
-    company facts and the calls list are still validated.
+    ``filings.select_seasons`` refuses, no season is listed and ``reason`` says why; the calls
+    list is still validated.
     """
     now = to_eastern(now, "now")
     raw = layout.raw(ticker)
@@ -990,20 +911,10 @@ def season_documents(layout: DataLayout, ticker: str, now: datetime) -> RawState
             listing = select_seasons(submissions)
         except ValueError as error:  # no exact 10-K or 10-Q, two for one period, an undated release
             reason = str(error)
-    facts_path = top.companyfacts[max(top.companyfacts)] if top.companyfacts else None
-    facts: CompanyFacts | None = None
-    facts_problem: str | None = NO_FACTS if facts_path is None else None
-    if facts_path is not None:
-        cik = None if submissions is None else submissions.cik
-        try:
-            facts = read_companyfacts(read_raw(facts_path, COMPANYFACTS_LIMIT), cik)
-        except ValueError as error:
-            invalid.append((facts_path, str(error)))
-            facts_problem = INVALID_FACTS
     capture, capture_problem = _newest_capture(ticker, top.captures, invalid)
     seasons: tuple[SeasonFiles, ...] = ()
     pending_calls: list[CallEvent] = []
-    unlisted: list[Path] = []
+    unlisted: list[Path] = list(top.retired)
     transcript_files: dict[int, Path] = {}
     if listing is not None and submissions is not None:
         placement: dict[int, Season | str] = {}
@@ -1058,9 +969,6 @@ def season_documents(layout: DataLayout, ticker: str, now: datetime) -> RawState
         reason=reason,
         listing=listing,
         seasons=seasons,
-        companyfacts=facts_path,
-        facts=facts,
-        facts_problem=facts_problem,
         capture=capture,
         capture_problem=capture_problem,
         pending_calls=tuple(pending_calls),
@@ -1083,19 +991,14 @@ def _first_per_path(invalid: list[tuple[Path, str]]) -> tuple[tuple[Path, str], 
 
 
 def edgar_text(data: bytes, name: str) -> str:
-    """The derived text of a document EDGAR served: plain text for a ``.txt`` name, the XML
-    derivation for an ``.xml`` name, else HTML.
+    """The derived text of a document EDGAR served: plain text for a ``.txt`` name, else HTML.
 
-    A text document's bytes are decoded as ``client.decode_document`` decodes them (strict
-    UTF-8, else Latin-1); a Latin-1 document is read as windows-1252, as a browser shows it.
-    An XML document is read by its own declaration.
+    Its bytes are decoded as ``client.decode_document`` decodes them (strict UTF-8, else
+    Latin-1); a Latin-1 document is read as windows-1252, as a browser shows it.
     """
-    lower = name.lower()
-    if lower.endswith(".xml"):
-        return xml_text(data)
     body, encoding = decode_document(data)
     text = windows_1252(body) if encoding == "latin-1" else body
-    if lower.endswith(".txt"):
+    if name.lower().endswith(".txt"):
         return plain_text(text)
     return html_text(text)
 

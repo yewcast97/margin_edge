@@ -68,7 +68,6 @@ admit a failed file. Market data of a session (`stock_iv_regime`'s chains and pr
 `market_position_regime`'s VIX and SKEW) is read as of the last completed XNYS session, and no
 intraday live value is stored; a document that is no session's (`market_position_regime`'s
 months and weeks, `fundamentals`, `posts`) is dated by its own date, with no session logic
-but `fundamentals`' test of a release accepted on the eve of a day without a session
 (see [market_state_research/AGENTS.md](market_state_research/AGENTS.md)).
 
 ## Repository layout

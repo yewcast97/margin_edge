@@ -73,14 +73,13 @@ from .support import NOW, edt, est
 from .workflow_support import (
     CALLS_FETCHED_AT,
     CALLS_OF_SEASONS,
+    COMPARISONS,
     DEFAULT_WINDOW,
     DOC_IDS,
     FETCH_URLS,
     FETCHED_AT,
-    QUOTE_FILING,
     RAW,
     WINDOW,
-    WINDOW_SEASONS,
     FetchClock,
     Reading,
     client,
@@ -319,7 +318,7 @@ def test_main_reads_the_real_settings_by_default():
         (
             ["plan", "--help"],
             [
-                "readings and report in the window and the next action (read-only)",
+                "sheet and comparisons (readings and report) in the window and the next action (read-only)",
                 "--from YYYY-MM-DD",
                 "--to YYYY-MM-DD",
                 "--refresh",
@@ -328,12 +327,15 @@ def test_main_reads_the_real_settings_by_default():
         (["derive", "--help"], ["each when it is missing or differs from its derivation", "TICKER"]),
         (
             ["check", "--help"],
-            ["[READINGS_PATH ...]", "default: every season's readings.md in reports/TICKER/"],
+            [
+                "[READINGS_PATH ...]",
+                "default: every season's readings_quarter.md and readings_year.md in reports/TICKER/",
+            ],
         ),
-        (["render", "--help"], ["write the report of every season whose readings pass"]),
+        (["render", "--help"], ["write the report of every comparison whose readings pass"]),
         (
             ["show", "--help"],
-            ["print each ticker's newest season report", "--watchlist PATH"],
+            ["print each ticker's newest season's reports", "--watchlist PATH"],
         ),
     ],
 )
@@ -674,7 +676,7 @@ def test_refresh_reaches_fetch_and_plan(cli, layout):
     (entry,) = refreshed["tickers"]
     assert {season["filing"]["status"] for season in entry["seasons"]} == {"verified"}
     assert [item["status"] for item in entry["calls"]["transcripts"]] == ["verified"] * 3
-    assert entry["companyfacts"]["status"] == "reused"
+    assert "companyfacts" not in entry
     planned = cli("plan", "INTC", *WINDOW_ARGS, "--refresh").json()
     assert planned["refresh"] is True
     (ticker,) = planned["tickers"]
@@ -710,21 +712,33 @@ def test_the_pipeline_end_to_end_through_the_command_line(cli, layout, clock):
 
     derived = cli("derive", "INTC").json()
     assert {document["status"] for document in derived["documents"]} == {"published"}
-    assert [entry["status"] for entry in derived["measures"]] == ["published"] * 5
+    assert [entry["status"] for entry in derived["sheets"]] == ["published"] * 5
     assert cli("plan", "INTC", *WINDOW_ARGS).json()["tickers"][0]["action"] == "research"
 
-    for row in WINDOW_SEASONS:
-        write_readings(layout, row.period)
+    for period, kind in COMPARISONS:
+        write_readings(layout, period, kind=kind)
     checked = cli("check", "INTC").json()
-    assert [readings["valid"] for readings in checked["readings"]] == [True] * 3
+    assert [(readings["kind"], readings["valid"]) for readings in checked["readings"]] == [
+        ("quarter", True),
+        ("year", True),
+        ("quarter", True),
+        ("quarter", True),
+    ]
     assert cli("plan", "INTC", *WINDOW_ARGS).json()["tickers"][0]["action"] == "render"
 
     rendered = cli("render", "INTC").json()
-    assert [report["season"] for report in rendered["reports"]] == ["2025-12-27", "2026-03-28", "2026-06-27"]
+    assert [(report["season"], report["kind"]) for report in rendered["reports"]] == [
+        ("2025-12-27", "quarter"),
+        ("2025-12-27", "year"),
+        ("2026-03-28", "quarter"),
+        ("2026-06-27", "quarter"),
+    ]
     later = clock.tick(60)
     planned = cli("plan", "INTC", *WINDOW_ARGS, now=later).json()["tickers"][0]
     assert planned["action"] == "reuse"
-    assert {season["report"]["status"] for season in planned["seasons"] if season["in_window"]} == {"fresh"}
+    assert {
+        found["report"]["status"] for season in planned["seasons"] for found in season.get("comparisons", ())
+    } == {"fresh"}
 
     again = cli(
         "fetch", "INTC", *WINDOW_ARGS, client=client(edgar()), calls=Provider.client(FakeEarningsCalls())
@@ -735,10 +749,11 @@ def test_the_pipeline_end_to_end_through_the_command_line(cli, layout, clock):
     report = rendered["reports"][-1]["path"]
     # The default window also holds the two seasons fetched as baselines, which have no readings.
     assert shown.startswith(
-        "INTC: action research: readings missing or failing check: 2024-12-28 (missing), "
-        f"2025-09-27 (missing). Newest report: {report} (fresh).\n\n# INTC · 2026-06-27 · season report\n"
+        "INTC: action research: readings missing or failing check: 2024-12-28 quarter (missing), 2024-12-28 "
+        f"year (missing), 2025-09-27 quarter (missing). Newest quarter report: {report} (fresh).\n\n"
+        "# INTC · 2026-06-27 · quarter report\n"
     )
-    assert "\n## Items\n" in shown and "\n## Evidence\n" in shown
+    assert "\n## Guidance\n" in shown and "\n## Evidence\n" in shown
     assert "## Ranking" not in shown
 
 
@@ -746,9 +761,14 @@ def test_check_with_problems_exits_0_and_lists_them(cli, layout):
     research(layout)
     broken = readings_text(
         Q2,
-        i3_6=Reading(
-            DOC_IDS["ten_q_1"], "yellow", quotes=(("Not a sentence of the 10-Q at all.", QUOTE_FILING[1]),)
-        ),
+        supply=[
+            Reading(
+                "Substrates",
+                DOC_IDS["ten_q_2"],
+                "tight",
+                quotes=(("Not a sentence of the 10-Q at all.", DOC_IDS["ten_q_2"]),),
+            )
+        ],
     )
     path = write_readings(layout, Q2, broken)
 
@@ -761,6 +781,7 @@ def test_check_with_problems_exits_0_and_lists_them(cli, layout):
             {
                 "path": str(path),
                 "season": "2026-06-27",
+                "kind": "quarter",
                 "valid": False,
                 "problems": [{"line": line, "message": "quote not found in the document's derived text"}],
             }
@@ -774,15 +795,15 @@ def test_render_refusals_exit_2_with_one_line(cli, layout):
     assert cli("render", "INTC").error() == f"{TICKER}: no season has readings; run plan"
     write_readings(layout, Q2)
     assert cli("render", "INTC").error() == (
-        f"{TICKER}: no report to write: 2026-06-27: 5 text files missing or out of date; run derive"
+        f"{TICKER}: no report to write: 2026-06-27 quarter: 9 text files missing or out of date; run derive"
     )
     research(layout)
     first = cli("render", "INTC").json()
-    assert len(first["reports"]) == 3
+    assert len(first["reports"]) == 4
     assert cli("render", "INTC").json() == {
         "ticker": TICKER,
         "reports": [],
-        "current": ["2025-12-27", "2026-03-28", "2026-06-27"],
+        "current": [{"season": day.isoformat(), "kind": kind} for day, kind in COMPARISONS],
         "skipped": [],
     }
 

@@ -1,35 +1,36 @@
 """A fake EDGAR and EarningsCalls.dev, raw-tree planters and readings for the workflow tests.
 
-``edgar`` serves INTC's ticker map, submissions JSON (``edgar_support.RECENT``), company
-facts (``companyfacts_json``) and every document of the five seasons ``fetch`` requests for
-``WINDOW`` (2025-12-01 to ``TODAY``): its three seasons, the fiscal year ended 2025-12-27 and
-the quarters ended 2026-03-28 and 2026-06-27, and the two listed before them, the quarter
-ended 2025-09-27 and the fiscal year ended 2024-12-28 (``items.BASELINE_SEASONS`` reaches
-four back). The fiscal year's season holds the 8-K of 2026-02-09 (Item 5.02, no exhibit)
-and the proxy statement filed 2026-03-27; each quarter its earnings release (index page,
-primary document and EX-99 exhibits). The Form 4 of 2026-07-30 is pending. ``provider``
+``edgar`` serves INTC's ticker map, submissions JSON (``edgar_support.RECENT``) and every
+document of the five seasons ``fetch`` requests for ``WINDOW`` (2025-12-01 to ``TODAY``): its
+three seasons, the fiscal year ended 2025-12-27 and the quarters ended 2026-03-28 and
+2026-06-27, and the two listed before them, the quarter ended 2025-09-27 and the fiscal year
+ended 2024-12-28 (``aspects.BASELINE_SEASONS`` reaches four back). The fiscal year's season
+holds the 8-K of 2026-02-09 (Item 5.02, no exhibit); the proxy statement filed 2026-03-27 is
+listed by EDGAR and read by no one; each quarter holds its earnings release (index page,
+primary document and EX-99 exhibits). The 8-K of 2026-07-30 is pending. ``provider``
 (``fake_earningscalls``) serves INTC's calls list and the transcripts of the calls Rule B
 places in those seasons: 2025-10-23, 2026-04-23 and 2026-07-23; none is listed for either
 fiscal year, which the list so shows unavailable.
 
 ``RAW`` names, written out independently of the code under test, where each document lands
-under ``raw/INTC/`` and ``DOC_IDS`` each quoted document's ``DOC_ID``. ``readings_text`` writes
-a readings file of a season in the grammar, every bot item at ``none`` but the statuses its
-season requires, each naming one baseline document (``BASELINES``); ``research`` fetches,
-derives and writes the window seasons' readings, so ``plan`` then says ``render``.
+under ``raw/INTC/`` and ``DOC_IDS`` each quoted document's ``DOC_ID``. ``readings_text``
+writes the readings of one comparison of a season in the grammar, each aspect ``na`` but the
+items a test gives it (``Reading``); ``research`` fetches, derives and writes the readings of
+every comparison of the window's seasons (``COMPARISONS``), each aspect ``na``, so ``plan``
+then says ``render``.
 """
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from market_state_research.common.layout import DataLayout
 from market_state_research.fundamentals.script import workflow
+from market_state_research.fundamentals.script.aspects import ASPECTS
 from market_state_research.fundamentals.script.client import COMPANY_TICKERS_URL, EdgarClient
 from market_state_research.fundamentals.script.filings import Window
-from market_state_research.fundamentals.script.items import BOT_ITEMS, Item
 
 from .calls_support import CALL_OLD_Q, CALL_Q1, CALL_Q2, CEO, CEO_DEMAND, Call, events_page, transcript_body
 from .edgar_support import (
@@ -37,10 +38,8 @@ from .edgar_support import (
     EIGHT_K_OTHER,
     EIGHT_K_Q1,
     EIGHT_K_Q2,
-    ENTITY_NAME,
     OLD_TEN_K,
     OLD_TEN_Q,
-    PROXY,
     Q1_EXHIBITS,
     Q2_EXHIBITS,
     RECENT,
@@ -70,8 +69,10 @@ JSON_TYPE = "application/json"
 HTML_TYPE = "text/html"
 SEASONS = (OLD_TEN_K, OLD_TEN_Q, TEN_K, TEN_Q_1, TEN_Q_2)  # the listed seasons' filings, oldest first
 WINDOW_SEASONS = (TEN_K, TEN_Q_1, TEN_Q_2)
+# The comparisons of the window's seasons: each season's quarter, and the 10-K season's year.
+COMPARISONS = ((date(2025, 12, 27), "quarter"), (date(2025, 12, 27), "year"), (date(2026, 3, 28), "quarter"))
+COMPARISONS += ((date(2026, 6, 27), "quarter"),)
 FETCHED_AT = edt(2026, 10, 8, 5, 30, 1)
-COMPANYFACTS_AT = edt(2026, 10, 8, 5, 30, 30)
 CALLS_FETCHED_AT = edt(2026, 10, 8, 5, 31, 0)
 
 DOC_IDS = {
@@ -80,7 +81,6 @@ DOC_IDS = {
     "call_old_q": "call_2025-09-27_35174",
     "ten_k": "10-K_2025-12-27_0000050863-26-000012_intc-20251227",
     "eight_k_other": "8-K_2026-02-09_0000050863-26-000020_intc-20260209",
-    "proxy": "DEF14A_2026-03-27_0001193125-26-112233_d123456ddef14a",
     "ten_q_1": "10-Q_2026-03-28_0000050863-26-000041_intc-20260328",
     "eight_k_1": "8-K_2026-04-23_0000050863-26-000040_intc-20260423",
     "exhibit_1": "8-K_2026-04-23_0000050863-26-000040_q126earningsrelease",
@@ -99,7 +99,6 @@ RAW = {
     "ten_k": "2025-12-27/10-K_2025-12-27_0000050863-26-000012/intc-20251227.htm",
     "index_other": "2025-12-27/8-K_2026-02-09_0000050863-26-000020/0000050863-26-000020-index.htm",
     "eight_k_other": "2025-12-27/8-K_2026-02-09_0000050863-26-000020/intc-20260209.htm",
-    "proxy": "2025-12-27/DEF14A_2026-03-27_0001193125-26-112233/d123456ddef14a.htm",
     "ten_q_1": "2026-03-28/10-Q_2026-03-28_0000050863-26-000041/intc-20260328.htm",
     "index_1": "2026-03-28/8-K_2026-04-23_0000050863-26-000040/0000050863-26-000040-index.htm",
     "eight_k_1": "2026-03-28/8-K_2026-04-23_0000050863-26-000040/intc-20260423.htm",
@@ -132,10 +131,6 @@ def submissions_url(cik: str = CIK) -> str:
     return f"https://data.sec.gov/submissions/CIK{cik}.json"
 
 
-def companyfacts_url(cik: str = CIK) -> str:
-    return f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-
-
 def filing_url(row: Row) -> str:
     return archive_document_url(row.accession, row.primary_document)
 
@@ -165,18 +160,6 @@ def eight_k_html(row: Row) -> str:
     )
 
 
-PROXY_SENTENCE = "The Board recommends that stockholders vote for each of the director nominees."
-
-
-def proxy_html() -> str:
-    """The synthetic proxy statement."""
-    return (
-        "<html><head><title>DEF 14A</title></head><body><p>Notice of 2026 Annual Meeting of Stockholders</p>"
-        f"<p>{PROXY_SENTENCE}</p><p>No director or executive officer has pledged shares of the Company.</p>"
-        "</body></html>"
-    )
-
-
 def exhibit_document(row: Row, index_row: IndexRow) -> str:
     quarter = TEN_Q_1 if row is EIGHT_K_Q1 else TEN_Q_2
     assert quarter.period is not None
@@ -184,129 +167,6 @@ def exhibit_document(row: Row, index_row: IndexRow) -> str:
         return commentary_html(quarter.period)
     title = RELEASE_TITLES.get(index_row.document, f"Intel Reports Results ({index_row.document})")
     return exhibit_html(quarter.period, title=title)
-
-
-@dataclass(frozen=True)
-class Quarter:
-    """One season's figures for the company facts: the quarter's flows and the period-end balances."""
-
-    revenue: int
-    cost: int
-    operating: int
-    income: int
-    cash_flow: int
-    receivables: int
-    inventory: int
-    payables: int
-    debt: int
-    cash: int
-    shares: int
-    goodwill: int
-    equity: int
-    assets: int
-
-
-FIGURES: Mapping[date, Quarter] = {
-    date(2025, 9, 27): Quarter(
-        13_000, 8_000, 500, 400, 600, 3_000, 11_000, 10_000, 46_000, 11_000, 4_500, 23_000, 106_000, 204_000
-    ),
-    date(2025, 12, 27): Quarter(
-        13_500, 8_500, 600, 500, 700, 3_800, 11_600, 9_800, 46_500, 14_000, 4_600, 23_000, 114_000, 211_000
-    ),
-    date(2026, 3, 28): Quarter(
-        13_600, 8_200, 700, 550, 1_100, 4_000, 12_400, 7_100, 45_000, 17_000, 5_080, 20_400, 111_000, 205_000
-    ),
-    date(2026, 6, 27): Quarter(
-        16_100, 9_600, 1_800, 900, 7_000, 4_000, 12_500, 8_700, 50_500, 12_800, 5_100, 20_400, 87_500, 202_000
-    ),
-}
-_FLOWS = {
-    "RevenueFromContractWithCustomerExcludingAssessedTax": "revenue",
-    "CostOfGoodsAndServicesSold": "cost",
-    "OperatingIncomeLoss": "operating",
-    "NetIncomeLoss": "income",
-}
-_BALANCES = {
-    "AccountsReceivableNetCurrent": "receivables",
-    "InventoryNet": "inventory",
-    "AccountsPayableCurrent": "payables",
-    "LongTermDebtNoncurrent": "debt",
-    "CashAndCashEquivalentsAtCarryingValue": "cash",
-    "Goodwill": "goodwill",
-    "StockholdersEquity": "equity",
-    "Assets": "assets",
-}
-MILLION = 1_000_000
-
-
-def _entry(row: Row, start: date | None, end: date, value: int) -> dict[str, object]:
-    entry: dict[str, object] = {
-        "end": end.isoformat(),
-        "val": value,
-        "accn": row.accession,
-        "fy": 2026,
-        "fp": "Q",
-        "form": row.form,
-        "filed": row.filed.isoformat(),
-    }
-    if start is not None:
-        entry = {"start": start.isoformat(), **entry}
-    return entry
-
-
-def companyfacts_document() -> dict[str, object]:
-    """INTC's company facts in EDGAR's layout, the figures of ``FIGURES`` in millions: each 10-Q
-    reports its quarter (operating cash flow as the year to date only, the second quarter's from
-    the first's), the 10-K its year, from which the third quarter's nine months come off."""
-    concepts: dict[str, dict[str, list[dict[str, object]]]] = {}
-
-    def add(tag: str, unit: str, entry: dict[str, object]) -> None:
-        concepts.setdefault(tag, {}).setdefault(unit, []).append(entry)
-
-    rows = {row.period: row for row in SEASONS}
-    for period, quarter in FIGURES.items():
-        row = rows[period]
-        start = period - timedelta(days=90)
-        for tag, name in _FLOWS.items():
-            value = getattr(quarter, name) * MILLION
-            if row.form == "10-K":
-                nine = getattr(FIGURES[date(2025, 9, 27)], name) * MILLION * 3
-                add(tag, "USD", _entry(row, date(2024, 12, 29), period, value + nine))
-                add(tag, "USD", _entry(OLD_TEN_Q, date(2024, 12, 29), date(2025, 9, 27), nine))
-            else:
-                add(tag, "USD", _entry(row, start, period, value))
-        for tag, name in _BALANCES.items():
-            add(tag, "USD", _entry(row, None, period, getattr(quarter, name) * MILLION))
-        if row.form == "10-Q":
-            add(
-                "WeightedAverageNumberOfDilutedSharesOutstanding",
-                "shares",
-                _entry(row, start, period, quarter.shares * MILLION),
-            )
-        cash_flow = quarter.cash_flow * MILLION
-        if period == date(2026, 6, 27):
-            first = FIGURES[date(2026, 3, 28)].cash_flow * MILLION
-            add(
-                "NetCashProvidedByUsedInOperatingActivities",
-                "USD",
-                _entry(row, date(2025, 12, 28), period, first + cash_flow),
-            )
-        elif row.form == "10-Q":
-            add("NetCashProvidedByUsedInOperatingActivities", "USD", _entry(row, start, period, cash_flow))
-    return {
-        "cik": int(CIK),
-        "entityName": ENTITY_NAME,
-        "facts": {
-            "dei": {"EntityCommonStockSharesOutstanding": {"units": {"shares": []}}},
-            "us-gaap": {
-                tag: {"label": tag, "description": "", "units": units} for tag, units in concepts.items()
-            },
-        },
-    }
-
-
-def companyfacts_json() -> str:
-    return json.dumps(companyfacts_document(), separators=(",", ":"))
 
 
 def raw_bytes(role: str) -> bytes:
@@ -325,8 +185,6 @@ def raw_bytes(role: str) -> bytes:
     if role in ("eight_k_other", "eight_k_1", "eight_k_2"):
         row = {"eight_k_other": EIGHT_K_OTHER, "eight_k_1": EIGHT_K_Q1, "eight_k_2": EIGHT_K_Q2}[role]
         return eight_k_html(row).encode()
-    if role == "proxy":
-        return proxy_html().encode()
     if role == "exhibit_1":
         return exhibit_document(EIGHT_K_Q1, Q1_EXHIBITS[0]).encode()
     if role in ("exhibit_2_1", "exhibit_2_2"):
@@ -336,14 +194,12 @@ def raw_bytes(role: str) -> bytes:
 
 
 def edgar(rows: Sequence[Row] = RECENT, **replaced: bytes) -> FakeEdgar:
-    """EDGAR serving the ticker map, INTC's submissions listing ``rows``, its company facts and
-    every document of ``RAW``'s seasons; ``replaced`` serves other bytes at a role's URL."""
+    """EDGAR serving the ticker map, INTC's submissions listing ``rows`` and every document of
+    ``RAW``'s seasons; ``replaced`` serves other bytes at a role's URL."""
     responses = {
         COMPANY_TICKERS_URL: ok(tickers_json().encode(), JSON_TYPE),
         submissions_url(): ok(submissions_json(rows=rows).encode(), JSON_TYPE),
-        companyfacts_url(): ok(companyfacts_json().encode(), JSON_TYPE),
         **{filing_url(row): ok(filing_document(row).encode(), HTML_TYPE) for row in SEASONS},
-        filing_url(PROXY): ok(proxy_html().encode(), HTML_TYPE),
     }
     for row, exhibits in RELEASES.values():
         responses[index_url(row)] = ok(filing_index_html(row, exhibits).encode(), HTML_TYPE)
@@ -358,8 +214,6 @@ def edgar(rows: Sequence[Row] = RECENT, **replaced: bytes) -> FakeEdgar:
 
 def role_url(role: str) -> str:
     """The URL a role of ``RAW`` is requested at."""
-    if role == "companyfacts":
-        return companyfacts_url()
     path = RAW[role]
     folder = path.split("/")[1]
     accession = folder.rsplit("_", 1)[1]
@@ -375,7 +229,6 @@ FETCH_URLS = (
     filing_url(TEN_K),
     index_url(EIGHT_K_OTHER),
     filing_url(EIGHT_K_OTHER),
-    filing_url(PROXY),
     filing_url(TEN_Q_1),
     index_url(EIGHT_K_Q1),
     filing_url(EIGHT_K_Q1),
@@ -384,7 +237,6 @@ FETCH_URLS = (
     index_url(EIGHT_K_Q2),
     filing_url(EIGHT_K_Q2),
     *(archive_document_url(EIGHT_K_Q2.accession, row.document) for row in Q2_EXHIBITS),
-    companyfacts_url(),
 )
 
 
@@ -470,68 +322,6 @@ def write_watchlist(directory: Path, stock: Sequence[str] = (TICKER,)) -> Path:
 
 # --------------------------------------------------------------------------- readings
 
-
-# Per window season: its form, whether it holds a proxy statement, whether its call has a
-# transcript, and the baseline document each baseline kind names (None: no baseline in raw/).
-@dataclass(frozen=True)
-class SeasonFacts:
-    period: date
-    form: str
-    proxy: bool
-    transcript: bool
-    baselines: Mapping[str, str | None]
-
-
-SEASON_FACTS = {
-    date(2025, 12, 27): SeasonFacts(
-        date(2025, 12, 27),
-        "10-K",
-        True,
-        False,
-        {
-            "previous quarter": DOC_IDS["old_ten_q"],
-            "previous guidance": DOC_IDS["old_ten_q"],
-            "same quarter last year": DOC_IDS["old_ten_k"],
-            "previous quarter and same quarter last year": DOC_IDS["old_ten_q"],
-            "previous filings": DOC_IDS["old_ten_k"],
-            "previous 10-K": DOC_IDS["old_ten_k"],
-            "previous proxy": None,
-            "previous eight seasons": DOC_IDS["call_old_q"],
-        },
-    ),
-    date(2026, 3, 28): SeasonFacts(
-        date(2026, 3, 28),
-        "10-Q",
-        False,
-        True,
-        {
-            "previous quarter": DOC_IDS["ten_k"],
-            "previous guidance": DOC_IDS["eight_k_other"],
-            "same quarter last year": None,
-            "previous quarter and same quarter last year": DOC_IDS["ten_k"],
-            "previous filings": DOC_IDS["ten_k"],
-            "previous 10-K": DOC_IDS["ten_k"],
-            "previous proxy": DOC_IDS["proxy"],
-            "previous eight seasons": DOC_IDS["old_ten_q"],
-        },
-    ),
-    date(2026, 6, 27): SeasonFacts(
-        date(2026, 6, 27),
-        "10-Q",
-        False,
-        True,
-        {
-            "previous quarter": DOC_IDS["ten_q_1"],
-            "previous guidance": DOC_IDS["exhibit_1"],
-            "same quarter last year": None,
-            "previous quarter and same quarter last year": DOC_IDS["ten_q_1"],
-            "previous filings": DOC_IDS["ten_k"],
-            "previous 10-K": DOC_IDS["ten_k"],
-            "previous proxy": DOC_IDS["proxy"],
-            "previous eight seasons": DOC_IDS["ten_q_1"],
-        },
-    ),
-}
 # A quote of the season of 2026-06-27 and of its call, with their attributions.
 QUOTE_FILING = (TEN_Q_SUPPLY[0], DOC_IDS["ten_q_2"])
 QUOTE_CALL = (CEO_DEMAND, f"{DOC_IDS['call_q2']}, {CEO[0]} ({CEO[1]})")
@@ -539,63 +329,63 @@ QUOTE_CALL = (CEO_DEMAND, f"{DOC_IDS['call_q2']}, {CEO[0]} ({CEO[1]})")
 
 @dataclass(frozen=True)
 class Reading:
-    """One item's section: its baseline line, old and new values and quotes (text, attribution)."""
+    """One item: its title, the season's documents and new value, the baseline's documents and old
+    value, the difference and its quotes (text, attribution)."""
 
-    baseline: str
-    old: str
-    new: str = "none"
+    title: str
+    season: str = "none"
+    new: str = "na"
+    baseline: str = "none"
+    old: str = "na"
+    difference: str = "na"
     quotes: tuple[tuple[str, str], ...] = ()
 
 
-def default_reading(item: Item, facts: SeasonFacts) -> Reading:
-    """The reading the rules require of ``item`` in the season, else ``none`` against its baseline."""
-    old = "—" if item.baseline == "none" else None
-    if item.scope == "annual" and facts.form == "10-Q" or item.scope == "proxy" and not facts.proxy:
-        return Reading("none", old or "not applicable", "not applicable")
-    if item.scope == "call" and not facts.transcript:
-        return Reading("none", old or "unavailable", "unavailable")
-    if old is not None:
-        return Reading("none", old)
-    named = facts.baselines.get(item.baseline)
-    if named is None:
-        return Reading("none", "no baseline")
-    return Reading(named, "none")
+def item_lines(item: Reading) -> list[str]:
+    """An item as the readings write it: its heading, its five lines, then its quotes."""
+    lines = [
+        f"### {item.title}",
+        f"season: {item.season}",
+        f"new: {item.new}",
+        f"baseline: {item.baseline}",
+        f"old: {item.old}",
+        f"difference: {item.difference}",
+    ]
+    for text, attribution in item.quotes:
+        lines += [f"> {text}", f"— {attribution}"]
+    return lines
 
 
-def readings_text(period: date, **changed: Reading) -> str:
-    """The readings of the window season ``period``: every bot item's default reading, but those
-    ``changed`` gives (keyed ``i1_1`` for item 1.1)."""
-    facts = SEASON_FACTS[period]
-    lines = [f"# {TICKER} · {period.isoformat()} · readings", ""]
-    for item in BOT_ITEMS:
-        reading = changed.get("i" + item.id.replace(".", "_"), default_reading(item, facts))
-        lines += [
-            f"## {item.heading}",
-            f"baseline: {reading.baseline}",
-            f"old: {reading.old}",
-            f"new: {reading.new}",
-        ]
-        for text, attribution in reading.quotes:
-            lines += [f"> {text}", f"— {attribution}"]
-        lines.append("")
+def readings_text(period: date, kind: str = "quarter", **aspects: Sequence[Reading]) -> str:
+    """The readings of the comparison ``kind`` of the season ``period``: each aspect ``na`` but those
+    ``aspects`` gives items to, keyed by the aspect's key."""
+    assert set(aspects) <= {aspect.key for aspect in ASPECTS}, aspects
+    lines = [f"# {TICKER} · {period.isoformat()} · {kind} readings", ""]
+    for aspect in ASPECTS:
+        lines += [f"## {aspect.title}", ""]
+        items = aspects.get(aspect.key, ())
+        if not items:
+            lines += ["na", ""]
+        for item in items:
+            lines += [*item_lines(item), ""]
     return "\n".join(lines)
 
 
-def readings_file(layout: DataLayout, period: date) -> Path:
-    return layout.reports(TICKER) / period.isoformat() / "readings.md"
+def readings_file(layout: DataLayout, period: date, kind: str = "quarter") -> Path:
+    return layout.reports(TICKER) / period.isoformat() / f"readings_{kind}.md"
 
 
-def write_readings(layout: DataLayout, period: date, text: str | None = None) -> Path:
-    return place(readings_file(layout, period), readings_text(period) if text is None else text)
+def write_readings(layout: DataLayout, period: date, text: str | None = None, kind: str = "quarter") -> Path:
+    return place(readings_file(layout, period, kind), readings_text(period, kind) if text is None else text)
 
 
 def research(layout: DataLayout, now: datetime = NOW) -> None:
-    """Fetch, derive, then write each window season's default readings: ``plan`` says ``render``."""
+    """Fetch, derive, then write the readings of every comparison of the window's seasons, each
+    aspect ``na``: ``plan`` says ``render``."""
     fetch(layout)
     workflow.derive(layout, TICKER, now)
-    for row in WINDOW_SEASONS:
-        assert row.period is not None
-        write_readings(layout, row.period)
+    for period, kind in COMPARISONS:
+        write_readings(layout, period, kind=kind)
 
 
 def plant_former_layout(layout: DataLayout) -> list[Path]:
