@@ -18,10 +18,11 @@ minute) and counts them; with a ``budget`` it refuses to send more than that man
 
 Statuses: 402 is the product's daily quota (100,000 API calls per rolling 24 hours, ten
 per request), raised as ``QuotaExceeded`` so a run keeps what it wrote and stops cleanly;
-429 is the per-minute limit: the request is sent once more after the ``Retry-After`` pause
-(at most ``MAX_RETRY_AFTER`` seconds), and a second 429 fails; 401, 403, 5xx and every
-other status fail with one ``EodhdError`` line naming the token-free URL and the next step.
-A network failure, a timeout and a body cut short fail the same way: run ``fetch`` again.
+429 is the per-minute limit; 401, 403, 5xx and every other status fail with one
+``EodhdError`` line naming the token-free URL and the next step, and so do a network
+failure, a timeout and a body cut short (``TransportError``): run ``fetch`` again. A request
+that got HTTP 429 or no whole answer is sent once more, after the ``Retry-After`` pause (at
+most ``RETRY_PAUSE`` seconds) or ``RETRY_PAUSE`` seconds, and the second answer is final.
 
 The HTTP layer is a ``Fetch`` callable, so tests replace it (and ``sleep`` and the clock)
 and never reach the network. The HTTP reading helpers are copies of the fundamentals
@@ -50,7 +51,7 @@ TOKEN_PARAMETER: Final = "api_token"
 PAGE_LIMIT_BYTES: Final = 8 * 1024 * 1024  # a page of at most 1,000 records is about 0.3 MB
 TIMEOUT: Final = 60  # seconds per request
 PACING: Final = 0.1  # seconds before every request after the first: EODHD allows 1,000 a minute
-MAX_RETRY_AFTER: Final = 60  # seconds waited once after HTTP 429
+RETRY_PAUSE: Final = 60  # seconds before a request's second sending; a 429's Retry-After when shorter
 REDACTED: Final = f"<{API_KEY_SETTING}>"
 API_KEY_UNSET: Final = (
     f'{API_KEY_SETTING} is not set; add {API_KEY_SETTING}="..." to the repository-root .env'
@@ -240,9 +241,9 @@ def _status_problem(url: str, response: Response) -> str:
 
 
 def _retry_after(headers: Mapping[str, str]) -> int:
-    """Seconds to wait after HTTP 429: ``Retry-After`` in whole seconds, at most ``MAX_RETRY_AFTER``."""
+    """Seconds to wait after HTTP 429: ``Retry-After`` in whole seconds, at most ``RETRY_PAUSE``."""
     value = headers.get("retry-after", "").strip(" \t")
-    return min(int(value), MAX_RETRY_AFTER) if _SECONDS.fullmatch(value) else MAX_RETRY_AFTER
+    return min(int(value), RETRY_PAUSE) if _SECONDS.fullmatch(value) else RETRY_PAUSE
 
 
 class EodhdClient:
@@ -268,7 +269,7 @@ class EodhdClient:
 
     @property
     def requests(self) -> int:
-        """Requests attempted so far, failed ones included."""
+        """Requests attempted so far, failed ones and second sendings included."""
         return self._requests
 
     @property
@@ -280,13 +281,27 @@ class EodhdClient:
         return to_eastern(self._clock(), "now")
 
     def _send(self, url: str) -> Response:
+        """One sending of ``url``, paced and counted; ``TransportError`` when no whole answer came."""
         if self._budget is not None and self._requests >= self._budget:
             raise BudgetSpent(f"the run's budget of {self._budget} requests is spent; run fetch again")
         if self._requests:
             self._sleep(PACING)
         self._requests += 1
+        return self._fetch(_with_key(url, self._key), {"Accept": "application/json"}, PAGE_LIMIT_BYTES)
+
+    def _answer(self, url: str) -> Response:
+        """The final answer to ``url``: after HTTP 429 or no whole answer, that of a second sending."""
         try:
-            return self._fetch(_with_key(url, self._key), {"Accept": "application/json"}, PAGE_LIMIT_BYTES)
+            response = self._send(url)
+        except TransportError:
+            pause = RETRY_PAUSE
+        else:
+            if response.status != 429:
+                return response
+            pause = _retry_after({name.lower(): value for name, value in response.headers.items()})
+        self._sleep(pause)
+        try:
+            return self._send(url)
         except TransportError as error:
             reason = redact(str(error), self._key)
             raise EodhdError(f"GET {url}: {reason}; run fetch again") from None
@@ -299,10 +314,7 @@ class EodhdClient:
                 f"GET {printable(redact(url, self._key))}: only token-free HTTPS URLs of the "
                 f"options API on https://{HOST}{PATH_PREFIX} are requested"
             )
-        response = self._send(url)
-        if response.status == 429:
-            self._sleep(_retry_after({name.lower(): value for name, value in response.headers.items()}))
-            response = self._send(url)
+        response = self._answer(url)
         if response.status == 402:
             raise QuotaExceeded(f"GET {url}: HTTP 402; {QUOTA_SPENT}")
         if response.status != 200:

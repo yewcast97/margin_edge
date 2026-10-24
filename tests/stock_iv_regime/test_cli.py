@@ -94,9 +94,11 @@ def test_fetch_never_prints_the_keys(capsys, layout, watchlist, monkeypatch):
         settings=settings,
     )
     assert settings.asked == ["EODHD_API", "TIINGO_API"]
-    assert (code, out) == (2, "")
-    assert err.startswith("STOCK_IV_REGIME: GET https://eodhd.com/api/mp/unicornbay/options/contracts?")
-    assert "check EODHD_API" in err and CANARY not in err and TIINGO_CANARY not in err
+    assert (code, err) == (0, "")
+    # The refused key stops the run, which prints what it did; the refusal is the reason.
+    reason = json.loads(out)["stopped"]["reason"]
+    assert reason.startswith("GET https://eodhd.com/api/mp/unicornbay/options/contracts?")
+    assert "check EODHD_API" in reason and CANARY not in out and TIINGO_CANARY not in out
     assert (fake.tokens, tiingo.tokens) == ([CANARY], [TIINGO_CANARY])
     assert all(TIINGO_CANARY not in call for call in tiingo.calls)
     files = [path for path in layout.root.rglob("*") if path.is_file()]

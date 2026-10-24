@@ -12,7 +12,8 @@ files and whether the CSV and the newest report of the window are current; its a
 ``fetch``, ``record`` or ``reuse``. ``fetch`` first requests from Tiingo the prices of every
 ticker whose prices are not current, one request each, then writes the missing chains of the
 span (``fetch`` module): the latest session of every ticker, then the older sessions ticker
-by ticker, until the run's budget, EODHD's daily quota or an interruption stops it cleanly.
+by ticker, until the run's budget, EODHD's daily quota, an EODHD failure or an interruption
+stops it cleanly.
 No answer of Tiingo stops the chains. ``record`` rewrites the formatted CSV from ``raw/`` and
 writes a new report (the chart and its Markdown twin) each time it runs, when the span is
 complete and the prices current, or when ``--partial`` is given. ``show`` prints the window
@@ -37,7 +38,7 @@ from market_state_research.common.times import et_isoformat, to_eastern
 from market_state_research.common.watchlist import domain_watchlist, stock_tickers
 
 from .chart import ChartSpec, load_library, render_html, render_markdown
-from .client import BudgetSpent, EodhdClient, QuotaExceeded
+from .client import EodhdClient, EodhdError
 from .fetch import Outcome, fetch_prices, history, latest, write_chain
 from .percentile import WINDOW
 from .store import (
@@ -389,10 +390,11 @@ def fetch(
     key or its request limit is reached: no later ticker's prices are requested). Then the
     latest session of every ticker is fetched from the contracts listing, and each ticker's
     older sessions by sweeps, in ticker order. EODHD's daily quota (HTTP 402), the client's
-    budget or an interruption (``KeyboardInterrupt``: Ctrl-C, or SIGTERM as the command line
-    turns it) stops the run cleanly: every file written is kept, ``stopped`` names the ticker
-    and the reason, and each ticker's ``requests`` counts every request sent for it, so that
-    they add up to the run's. Any other EODHD failure raises.
+    budget, any other EODHD failure (``EodhdError``: a request refused or failed, or an answer
+    the code does not accept) or an interruption (``KeyboardInterrupt``: Ctrl-C, or SIGTERM as
+    the command line turns it) stops the run cleanly: every file written is kept, ``stopped``
+    names the ticker and the reason, and each ticker's ``requests`` counts every request sent
+    for it, so that they add up to the run's.
     """
     now = to_eastern(now, "now")
     runs = []
@@ -446,7 +448,7 @@ def fetch(
                 history(client, layout, run.ticker, older, run.outcome)
             finally:
                 run.requests += client.requests - before
-    except (QuotaExceeded, BudgetSpent) as error:
+    except EodhdError as error:  # the quota and the budget among them
         stopped = {"ticker": "" if current is None else current.ticker, "reason": str(error)}
     except KeyboardInterrupt:
         stopped = {"ticker": "" if current is None else current.ticker, "reason": INTERRUPTED}

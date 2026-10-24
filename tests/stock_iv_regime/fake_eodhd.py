@@ -8,8 +8,9 @@ tie on the sort key come back in a new order on every request, as EODHD's do, so
 page may repeat some records and miss as many. ``underlying`` maps a contract to its
 underlying when its OCC root differs (an adjusted series). ``statuses`` scripts the status of
 a request by its number (1-based), whose body is then empty; ``interruptions`` calls a
-function when the request of that number arrives, before it is answered (Ctrl-C or SIGTERM
-while EODHD is awaited); every request's token-free URL and token are recorded.
+function when the request of that number arrives, before it is answered (Ctrl-C, SIGTERM or
+a network failure while EODHD is awaited); every request's token-free URL and token are
+recorded.
 """
 
 import json

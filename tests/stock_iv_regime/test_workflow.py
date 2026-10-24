@@ -6,6 +6,7 @@ import pytest
 
 from market_state_research.common.sessions import session_window
 from market_state_research.stock_iv_regime.script import workflow
+from market_state_research.stock_iv_regime.script.client import TransportError
 from market_state_research.stock_iv_regime.script.workflow import fetch, plan, record, show
 
 from .fake_eodhd import FakeEodhd
@@ -335,6 +336,34 @@ def test_an_interrupted_fetch_reports_what_it_wrote_and_the_next_one_resumes(lay
     assert again["stopped"] is None and entry(again)["fetched"]["sessions"] == 4
     chains = sorted(path.name for path in layout.raw(TICKER).glob("chain_*"))
     assert [name[6:16] for name in chains] == [day.isoformat() for day in sessions]
+    assert entry(plan(layout, [TICKER], LOOKBACK, NOW))["action"] == "record"
+
+
+def no_answer() -> None:
+    raise TransportError("no response within 60 seconds")
+
+
+def test_a_failure_stops_the_run_with_what_it_did(layout, monkeypatch):
+    monkeypatch.setattr(workflow, "WINDOW", 3)
+    sessions = list(session_window(AS_OF, 5))
+    expiries = [AS_OF + timedelta(days=days) for days in (-3, 4, 11, 32, 39)]
+    fake, tiingo = FakeEodhd(), priced()
+    market(fake, sessions, expiries)
+    fake.interruptions = {3: no_answer, 4: no_answer}  # the first sweep, sent twice, gets no answer
+    output = fetch(layout, [TICKER], LOOKBACK, NOW, fake.client(), tiingo.client())
+    item = entry(output)
+    assert output["stopped"]["ticker"] == TICKER
+    assert output["stopped"]["reason"].startswith("GET https://eodhd.com/api/mp/unicornbay/options/")
+    assert output["stopped"]["reason"].endswith(": no response within 60 seconds; run fetch again")
+    assert item["fetched"] == {"sessions": 1, "first": "2026-10-16", "last": "2026-10-16"}
+    assert item["prices"]["status"] == "new" and item["remaining"]["sessions"] == 4
+    assert output["requests"] == item["requests"] == 4
+    # The next run resumes, and its first request, without an answer once, is sent once more.
+    fake.calls.clear()
+    fake.interruptions = {1: no_answer}
+    again = fetch(layout, [TICKER], LOOKBACK, NOW, fake.client(), tiingo.client())
+    assert again["stopped"] is None and entry(again)["fetched"]["sessions"] == 4
+    assert fake.calls[0] == fake.calls[1] and again["requests"] == len(fake.calls)
     assert entry(plan(layout, [TICKER], LOOKBACK, NOW))["action"] == "record"
 
 

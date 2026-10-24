@@ -16,9 +16,9 @@ uv run --locked python -m market_state_research.stock_iv_regime.script COMMAND .
 ```
 
 A command that succeeds exits 0 and prints JSON (`show`: Markdown), also when sessions are
-missing, when `fetch` stopped at its budget, at EODHD's quota or on an interruption, and when
-Tiingo refused or failed to give a ticker's prices. A command that fails exits 2 with one
-`STOCK_IV_REGIME: ...` line on standard error and prints nothing else.
+missing, when `fetch` stopped at its budget, at EODHD's quota, on an EODHD failure or on an
+interruption, and when Tiingo refused or failed to give a ticker's prices. A command that
+fails exits 2 with one `STOCK_IV_REGIME: ...` line on standard error and prints nothing else.
 
 ## 1. Settings and parameters
 
@@ -95,6 +95,8 @@ ticker:
 - `EODHD's daily quota ... is spent`: run `fetch` again after 24 hours.
 - `the run was interrupted; ...`: the process got Ctrl-C or SIGTERM (a host ending a command
   that ran too long, for one) while it fetched chains: run `fetch` again.
+- Any other reason: an EODHD request failed, or EODHD answered in a way the code does not
+  accept. Act on the message as section 5 says.
 
 A process killed outright (SIGKILL) prints nothing; the chains it wrote are kept, and `plan`
 says what is still missing. EODHD's answers give nothing of the daily quota (their
@@ -218,8 +220,8 @@ root [AGENTS.md](../../AGENTS.md), Feedback), never into the rule.
 | `EODHD_API is not set ...`, `TIINGO_API is not set ...` or `... must be 8 to 200 ASCII letters ...` | Nothing was sent. Ask the user to set the key in `.env`; never ask for its value in the conversation. |
 | `HTTP 401 ...; EODHD refused the key: check EODHD_API` | The key is wrong or revoked: tell the user. |
 | `HTTP 403 ...; the account needs the marketplace product ...` | The account lacks the product: tell the user. |
-| `HTTP 429 ...` after the retry, a 5xx status, a network failure, `the body ended after ...` | Wait some minutes and run `fetch` again. |
-| `... the response is not EODHD's options page: ...`, `EODHD returned the record ... twice`, `... more than 11000 records` | EODHD answered in a way the code does not accept. Report the message; never weaken validation. |
+| `HTTP 429 ...` or a network failure (`no response within 60 seconds`, `Remote end closed connection without response`, ...), each after the retry up to a minute later; a 5xx status; `the body ended after ...` | Wait some minutes and run `fetch` again. |
+| `... the response is not EODHD's options page: ...`, `EODHD returned the record ... twice`, `... one contract holds more than 1000 records`, `... an empty page names a further page` | EODHD answered in a way the code does not accept. Report the message; never weaken validation. |
 | `prices.status` `stopped` with `HTTP 401` or `403 ...; Tiingo refused the key or the request` | The Tiingo key is wrong or its plan lacks daily prices: tell the user. The chains were fetched. |
 | `prices.status` `stopped` with `HTTP 429 ...; Tiingo's request limit ...` | Run `fetch` again after an hour (the Starter plan allows 50 requests an hour), or the next day when its 1,000 a day are spent. Later tickers say `not requested: Tiingo stopped the run at T`. |
 | `prices.status` `failed` | A 5xx status, a network failure, or an answer the code does not accept (`the response is not Tiingo's daily prices: ...`, or a rule of `check_prices`). Run `fetch` again later; when it fails the same way the next day, report the reason and record with `--partial` only when the user asks. |

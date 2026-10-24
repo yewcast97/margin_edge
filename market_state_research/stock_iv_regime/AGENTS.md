@@ -217,7 +217,7 @@ Run from the repository root as
 
 | Command | Does |
 | --- | --- |
-| `fetch [TICKER ...] [--refresh] [--budget R] [--watchlist PATH]` | The one network command (needs `TIINGO_API` and `EODHD_API`). First, for every ticker whose prices are not current, one request to Tiingo; then the chain of every span session `raw/` lacks: the latest session of every ticker, then the older sessions ticker by ticker. Stops cleanly, keeping every file written and printing what it did, at EODHD's daily quota, after R requests to EODHD (default 9,000) or when interrupted (Ctrl-C or SIGTERM) while fetching chains; no answer of Tiingo stops the chains. |
+| `fetch [TICKER ...] [--refresh] [--budget R] [--watchlist PATH]` | The one network command (needs `TIINGO_API` and `EODHD_API`). First, for every ticker whose prices are not current, one request to Tiingo; then the chain of every span session `raw/` lacks: the latest session of every ticker, then the older sessions ticker by ticker. Stops cleanly, keeping every file written and printing what it did, at EODHD's daily quota, after R requests to EODHD (default 9,000), on any other EODHD failure or when interrupted (Ctrl-C or SIGTERM) while fetching chains; no answer of Tiingo stops the chains. |
 | `plan [TICKER ...] [--refresh] [--watchlist PATH]` | Read-only. Per ticker: `action` (`fetch`, `record` or `reuse`), the window sessions not fetched, the sessions before the window not fetched, the prices, gaps, invalid raw files, the table and the newest report's freshness. |
 | `record TICKER [--partial]` | Rewrites the table from `raw/`; writes the report and its twin when every span session is fetched and the prices are current, or with `--partial` when a window session is fetched. Refuses while a raw file of the ticker is invalid. |
 | `show TICKER` | Read-only: one status line, then the twin recomputed from `raw/`. |
@@ -236,7 +236,7 @@ reads this domain's `raw/` ([explore_hypothesis/AGENTS.md](../../explore_hypothe
 | Module | Responsibility |
 | --- | --- |
 | `__main__` | The command line (`STOCK_IV_REGIME` label); builds the EODHD client from `EODHD_API` and the Tiingo client from `TIINGO_API` for `fetch` only, before the watchlist is read; while `fetch` runs, SIGTERM raises the `KeyboardInterrupt` of Ctrl-C, which the run turns into a clean stop. |
-| `client` | HTTPS to `eodhd.com` only, the key appended at send time and redacted from every message, pacing, the budget, statuses (402 `QuotaExceeded`, 429 retried once after `Retry-After`), bounded and whole bodies. |
+| `client` | HTTPS to `eodhd.com` only, the key appended at send time and redacted from every message, pacing, the budget, statuses (402 `QuotaExceeded`), one retry of a request that got HTTP 429 (after `Retry-After`, at most 60 s) or no whole answer (after 60 s), bounded and whole bodies. |
 | `tiingo` | HTTPS to `api.tiingo.com` only, the key only in the `Authorization` header, never in a URL; statuses (404 `NotCovered`, 401, 403 and 429 `Stopped`); bounded and whole bodies. |
 | `api` | The EODHD queries and their URLs, one page per query (never a second page), page parsing with numbers kept as literal text, the record checks (OCC symbol against expiry, type and strike; number, date and word forms). |
 | `chain` | The chain raw unit: its bytes (`dump`, `load`), its name, its window (`WINDOW_DAYS`), every rule (`check_chain`) and the proof that a contracts listing is a session's (`proof_problem`). |

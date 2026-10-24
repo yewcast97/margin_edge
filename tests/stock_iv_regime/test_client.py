@@ -7,11 +7,13 @@ from market_state_research.stock_iv_regime.script.client import (
     API_KEY_UNSET,
     PACING,
     PAGE_LIMIT_BYTES,
+    RETRY_PAUSE,
     BudgetSpent,
     EodhdClient,
     EodhdError,
     QuotaExceeded,
     Response,
+    TransportError,
     allowed_url,
     check_api_key,
     declared_length,
@@ -25,15 +27,19 @@ URL = "https://eodhd.com/api/mp/unicornbay/options/contracts?filter%5Bunderlying
 
 
 class Scripted:
-    """A Fetch answering each request with the next scripted response, recording what it was sent."""
+    """A Fetch answering each request with the next scripted response, or raising it when it is a
+    ``TransportError``, and recording what it was sent."""
 
-    def __init__(self, *responses: Response) -> None:
+    def __init__(self, *responses: Response | TransportError) -> None:
         self.responses = list(responses)
         self.sent: list[tuple[str, dict[str, str], int]] = []
 
     def __call__(self, url, headers, limit):
         self.sent.append((url, dict(headers), limit))
-        return self.responses.pop(0)
+        answer = self.responses.pop(0)
+        if isinstance(answer, TransportError):
+            raise answer
+        return answer
 
 
 def ok(body: bytes = b"{}", **headers: str) -> Response:
@@ -154,6 +160,45 @@ def test_a_second_429_fails_and_long_waits_are_capped():
     with pytest.raises(EodhdError, match="rate limit of requests per minute"):
         client(fetch, sleeps).get(URL)
     assert sleeps.calls == [60, PACING]
+
+
+def test_no_answer_is_sent_once_more_after_the_pause():
+    sleeps = Sleeps()
+    fetch = Scripted(TransportError("no response within 60 seconds"), ok(b"later"))
+    eodhd = client(fetch, sleeps)
+    assert eodhd.get(URL) == b"later"
+    assert (sleeps.calls, eodhd.requests, fetch.sent[0] == fetch.sent[1]) == ([RETRY_PAUSE, PACING], 2, True)
+
+
+def test_a_second_sending_without_an_answer_fails_without_the_key():
+    sleeps = Sleeps()
+    fetch = Scripted(TransportError("timed out"), TransportError(f"connection reset for {CANARY}"))
+    eodhd = client(fetch, sleeps)
+    with pytest.raises(EodhdError) as error:
+        eodhd.get(URL)
+    assert str(error.value) == f"GET {URL}: connection reset for <EODHD_API>; run fetch again"
+    assert (sleeps.calls, eodhd.requests) == ([RETRY_PAUSE, PACING], 2)
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "message"),
+    [
+        (Response(429, "Too Many Requests", {}, b""), TransportError("connection reset"), "connection reset"),
+        (TransportError("connection reset"), Response(429, "Too Many Requests", {}, b""), "rate limit"),
+    ],
+)
+def test_a_request_is_sent_at_most_twice(first, second, message):
+    fetch = Scripted(first, second, ok())
+    with pytest.raises(EodhdError, match=message):
+        client(fetch).get(URL)
+    assert len(fetch.sent) == 2
+
+
+def test_the_second_sending_counts_against_the_budget():
+    eodhd = client(Scripted(TransportError("connection reset"), ok()), budget=1)
+    with pytest.raises(BudgetSpent):
+        eodhd.get(URL)
+    assert eodhd.requests == 1
 
 
 def test_encoded_oversized_and_cut_short_bodies_are_refused():
